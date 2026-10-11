@@ -52,7 +52,9 @@
 // paging from one week to the next sees no comparison figure — there is no page
 // to drive until E8 builds it. `docs/tickets/e5/deferred.md` records that gap
 // under "The student benchmark sweep runs over one week, because that is all
-// there is (E5-11)", with E8 as its owner.
+// there is (E5-11)", with E8 as its owner. Since E7-10 the results page E7-06
+// built is swept too (the fourth test), at the week it opens on; paging it from
+// week to week is still the gap that record names.
 //
 // **The clock moves twice per test, which is shared state.**
 // `playwright.config.ts` pins `workers` to 1 and this file is serial. The
@@ -265,6 +267,8 @@ const CANARY_ON_THE_SUPPRESSED: readonly string[] = [
 const INSTRUCTOR_LANDING = "pulse-landing-instructor";
 const REPORT = "pulse-instructor-report";
 const SECTIONS_MENU = "pulse-instructor-sections";
+// The results page's own testid, as `tests/e2e/student-results.spec.ts` reads it.
+const RESULTS = "pulse-student-results";
 
 // The governed heading the submitted state carries, transcribed from
 // `frontend/src/copy/studentSurvey.ts` the way `exit-weekly-survey.spec.ts`
@@ -369,7 +373,7 @@ test.beforeAll(async ({ browser }) => {
 });
 
 test.beforeEach(() => {
-  // Both of the learner's weeks start unanswered. Two of the three cases answer
+  // Both of the learner's weeks start unanswered. Two of the four cases answer
   // one of them, and a week left answered would put the next case's first sweep
   // over the submitted state while it was asserting about the form.
   clearTheWeek(THE_LEARNERS_SECTIONS);
@@ -461,6 +465,85 @@ test("the revise state carries no benchmark trace", async ({ page }) => {
     instructor,
   );
 });
+
+test("the results page carries no benchmark trace", async ({ page }) => {
+  // **Surface 4, E7-10 done-when 7.** E7-06's results page — the student's view of
+  // a published week and its response, SPEC §5.4's closing-the-loop view — is a
+  // student screen this file did not reach until E7-10, and SPEC §4.1 item 1
+  // covers every one. It is read at `READ_CLOCK`, when `BIOL-215-R3WW` has
+  // published weeks, so the page is showing a week rather than an empty state.
+  // `theInstructorsBenchmarkPages` leaves the clock there, and the learner lands
+  // at that same minute: no week of hers is open then, which this case does not
+  // need — it answers nothing.
+  //
+  // **The page is reached by the address the landing links to**, read off the
+  // section block's reply link rather than built here, so a renamed route is a
+  // red naming the link and not a 404 swept as a clean page.
+  test.setTimeout(CASE_TIMEOUT_MS);
+
+  const instructor = await theInstructorsBenchmarkPages(page);
+  const block = await landOnTheSurvey(page, learnerPlacement, ALONE.code);
+  const link = block.getByRole("link", { name: /reply/i });
+  await expect(
+    link,
+    `The learner's ${ALONE.label} block carries no link to its results page, so there is no ` +
+      "results page to sweep.",
+  ).toBeVisible();
+  const href = (await link.getAttribute("href")) ?? "";
+  expect(
+    /\/student\/sections\/[0-9a-f-]+\/results/.test(href),
+    `The reply link points at ${JSON.stringify(href)}, not at a section's results page.`,
+  ).toBe(true);
+
+  const sectionId =
+    /\/student\/sections\/([0-9a-f-]+)\/results/.exec(href)?.[1] ?? "";
+  await expectAPublishedWeekToShow(page, sectionId);
+  await page.goto(href);
+  await expect(
+    page.getByTestId(RESULTS),
+    "The results page did not render, so what is swept below is not the results page.",
+  ).toBeVisible();
+
+  expectNoBenchmarkTrace(
+    await theWholeDocument(page),
+    "the results page",
+    instructor,
+  );
+});
+
+/**
+ * The premise of the results sweep: the section has a published week to show at
+ * the clock it is read at. Asked of the no-week results route (E7-02's amendment
+ * A2) with the learner's own session, the way `theReportPayload` asks the report
+ * route — a 404 here means the page would render its empty state and the sweep
+ * would be over a screen with nothing on it.
+ */
+async function expectAPublishedWeekToShow(
+  page: Page,
+  sectionId: string,
+): Promise<void> {
+  const token = await page.evaluate(() =>
+    window.sessionStorage.getItem("pulse.session"),
+  );
+  expect(
+    token,
+    "The learner's launch handed over no session, so the results page cannot be read as her.",
+  ).not.toBeNull();
+  const answer = await page.request.get(
+    `/student/sections/${sectionId}/results`,
+    {
+      headers: {
+        Authorization: `Bearer ${token ?? ""}`,
+        Accept: "application/json",
+      },
+    },
+  );
+  expect(
+    answer.status(),
+    `The results route answered ${String(answer.status())} for ${ALONE.label} at ${READ_CLOCK}, ` +
+      "so the page has no published week to show and a clean sweep of it would mean nothing.",
+  ).toBe(200);
+}
 
 // ---------------------------------------------------------------------------
 // The canaries, and what they hand to the sweep.

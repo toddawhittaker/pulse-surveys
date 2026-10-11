@@ -129,7 +129,9 @@ class WeekResponseView(BaseModel):
     What the instructor's response routes, and the on-behalf publish and edit,
     answer: the state a student of the section reads now, and the response with
     its author's name (through the staff-name definer, asked as the reader),
-    role and time. Nothing a student does not read.
+    role and time, and `can_edit`, true exactly when the reader first published
+    the week's response (SPEC §5.3: only that person may edit). Nothing else a
+    student does not read.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -137,6 +139,9 @@ class WeekResponseView(BaseModel):
     state: WeekState = Field(description="Whether the week is held, answered, or neither.")
     response: StudentResponse | None = Field(
         description="The published response; absent while awaiting and when unanswered."
+    )
+    can_edit: bool = Field(
+        description="Whether this reader first published the week's response, so may edit it."
     )
 
 
@@ -232,3 +237,6 @@ class OnBehalfWeek(BaseModel):
     section_label: str = Field(description="The section's course label and section code.")
     course_week: int
     streams: list[OnBehalfStream]
+    response: WeekResponseView | None = Field(
+        description="Null while unanswered; the response, for the reader who first published it."
+    )

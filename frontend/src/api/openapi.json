@@ -472,7 +472,7 @@
           "instructor"
         ],
         "summary": "An AI draft of my response to one week of my report",
-        "description": "SPEC \u00a75.3's draft: advisory, never stored, never posted.\n\n**The report's own refusals, byte for byte, and no model call behind\nthem.** A section the reader does not teach, one that does not exist, and a\nweek not yet published get exactly the 404 the report answers, because the\nservice raises the report's exceptions from the report's own gate before it\ngathers anything. Every refusal of the model's answer is one 502 and one\nsentence (`_assistant_unusable`).",
+        "description": "SPEC \u00a75.3's draft: advisory, never stored, never posted.\n\n**The report's own refusals, byte for byte, and no model call behind\nthem.** A section the reader does not teach, one that does not exist, and a\nweek not yet published get exactly the 404 the report answers, because the\nservice raises the report's exceptions from the report's own gate before it\ngathers anything. Every refusal of the model's answer is one 502 and one\nsentence (`assistant_unusable`), and a second draft or check from a person\nwith one in flight is one 429 before anything is read (`assistant_busy`).",
         "operationId": "draft_a_response_instructor_sections__section_id__weeks__course_week__response_draft_post",
         "parameters": [
           {
@@ -1744,7 +1744,7 @@
           "draft"
         ],
         "title": "DraftCheckRequest",
-        "description": "What the draft check is sent: the instructor's draft, and nothing else.\n\nBounded at the edge, so a body far over any response's length is refused with\na 422 before any model is asked (E7-04 done-when 6)."
+        "description": "What the draft check is sent: the instructor's draft, and nothing else.\n\nBounded at the edge by the published response's own bound\n(`RESPONSE_TEXT_MAX` in `app.models.loop`), because the draft checked is the\ntext that will become one; a body over it is refused with a 422 before any\nmodel is asked (E7-04 done-when 6)."
       },
       "DraftCheckView": {
         "properties": {
@@ -2116,6 +2116,17 @@
             },
             "type": "array",
             "title": "Streams"
+          },
+          "response": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeekResponseView"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null while unanswered; the response, for the reader who first published it."
           }
         },
         "additionalProperties": false,
@@ -2123,7 +2134,8 @@
         "required": [
           "section_label",
           "course_week",
-          "streams"
+          "streams",
+          "response"
         ],
         "title": "OnBehalfWeek",
         "description": "What a lead (or a chair acting as lead) reads before responding on behalf (decision 5)."
@@ -3449,16 +3461,22 @@
               }
             ],
             "description": "The published response; absent while awaiting and when unanswered."
+          },
+          "can_edit": {
+            "type": "boolean",
+            "title": "Can Edit",
+            "description": "Whether this reader first published the week's response, so may edit it."
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "state",
-          "response"
+          "response",
+          "can_edit"
         ],
         "title": "WeekResponseView",
-        "description": "One week's state and its response, as students read them, for the response's author.\n\nWhat the instructor's response routes, and the on-behalf publish and edit,\nanswer: the state a student of the section reads now, and the response with\nits author's name (through the staff-name definer, asked as the reader),\nrole and time. Nothing a student does not read."
+        "description": "One week's state and its response, as students read them, for the response's author.\n\nWhat the instructor's response routes, and the on-behalf publish and edit,\nanswer: the state a student of the section reads now, and the response with\nits author's name (through the staff-name definer, asked as the reader),\nrole and time, and `can_edit`, true exactly when the reader first published\nthe week's response (SPEC \u00a75.3: only that person may edit). Nothing else a\nstudent does not read."
       },
       "WeekView": {
         "properties": {

@@ -22,7 +22,8 @@ in this repository answers any of it yet.
     course_week, on_behalf_open}]`;
   - decision 5: `GET …/sections/{section_id}/weeks/{course_week}/on-behalf`
     answering `{section_label, course_week, streams: [{stream, summary_text,
-    response_count, rating_distribution}]}`, and `POST …/on-behalf/response-draft`,
+    response_count, rating_distribution}]}` (and, since E7-10, `response`: null
+    while unanswered, the response for its first publisher), and `POST …/on-behalf/response-draft`,
     `POST …/on-behalf/draft-check` `{draft}`, `POST …/on-behalf/response` and
     `PUT …/on-behalf/response` `{text, ai_seeded}`; every refusal ONE 404,
     byte-identical across its causes.
@@ -162,8 +163,14 @@ OWED_MEMBERS = frozenset(
     {OWED_SECTION_ID, OWED_SECTION_LABEL, OWED_COURSE_WEEK, OWED_ON_BEHALF_OPEN}
 )
 
-# Decision 5: the on-behalf read's payload, exactly.
-ON_BEHALF_MEMBERS = frozenset({"section_label", "course_week", "streams"})
+# Decision 5: the on-behalf read's payload, exactly. E7-10 (work-order decision 3,
+# done-when 5) adds `response: WeekResponseView | null` — null while the week is
+# unanswered, the response when the reader is its first publisher.
+ON_BEHALF_RESPONSE = "response"
+ON_BEHALF_MEMBERS = frozenset({"section_label", "course_week", "streams", ON_BEHALF_RESPONSE})
+# E7-10 (work-order decision 4, done-when 6): `WeekResponseView.can_edit`, true
+# exactly when the reader is the first row's author.
+CAN_EDIT = "can_edit"
 STREAMS = "streams"
 STREAM = "stream"
 SUMMARY_TEXT = "summary_text"

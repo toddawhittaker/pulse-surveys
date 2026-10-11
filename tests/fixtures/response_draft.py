@@ -63,7 +63,7 @@ import re
 import threading
 import types
 import typing
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import import_module
@@ -582,6 +582,9 @@ class _StubHandler(BaseHTTPRequestHandler):
             payload = json.loads(raw)
         provider: ScriptedProvider = self.server.provider  # type: ignore[attr-defined]
         provider.sent.append(Sent(path=self.path, raw=raw, payload=payload))
+        hook = provider.before_answer
+        if hook is not None and self.path.endswith("/chat/completions"):
+            hook()
         requested = payload.get("model") if isinstance(payload, Mapping) else None
         model = requested if isinstance(requested, str) and requested else "e7-04-stub-model"
         self._send(200, json.dumps(chat_completion(provider.answer, payload, model)))
@@ -609,6 +612,11 @@ class ScriptedProvider:
 
     answer: str = "{}"
     sent: list[Sent] = field(default_factory=list)
+    # E7-10 done-when 3: called on the stub's own thread for each completion
+    # request, after it is recorded and before it is answered — so a test can
+    # measure what the application holds while it waits on the model, or hold the
+    # model call open. `None`, the default, changes nothing.
+    before_answer: Callable[[], None] | None = None
     _server: _StubServer | None = None
 
     def start(self) -> None:

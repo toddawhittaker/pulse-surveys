@@ -94,3 +94,17 @@ with one sentence, a section with no published week included.
   answer. The read raises in that case (a 500) rather than serving the response
   without its author. Kept simple on purpose; a role-only attribution is the
   alternative if it shows up in practice.
+
+**Amended by E7-10 (the boundary review's records).**
+
+- **A course's setting carries over when its lead changes** (SPEC §5.3). The
+  policy in force for a course is its latest row, whoever wrote it. So a chair's
+  `REQUIRED` for a course with no lead still holds the course's weeks after a
+  lead is mapped to it, and the new lead's policy read shows `REQUIRED` with
+  `can_set` true, until the new lead switches it.
+  `tests/integration/test_a_courses_policy_carries_over_when_its_lead_changes.py`
+  pins it.
+- **Why `prefix_id` stays though `course_id` determines it.** The row records
+  what its setter did, which was to switch a prefix; the composite key keeps the
+  two in agreement, so the redundancy cannot drift. Dropping it would leave a
+  setter's switch readable only by grouping rows by `set_at`.

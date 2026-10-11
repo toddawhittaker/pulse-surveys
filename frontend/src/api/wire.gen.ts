@@ -535,7 +535,8 @@ export interface paths {
          *     week not yet published get exactly the 404 the report answers, because the
          *     service raises the report's exceptions from the report's own gate before it
          *     gathers anything. Every refusal of the model's answer is one 502 and one
-         *     sentence (`_assistant_unusable`).
+         *     sentence (`assistant_unusable`), and a second draft or check from a person
+         *     with one in flight is one 429 before anything is read (`assistant_busy`).
          */
         readonly post: operations["draft_a_response_instructor_sections__section_id__weeks__course_week__response_draft_post"];
         readonly delete?: never;
@@ -1156,8 +1157,10 @@ export interface components {
          * DraftCheckRequest
          * @description What the draft check is sent: the instructor's draft, and nothing else.
          *
-         *     Bounded at the edge, so a body far over any response's length is refused with
-         *     a 422 before any model is asked (E7-04 done-when 6).
+         *     Bounded at the edge by the published response's own bound
+         *     (`RESPONSE_TEXT_MAX` in `app.models.loop`), because the draft checked is the
+         *     text that will become one; a body over it is refused with a 422 before any
+         *     model is asked (E7-04 done-when 6).
          */
         readonly DraftCheckRequest: {
             /**
@@ -1408,6 +1411,8 @@ export interface components {
             readonly course_week: number;
             /** Streams */
             readonly streams: readonly components["schemas"]["OnBehalfStream"][];
+            /** @description Null while unanswered; the response, for the reader who first published it. */
+            readonly response: components["schemas"]["WeekResponseView"] | null;
         };
         /**
          * OpenSurvey
@@ -2278,7 +2283,9 @@ export interface components {
          *     What the instructor's response routes, and the on-behalf publish and edit,
          *     answer: the state a student of the section reads now, and the response with
          *     its author's name (through the staff-name definer, asked as the reader),
-         *     role and time. Nothing a student does not read.
+         *     role and time, and `can_edit`, true exactly when the reader first published
+         *     the week's response (SPEC §5.3: only that person may edit). Nothing else a
+         *     student does not read.
          */
         readonly WeekResponseView: {
             /**
@@ -2289,6 +2296,11 @@ export interface components {
             readonly state: "awaiting" | "published" | "on-behalf" | "unanswered";
             /** @description The published response; absent while awaiting and when unanswered. */
             readonly response: components["schemas"]["StudentResponse"] | null;
+            /**
+             * Can Edit
+             * @description Whether this reader first published the week's response, so may edit it.
+             */
+            readonly can_edit: boolean;
         };
         /**
          * WeekView

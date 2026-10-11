@@ -73,7 +73,19 @@ comment, and each stream's `response_count` is the week's response count.
   trigger refuses a second author, and the same author's second row reads as an
   edit.
 - An exclusion later undone still withholds a summary written before it, from
-  the on-behalf reader only.
+  the on-behalf reader and, since E7-10, from every draft and check
+  ([ADR 0195](0195-the-draft-and-the-check-read-stored-summaries-and-refuse-what-students-may-not-read.md)).
 - The two leadership refusals are filed under their own `leadership_response.`
   copy prefix, a surface of its own in the copy governance map (ruling on
   `E7-03-03`), not under the moderation screen's.
+
+**Amended by E7-10 (the boundary review's fixes).** The gate's last step has a
+third purpose, the read. The on-behalf read admits a week that is open on behalf,
+as before, or a week whose first response the reader published, so the first
+publisher can come back to edit it. Its payload gains `response`: null while
+the week is unanswered, and the week's `WeekResponseView` for that first
+publisher. Every other reader of an answered week, the course's own lead
+included when the instructor answered, still gets the one 404.
+`WeekResponseView` carries `can_edit`, true exactly when the reader first
+published the week's response, on the instructor's routes and the on-behalf
+ones alike; the composer offers Edit only then.

@@ -33,7 +33,7 @@ refuses to be built otherwise. The check's output uses a new `CheckTheme`
 required count. A theme's count is a count of comments and never feeds the
 threshold (`docs/MISTAKES.md` entry 50).
 
-**Two structural refusals after the model answers**, each one 502 with one
+**Three structural refusals after the model answers**, each one 502 with one
 sentence from `app.copy`, whatever triggered it and whatever the model did:
 
 - The check may name only gathered themes, each as an exact (label, count) pair:
@@ -52,13 +52,18 @@ sentence from `app.copy`, whatever triggered it and whatever the model did:
   exam, day, hour, minute, part, step, problem, version, and their plurals
   where listed), so "week 3" passes and "weeks 3 and 4" is refused at "4".
   Ordinals are not count tokens. The eval grader calls the same function, and
-  `response_draft.v2` asks the model for exactly this rule.
+  the draft's prompt (`response_draft.v3` since E7-10) asks the model for
+  exactly this rule.
 
-**The instructor's gather keeps a summary written before an exclusion.** The
-instructor already reads that summary on the report, and is the author of
-whatever is published; the run refusal blocks quoting the excluded comment.
-The on-behalf gather, which E7-03 builds behind `for_on_behalf=True`, leaves
-such a summary out (the E7 breakdown's ruling 9). E7-03 built it (ADR 0194).
+**No gather keeps a summary written before the week's latest exclusion.**
+*Amended by E7-10; this paragraph first said the instructor's gather kept such
+a summary.* A summary written before a comment was excluded may paraphrase it,
+and the run refusal catches a quoted run, never a paraphrase, so a draft
+written from that summary could carry the excluded comment's substance to every
+student. Both gathers read `_summary_rows_since_latest_removal`, the filter
+E7-03 built for the on-behalf reader (the E7 breakdown's ruling 9, ADR 0194).
+The instructor's report still shows such a summary: they read it there already,
+and nothing a model writes for students starts from it.
 
 **The forged summary block boundaries entry does not trigger here.** No comment
 is rendered into either prompt. The summaries and labels that are rendered are
@@ -96,11 +101,38 @@ owner's endpoint (SPEC §9.3).
   a count spelled with a word outside its list ("a trio of you"); it does not
   try to read meaning, and the prompt asks for no numbers at all.
 - Every model failure, an outage included, reads as the same 502.
-- `RESPONSE_TEXT_MAX` (4000) bounds the check's draft in `app.schemas.report`
-  until E7-01's bound merges and replaces it.
 
 **Amended by E7-03 (ADR 0194's ticket).** The count rule also counts a
 hyphenated word when any part of it is a cardinal ("two-thirds"), adds
 "single", "dozens", "hundreds" and "tens" to the quantity words, and counts
 "third", "thirds", "quarter" and "quarters" only when the next word is "of"
 ("a third of you"), so the ordinal in "the third week" stays allowed.
+
+**Amended by E7-10 (the boundary review's fixes).**
+
+- **A model call holds no database connection.** Each draft and check reads
+  everything it needs first (the gather, and for the draft the comments students
+  will not see), then rolls the request's transaction back, then calls the
+  model, then refuses or passes the answer on the data already in hand. A
+  thirty-second call therefore holds no pooled connection; before this, about
+  fifteen drafts at once could empty the pool every other request needs.
+- **One draft or check in flight per person.** All four routes (the
+  instructor's and the on-behalf draft and check) enter
+  `reporting.one_assistant_call_at_a_time` before reading anything. A second
+  request from the same person while one is waiting on the model is refused
+  429 with one sentence (`instructor_report.assistant_busy`), and never reaches
+  the database or the model. The mark is released in `finally`. **This assumes
+  the API runs as one process**, which it does (one uvicorn worker in
+  `backend/Dockerfile`). Run it as several processes or replicas and the limit
+  becomes one call per person per process; it then needs a shared store, such
+  as a Redis key with an expiry. The 502 and the 429, status and sentence, are
+  defined once, in `app.api.instructor`, and the leadership routes import them.
+- **The draft is written in its author's role.** `response_draft.v3` takes the
+  author's role in an `[[AUTHOR_ROLE]]` slot: "the course's instructor", "the
+  course's Lead Faculty" or "the department chair". For an author who is not
+  the instructor, the prompt forbids promising in the first person what only
+  the instructor can do, and asks for what the course will do or a step the
+  author has taken. `response_draft.v1` and `v2` are deleted with their pin
+  rows, against ADR 0032's keep-every-version rule, because the rule exists for
+  stored outputs and no draft is ever stored, so nothing cites either version.
+  Each eval set's `PROMPT_VERSION` is held equal to its task's by a test.

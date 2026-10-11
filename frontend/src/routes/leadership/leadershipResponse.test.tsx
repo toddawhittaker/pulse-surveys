@@ -289,6 +289,7 @@ const WEEK = {
       rating_distribution: { '1': 0, '2': 0, '3': 0, '4': 1, '5': 0 },
     },
   ],
+  response: null,
 };
 
 describe('responding on behalf', () => {
@@ -321,6 +322,7 @@ describe('responding on behalf', () => {
             author_role: 'LEAD_FACULTY',
             published_at: '2026-10-20T14:00:00Z',
           },
+          can_edit: true,
         }),
     });
     mountAt(`/leadership/sections/${SECTION_ID}/weeks/4/on-behalf`);
@@ -382,6 +384,32 @@ describe('responding on behalf', () => {
 
     expect(await screen.findByText('Nothing to respond to here')).toBeTruthy();
     expect(asked).toEqual([]);
+  });
+});
+
+describe('a lead coming back to a week they answered', () => {
+  it('shows their published response with Edit and no open composer', async () => {
+    serving({
+      [`GET ${ON_BEHALF}`]: () =>
+        json(200, {
+          ...WEEK,
+          response: {
+            state: 'on-behalf',
+            response: {
+              text: 'We heard you on pacing.',
+              author_name: 'Dr. Lena Park',
+              author_role: 'LEAD_FACULTY',
+              published_at: '2026-10-20T14:00:00Z',
+            },
+            can_edit: true,
+          },
+        }),
+    });
+    mountAt(`/leadership/sections/${SECTION_ID}/weeks/4/on-behalf`);
+
+    expect(await screen.findByText('We heard you on pacing.', { selector: '.pulse-response-text' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Edit response' })).toBeTruthy();
+    expect(screen.queryByRole('textbox', { name: 'Your response' })).toBeNull();
   });
 });
 

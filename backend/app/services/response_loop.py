@@ -65,6 +65,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -680,7 +681,12 @@ def _view(
         settings=settings,
         reader_person_id=reader,
     )
-    return WeekResponseView(state=state, response=response)
+    first = first_response(session, section_id=section.id, week_id=week.week_id)
+    return WeekResponseView(
+        state=state,
+        response=response,
+        can_edit=first is not None and first.author_person_id == reader,
+    )
 
 
 # -- the policy (rulings 1 and 5) ----------------------------------------------
@@ -950,7 +956,7 @@ def _on_behalf_door(
     section_id: UUID,
     course_week: int,
     settings: Settings,
-    to_edit: bool,
+    purpose: Literal["act", "edit", "read"],
 ) -> _OnBehalfDoor:
     """The one gate every on-behalf door passes, or `OnBehalfUnavailableError`.
 
@@ -964,6 +970,8 @@ def _on_behalf_door(
       3. the course week's report has opened;
       4. to act: the week is open on behalf now (required, unanswered, 96 hours
          past its opening). To edit: the reader first published its response.
+         To read: either of those (E7-10 done-when 5), so the first publisher
+         can come back to an answered week and nobody else can.
 
     So a refusal for a course outside the reader's own never reads the week, and
     cannot vary with it. Nothing here calls a model or writes.
@@ -988,9 +996,10 @@ def _on_behalf_door(
     )
     if week is None:
         raise OnBehalfUnavailableError
-    if to_edit:
-        first = first_response(session, section_id=section.id, week_id=week.week_id)
-        if first is None or first.author_person_id != person_id:
+    first = first_response(session, section_id=section.id, week_id=week.week_id)
+    first_publisher = first is not None and first.author_person_id == person_id
+    if purpose == "edit" or (purpose == "read" and first_publisher):
+        if not first_publisher:
             raise OnBehalfUnavailableError
     else:
         clock_ = _clock_of(
@@ -1017,7 +1026,9 @@ def on_behalf_week(
     """The section-week's stored summaries and ratings, as the on-behalf reader reads them.
 
     No comment text, at any threshold, and no summary written before the week's
-    latest removal (`reporting.on_behalf_streams`).
+    latest removal (`reporting.on_behalf_streams`). `response` is null while the
+    week is unanswered; once it is answered the door admits only its first
+    publisher, who reads the response to edit it (E7-10 done-when 5).
     """
     door = _on_behalf_door(
         session,
@@ -1025,13 +1036,19 @@ def on_behalf_week(
         section_id=section_id,
         course_week=course_week,
         settings=settings,
-        to_edit=False,
+        purpose="read",
     )
+    answered = first_response(session, section_id=door.section.id, week_id=door.week.week_id)
     return OnBehalfWeek(
         section_label=reporting._course_label(session, door.section),
         course_week=door.week.course_week,
         streams=reporting.on_behalf_streams(
             session, section_id=door.section.id, week_id=door.week.week_id
+        ),
+        response=None
+        if answered is None
+        else _view(
+            session, section=door.section, week=door.week, reader=door.reader, settings=settings
         ),
     )
 
@@ -1051,10 +1068,10 @@ def on_behalf_draft(
         section_id=section_id,
         course_week=course_week,
         settings=settings,
-        to_edit=False,
+        purpose="act",
     )
     return reporting.week_response_draft(
-        session, section_id=door.section.id, week_id=door.week.week_id, for_on_behalf=True
+        session, section_id=door.section.id, week_id=door.week.week_id, author_role=door.role
     )
 
 
@@ -1074,7 +1091,7 @@ def on_behalf_check(
         section_id=section_id,
         course_week=course_week,
         settings=settings,
-        to_edit=False,
+        purpose="act",
     )
     return reporting.week_draft_check(
         session,
@@ -1105,7 +1122,7 @@ def publish_on_behalf(
         section_id=section_id,
         course_week=course_week,
         settings=settings,
-        to_edit=False,
+        purpose="act",
     )
     return _write_and_view(
         session,
@@ -1134,7 +1151,7 @@ def edit_on_behalf(
         section_id=section_id,
         course_week=course_week,
         settings=settings,
-        to_edit=True,
+        purpose="edit",
     )
     return _write_and_view(
         session,

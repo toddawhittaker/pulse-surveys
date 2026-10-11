@@ -80,6 +80,7 @@ from app.ai.gateway import (
     AIResponseInvalidError,
 )
 from app.models.ai import Classification, ClassificationTask
+from app.models.loop import ResponseRole
 
 # The prompt this task renders, named as ADR 0031 spells a `prompt_version`: the
 # file's path stem under `app/ai/prompts/`, so the stored value names exactly one
@@ -689,18 +690,32 @@ def summarize_stream(
 # ---------------------------------------------------------------------------
 
 # The two prompts, named as every version above is (ADR 0031, ADR 0032). The
-# draft is on v2 since E7-04's fix round: v1 asked only for no count beside a
-# word for people, and v2 asks a week with a held stream for no number at all
-# except one naming a course structure, the rule the service enforces
-# (`app.services.reporting.states_a_count_of_people`). v1 stays on disk.
-RESPONSE_DRAFT_PROMPT_VERSION = "response_draft.v2"
+# draft is on v3 since E7-10: it takes the author's role, so a lead or a chair
+# writing on the instructor's behalf is never drafted a promise in the
+# instructor's voice (SPEC §5.3). A week with a held stream is asked for no
+# number at all except one naming a course structure, the rule the service
+# enforces (`app.services.reporting.states_a_count_of_people`). v1 and v2 were
+# deleted with E7-10: no draft is ever stored, so nothing cites either version
+# (ADR 0195).
+RESPONSE_DRAFT_PROMPT_VERSION = "response_draft.v3"
 DRAFT_CHECK_PROMPT_VERSION = "draft_check.v1"
 
-# Where the week goes in both prompts, and where the instructor's draft goes in
-# the check's. Replaced with `str.replace`, for the reason `prompts/README.md`
-# gives: both files carry a JSON example.
+# Where the author's role and the week go in the draft's prompt, and where the
+# week and the draft go in the check's. Replaced by `_render`, never by
+# `str.format`, for the reason `prompts/README.md` gives: both files carry a
+# JSON example.
+AUTHOR_ROLE_PLACEHOLDER = "[[AUTHOR_ROLE]]"
 RESPONSE_WEEK_PLACEHOLDER = "[[RESPONSE_WEEK]]"
 RESPONSE_DRAFT_PLACEHOLDER = "[[RESPONSE_DRAFT]]"
+
+# How the draft's prompt names its author, by the role the response is written
+# under. The prompt tells an author who is not the course's instructor to promise
+# only what the course will do or what they have done themselves.
+AUTHOR_ROLE_PHRASES: Mapping[ResponseRole, str] = {
+    ResponseRole.INSTRUCTOR: "the course's instructor",
+    ResponseRole.LEAD_FACULTY: "the course's Lead Faculty",
+    ResponseRole.CHAIR: "the department chair",
+}
 
 # How long either call may take. An instructor is waiting at the page for it,
 # unlike the Monday summary walk, so this is half the summary's minute; unlike a
@@ -831,11 +846,15 @@ def _render(version: str, replacements: Sequence[tuple[str, str]]) -> str:
     return "".join([*rendered, rest])
 
 
-def draft_response(week: ResponseGather, gateway: AIGateway | None = None) -> ResponseDraftOutput:
+def draft_response(
+    week: ResponseGather, *, author_role: ResponseRole, gateway: AIGateway | None = None
+) -> ResponseDraftOutput:
     """§7.4's response draft: one call in, one validated draft out.
 
-    Single-shot and advisory (SPEC §5.3): the draft is returned to the instructor
-    and nothing here stores or publishes it. The structural refusals of the answer
+    Single-shot and advisory (SPEC §5.3): the draft is returned to its author
+    and nothing here stores or publishes it. `author_role` is the role the
+    response will be published under, and the prompt frames the draft in it
+    (`AUTHOR_ROLE_PHRASES`). The structural refusals of the answer
     — a run of a hidden comment, a count beside a held stream — are the caller's,
     in `app.services.reporting`, because they need the section-week's comments and
     this module never sees one.
@@ -848,7 +867,10 @@ def draft_response(week: ResponseGather, gateway: AIGateway | None = None) -> Re
     return gateway.run_task(
         prompt=_render(
             RESPONSE_DRAFT_PROMPT_VERSION,
-            [(RESPONSE_WEEK_PLACEHOLDER, render_response_week(week))],
+            [
+                (AUTHOR_ROLE_PLACEHOLDER, AUTHOR_ROLE_PHRASES[author_role]),
+                (RESPONSE_WEEK_PLACEHOLDER, render_response_week(week)),
+            ],
         ),
         prompt_version=RESPONSE_DRAFT_PROMPT_VERSION,
         output_model=ResponseDraftOutput,

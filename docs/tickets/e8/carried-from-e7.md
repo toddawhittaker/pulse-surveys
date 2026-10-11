@@ -157,6 +157,15 @@ number and a held week may show none. **Owner:** E8. **Done when:** the page
 names the course where it can do so without a figure in a held week, or a
 record says why it does not.
 
+### For E8: the results page owes a confidentiality line once it shows student data
+
+E7-10 moved the results page's strings to the `student_results.` copy surface
+and listed it among the surfaces that owe no confidentiality line, because the
+page shows only staff-written text today. **Owner:** E8. **Done when:** the
+change that first puts anything derived from students on that page (aggregates,
+comments, or a small-N state) removes `student_results` from
+`SURFACES_WITH_NO_CONFIDENTIALITY_LINE`, and the page shows the line with a test.
+
 ### For E9: the attention list, staff names, and three leadership roles
 
 - The attention list calls `response_loop.is_owed` (SPEC §5.6 rule 4, ruling

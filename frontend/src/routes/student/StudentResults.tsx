@@ -130,7 +130,7 @@ export function StudentResults({
   return (
     <main className="pulse-survey" data-testid="pulse-student-results" aria-labelledby={HEADING_ID}>
       <h1 id={HEADING_ID} ref={headingRef} tabIndex={-1}>
-        {copy('student_survey.results_heading')}
+        {copy('student_results.heading')}
       </h1>
       <PulseDivider />
       <Body
@@ -157,7 +157,7 @@ function Body({
   if (load.kind === 'loading') {
     return (
       <p className="pulse-survey-status" role="status">
-        {copy('student_survey.results_loading')}
+        {copy('student_results.loading')}
       </p>
     );
   }
@@ -166,8 +166,8 @@ function Body({
       return (
         <StateNotice
           variant="flat"
-          title={copy('student_survey.results_session_ended_title')}
-          body={copy('student_survey.results_session_ended_body')}
+          title={copy('student_results.session_ended_title')}
+          body={copy('student_results.session_ended_body')}
         />
       );
     }
@@ -176,8 +176,8 @@ function Body({
         variant="flat"
         body={copy(
           load.answer.kind === 'nothing'
-            ? 'student_survey.results_nothing_to_show'
-            : 'student_survey.results_unavailable',
+            ? 'student_results.nothing_to_show'
+            : 'student_results.unavailable',
         )}
       />
     );
@@ -194,7 +194,7 @@ function Body({
           {/* A held week shows no number, not even its own week's. */}
           {results.state === 'awaiting' ? null : (
             <p className="pulse-eyebrow">
-              {fillCopy('student_survey.results_week_label', {
+              {fillCopy('student_results.week_label', {
                 week: String(current),
               })}
             </p>
@@ -219,10 +219,10 @@ function Reply({
   readonly timeZone: string | undefined;
 }): JSX.Element {
   if (results.state === 'awaiting') {
-    return <StateNotice variant="flat" body={copy('student_survey.results_awaiting')} />;
+    return <StateNotice variant="flat" body={copy('student_results.awaiting')} />;
   }
   if (results.state === 'unanswered' || results.response === null) {
-    return <StateNotice variant="flat" body={copy('student_survey.results_unanswered')} />;
+    return <StateNotice variant="flat" body={copy('student_results.unanswered')} />;
   }
   return (
     <ResponseCard

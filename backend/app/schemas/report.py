@@ -100,6 +100,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.ai.contracts import CheckTheme, HeldNoteType
+from app.models.loop import RESPONSE_TEXT_MAX
 from app.schemas import report_benchmark
 from app.services.reporting import ComparisonFigure, refuse_an_unsealed_comparison
 
@@ -519,19 +520,13 @@ class TaughtSections(BaseModel):
     sections: list[TaughtSection]
 
 
-# How long a draft the check is sent may be. **E7-01 sets the bound on a
-# published response's text** (`RESPONSE_TEXT_MAX` in `app.models.loop`), and the
-# check reads the draft that will become one, so the two are the same number.
-# E7-01 and E7-04 were built in parallel, so this is the one place the check's
-# copy lives until E7-01 merges, when it is replaced by an import of 01's.
-RESPONSE_TEXT_MAX = 4000
-
-
 class DraftCheckRequest(BaseModel):
     """What the draft check is sent: the instructor's draft, and nothing else.
 
-    Bounded at the edge, so a body far over any response's length is refused with
-    a 422 before any model is asked (E7-04 done-when 6).
+    Bounded at the edge by the published response's own bound
+    (`RESPONSE_TEXT_MAX` in `app.models.loop`), because the draft checked is the
+    text that will become one; a body over it is refused with a 422 before any
+    model is asked (E7-04 done-when 6).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

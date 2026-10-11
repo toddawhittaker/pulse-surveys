@@ -21,6 +21,11 @@ route that answers 201 and writes nothing is red.
 
 **Which failure a red is, before E7-03 lands.** `find_route` fails naming the
 instructor's response routes — a FAILED, never an ERROR.
+
+**The sibling-section publish refusal carries `invariant`** (E7-10 done-when 7):
+an instructor publishing into a section she does not teach is SPEC §4.1 item 2's
+boundary crossed by a write. The rest of the module is not confidentiality and
+stays unmarked.
 """
 
 import pytest
@@ -232,6 +237,7 @@ def test_the_lead_cannot_edit_the_teachers_response_through_on_behalf(
     assert summary(world.responses_of(world.hold.taught)) == before, "A refused write left a row."
 
 
+@pytest.mark.invariant
 @pytest.mark.parametrize("where", ["a-section-not-taught", "an-unpublished-week"])
 def test_a_publish_outside_the_teachers_published_weeks_is_the_reports_404(
     response_loop: LoopWorld, where: str
