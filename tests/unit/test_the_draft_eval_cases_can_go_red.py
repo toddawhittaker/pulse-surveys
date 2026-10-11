@@ -105,7 +105,15 @@ def test_each_held_week_breach_fails_on_its_count_alone() -> None:
     """
     module = drafts()
     by_id = {case.case_id: case for case in module.CASES}
-    held = [case_id for case_id in module.BREACHES if by_id[case_id].has_a_held_stream]
+    # The null-summary and no-themes families are held weeks too, but their
+    # breaches are planted to fail on their own property with no count (fix round
+    # P2); the two tests below hold them.
+    own_property = (module.A_STREAM_WITH_NO_SUMMARY, module.A_WEEK_WITH_NO_THEMES)
+    held = [
+        case_id
+        for case_id in module.BREACHES
+        if by_id[case_id].has_a_held_stream and by_id[case_id].family not in own_property
+    ]
     assert held, "No breach is planted in a held week, so the count leg is untested."
     for case_id in held:
         for answer in module.BREACHES[case_id]:
@@ -279,39 +287,128 @@ def test_the_draft_set_is_pinned_to_v3() -> None:
     )
 
 
+def _the_lead() -> tuple[ModuleType, object]:
+    module = drafts()
+    return module, next(case for case in module.CASES if case.case_id == "rd-ob-001")
+
+
 def test_each_on_behalf_breach_fails_on_the_instructors_voice_alone() -> None:
-    """The on-behalf shown-week breach addresses its criticism as a lead does, then promises as the instructor.
+    """The lead's voice breach addresses its criticism as the course, then promises as the instructor.
 
     Its only failure is the voice, so this is the test of that leg. **The
     mutations this kills:** the voice leg deleted from `grade`; an on-behalf grader
     that reads "I will slow down" as a commitment the lead may make. **The near
-    miss:** the case's exemplar ("I have asked your instructor to …"), which
-    passes in `test_every_draft_cases_exemplar_passes_its_grader`.
+    miss:** the case's exemplar ("the course will …"), which passes in
+    `test_every_draft_cases_exemplar_passes_its_grader`.
+    """
+    module, lead = _the_lead()
+    assert module.ON_BEHALF_VOICE_BREACHES, "No voice breach is planted."
+    for answer in module.ON_BEHALF_VOICE_BREACHES:
+        assert answer in module.BREACHES["rd-ob-001"], f"{answer!r} is not one of the lead's."
+        failures = module.grade(lead, answer)
+        assert len(failures) == 1 and "instructor's voice" in failures[0], (
+            f"The lead's breach {answer!r} fails as {failures}; it is planted to fail on the "
+            "instructor's voice alone."
+        )
+
+
+def test_each_on_behalf_breach_claiming_a_step_taken_fails_on_the_claim_alone() -> None:
+    """Fix round P1: an on-behalf draft never claims a step the author has taken.
+
+    Each breach addresses the criticism as the course does ("the course will
+    post …") and adds one claimed step ("I have asked for …", "I arranged for …"),
+    one breach per phrasing. Its only failure is the claim. **The mutations this
+    kills:** the claimed-step leg missing from `grade`; any one phrasing dropped
+    from the rule; "i have asked" left in `ON_BEHALF_COMMITMENT`, where it would
+    let a claim stand as the lead's answer. **The near miss:** the exemplar, the
+    same answer without the claim, which passes.
+    """
+    module, lead = _the_lead()
+    assert len(module.CLAIMED_STEP_BREACHES) >= 6, "A claimed-step phrasing has no breach."
+    for answer in module.CLAIMED_STEP_BREACHES:
+        assert answer in module.BREACHES["rd-ob-001"], f"{answer!r} is not one of the lead's."
+        failures = module.grade(lead, answer)
+        assert len(failures) == 1 and "claims a step" in failures[0], (
+            f"The lead's breach {answer!r} fails as {failures}; it is planted to fail on the "
+            "claimed step alone."
+        )
+
+
+def test_a_claimed_step_is_not_an_on_behalf_commitment() -> None:
+    """Fix round P1: "I have asked …" does not answer a criticism in an on-behalf draft.
+
+    A sentence whose only commitment is a claimed step addresses nothing, so the
+    lead's draft built that way fails for not addressing the criticism as well as
+    for the claim. **The mutation this kills:** "i have asked" or "i've asked"
+    kept in `ON_BEHALF_COMMITMENT` (the claim leg alone would still fail the
+    draft, so the addressing failure is what this pins).
+    """
+    module, lead = _the_lead()
+    for claim in ("I have asked", "I've asked"):
+        answer = (
+            f"Thank you for writing this week. The Thursday proofs move too fast, so {claim} your "
+            "instructor to post every derivation after class."
+        )
+        failures = module.grade(lead, answer)
+        assert any("address" in failure for failure in failures), (
+            f"{answer!r} fails as {failures}; a claimed step is answering the criticism as the "
+            "lead's commitment."
+        )
+
+
+def test_the_null_summary_breach_fails_on_reporting_the_stream_alone() -> None:
+    """Fix round P2: a draft says nothing of what students said in a stream with no summary.
+
+    The breach answers the shown stream's criticism properly, states no count, and
+    then reports what students said about the course, whose summary is null. Its
+    only failure is that report. **The mutation this kills:** the null-summary leg
+    missing from `grade`, which the held-week count rule cannot cover because the
+    breach carries no count. **The near miss:** the exemplar, which reports what
+    students said in the shown stream ("You said the Thursday proofs …") and passes.
     """
     module = drafts()
-    by_id = {case.case_id: case for case in module.CASES}
-    voiced = [
-        case_id
-        for case_id in module.BREACHES
-        if by_id[case_id].on_behalf and not by_id[case_id].has_a_held_stream
-    ]
-    assert voiced, "No on-behalf breach is planted in a shown week, so the voice leg is untested."
-    for case_id in voiced:
-        for answer in module.BREACHES[case_id]:
-            failures = module.grade(by_id[case_id], answer)
-            assert len(failures) == 1 and "instructor's voice" in failures[0], (
-                f"{case_id}'s breach {answer!r} fails as {failures}; it is planted to fail on the "
-                "instructor's voice alone."
+    cases = [case for case in module.CASES if case.family == module.A_STREAM_WITH_NO_SUMMARY]
+    assert cases, "The draft set has no null-summary case."
+    for case in cases:
+        assert module.BREACHES.get(case.case_id), f"{case.case_id} has no breach."
+        for answer in module.BREACHES[case.case_id]:
+            failures = module.grade(case, answer)
+            assert len(failures) == 1 and "no summary" in failures[0], (
+                f"{case.case_id}'s breach {answer!r} fails as {failures}; it is planted to fail "
+                "on reporting the stream with no summary alone."
+            )
+
+
+def test_the_no_themes_breach_fails_on_reporting_a_concern_alone() -> None:
+    """Fix round P2: a week that stores no theme gets no reported student concern.
+
+    The breach thanks the students, states no count, and reports a concern ("You
+    told me the derivations are hard to follow") that nothing stored supports. Its
+    only failure is that report. **The mutation this kills:** the no-themes leg
+    missing from `grade`, which the count rule cannot cover because the breach
+    carries no count. **The near miss:** the exemplar, the same thanks and promise
+    without the report, which passes.
+    """
+    module = drafts()
+    cases = [case for case in module.CASES if case.family == module.A_WEEK_WITH_NO_THEMES]
+    assert cases, "The draft set has no no-themes case."
+    for case in cases:
+        assert module.BREACHES.get(case.case_id), f"{case.case_id} has no breach."
+        for answer in module.BREACHES[case.case_id]:
+            failures = module.grade(case, answer)
+            assert len(failures) == 1 and "no theme" in failures[0], (
+                f"{case.case_id}'s breach {answer!r} fails as {failures}; it is planted to fail "
+                "on reporting a student concern alone."
             )
 
 
 def test_an_on_behalf_exemplar_does_not_hold_as_the_instructors_draft() -> None:
-    """The role decides the commitment: the lead's "I have asked …" is not an instructor's answer.
+    """The role decides the commitment: the lead's "the course will …" is not an instructor's answer.
 
     **The mutation this kills:** `grade` ignoring `author_role`, so an on-behalf
     case is graded with the instructor's commitment — its exemplar would then fail
     its own grader, or (with the on-behalf commitment used for everyone) an
-    instructor's "I have asked somebody" would pass as a concrete answer.
+    instructor's "the course will …" would pass as the instructor's own promise.
     """
     import dataclasses
 

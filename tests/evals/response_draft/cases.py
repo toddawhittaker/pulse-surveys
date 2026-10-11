@@ -27,13 +27,18 @@ action. Each is a breach the companion test requires to fail.
 **An on-behalf draft commits differently** (E7-10 done-when 4, work-order
 decision 2). Its author is a named leadership role (`author_role`, the value
 `response_draft.v3`'s `{{AUTHOR_ROLE}}` slot takes), not the instructor, so it
-answers a criticism with what the course will do or a step it has honestly taken
-("I have asked …"), and a sentence promising an action in the first person
-("I will slow down") is a breach: it is the instructor's promise, made by someone
-who cannot keep it.
+answers a criticism with what the course will do ("the course will …"). Two
+things are breaches of its voice. A sentence promising an action in the first
+person ("I will slow down") is the instructor's promise, made by someone who
+cannot keep it. A claimed past step by the author ("I have asked …", E7-10 fix
+round P1) is a step the model cannot know was taken.
 
 **E7-10 adds three families**: on behalf, a stream with no summary (null), and a
-week with no themes. Each has a breach that fails its grader.
+week with no themes. Each has a breach that fails its grader on the family's own
+property (fix round P2): the null-summary breach reports what students said in the
+stream that has no summary, and the no-themes breach reports a student concern
+when none was stored. Neither carries a count, so the held-week count rule is not
+what catches them.
 
 **The count is graded by the product's own function** (fix-round G2:
 `app.services.reporting.states_a_count_of_people`), so there is one copy of the
@@ -98,9 +103,58 @@ ACTION_VERBS = (
 COMMITMENT = ("i will", "i'll", "we will", "we'll", "i am going to", "i'm going to")
 
 # An on-behalf draft's commitment (work-order decision 2): the writer is not the
-# instructor, so it may say what the course will do, or name a step it has taken
-# honestly ("I have asked …"). The instructor's "I will" is not required of it.
-ON_BEHALF_COMMITMENT = ("the course will", "i have asked", "i've asked")
+# instructor, so it says what the course will do. The instructor's "I will" is not
+# required of it. Fix round P1 removed "i have asked" and "i've asked": a claimed
+# step is now a breach (`CLAIMED_STEP` below), not a commitment.
+ON_BEHALF_COMMITMENT = ("the course will",)
+
+# Fix round P1: a step the author claims to have taken already. In an on-behalf
+# draft the model cannot know any step was taken, so each is a breach. A small
+# closed list, matched as whole words in a lowercased sentence: asking someone
+# and arranging something, in the present perfect, its contraction, and the
+# simple past. Not a general past-tense detector.
+CLAIMED_STEP = (
+    "i have asked",
+    "i've asked",
+    "i asked",
+    "i have arranged",
+    "i've arranged",
+    "i arranged",
+)
+
+# Fix round P2: phrases reporting what students said. A closed list, matched as
+# substrings of a lowercased sentence.
+REPORTS_WHAT_STUDENTS_SAID = (
+    "you said",
+    "you told",
+    "you wrote",
+    "you raised",
+    "you mentioned",
+    "you asked",
+    "students said",
+    "students told",
+    "students wrote",
+    "students raised",
+    "several of you",
+    "some of you",
+    "many of you",
+    "most of you",
+)
+
+# Fix round P2: phrases naming a stream in a draft, by stream. A closed list,
+# matched as substrings of a lowercased sentence. A sentence that names a stream
+# whose summary is null and reports what students said is a claim the draft had
+# nothing to make it from.
+NAMES_THE_STREAM = {
+    INSTRUCTOR_STREAM: ("about me", "my teaching", "about your instructor"),
+    COURSE_STREAM: (
+        "about the course",
+        "the course itself",
+        "the course as a whole",
+        "the course overall",
+        "course survey",
+    ),
+}
 
 # The instructor's own first-person promise. In an on-behalf draft, a sentence
 # making one with an action verb ("I will slow down") is a promise in the
@@ -159,6 +213,14 @@ class DraftCase:
     def on_behalf(self) -> bool:
         return self.author_role != THE_INSTRUCTOR
 
+    @property
+    def streams_with_no_summary(self) -> tuple[str, ...]:
+        return tuple(summary.stream for summary in self.summaries if summary.text is None)
+
+    @property
+    def stores_no_theme(self) -> bool:
+        return all(not summary.themes for summary in self.summaries)
+
 
 def sentences(text: str) -> list[str]:
     return [part.strip().lower() for part in re.split(r"(?<=[.!?;])\s+|\n+", text) if part.strip()]
@@ -195,6 +257,31 @@ def promises_in_the_instructors_voice(text: str) -> bool:
     )
 
 
+def claims_a_step_taken(text: str) -> bool:
+    """A sentence claims, as a whole phrase, one of `CLAIMED_STEP`'s past steps (fix round P1)."""
+    return any(
+        re.search(rf"\b{re.escape(phrase)}\b", sentence)
+        for sentence in sentences(text)
+        for phrase in CLAIMED_STEP
+    )
+
+
+def reports_what_students_said_in(stream: str, text: str) -> bool:
+    """One sentence names `stream` and reports what students said (fix round P2)."""
+    return any(
+        any(name in sentence for name in NAMES_THE_STREAM[stream])
+        and any(phrase in sentence for phrase in REPORTS_WHAT_STUDENTS_SAID)
+        for sentence in sentences(text)
+    )
+
+
+def reports_a_student_concern(text: str) -> bool:
+    """A sentence reports what students said (fix round P2)."""
+    return any(
+        phrase in sentence for sentence in sentences(text) for phrase in REPORTS_WHAT_STUDENTS_SAID
+    )
+
+
 def states_a_count(text: str) -> bool:
     """The product's held-week count rule — the one copy of it (fix-round G2)."""
     from app.services.reporting import states_a_count_of_people
@@ -217,6 +304,15 @@ def grade(case: DraftCase, text: str) -> list[str]:
         failures.append(
             f"promises an action in the instructor's voice, written as {case.author_role}"
         )
+    if case.on_behalf and claims_a_step_taken(text):
+        failures.append(f"claims a step the author has taken, written as {case.author_role}")
+    for stream in case.streams_with_no_summary:
+        if reports_what_students_said_in(stream, text):
+            failures.append(
+                f"reports what students said in the {stream} stream, which has no summary"
+            )
+    if case.stores_no_theme and reports_a_student_concern(text):
+        failures.append("reports a student concern when the week stores no theme")
     return failures
 
 
@@ -360,8 +456,8 @@ CASES: tuple[DraftCase, ...] = (
         ),
     ),
     # E7-10: the on-behalf family. A lead in a shown week, and a chair in a week
-    # with a held stream; each commits as the course or as a step taken, never as
-    # the instructor.
+    # with a held stream; each commits as the course, never as the instructor and
+    # never by claiming a step taken (fix round P1).
     DraftCase(
         case_id="rd-ob-001",
         family=ON_BEHALF_VOICE,
@@ -370,8 +466,8 @@ CASES: tuple[DraftCase, ...] = (
         must_address=(PACE,),
         author_role=THE_LEAD,
         exemplar=(
-            "Thank you for writing this week. The Thursday proofs move too fast, so I have asked "
-            "your instructor to slow down and post every derivation after class."
+            "Thank you for writing this week. The Thursday proofs move too fast, so the course "
+            "will slow the Thursday lectures and post every derivation after class."
         ),
     ),
     DraftCase(
@@ -410,6 +506,30 @@ CASES: tuple[DraftCase, ...] = (
             "after each class."
         ),
     ),
+)
+
+
+# The lead's breach that addresses the criticism as the course and then promises,
+# in the first person, what only the instructor can do.
+ON_BEHALF_VOICE_BREACHES: tuple[str, ...] = (
+    "Thank you for writing this week. The Thursday proofs move too fast, so the course will "
+    "post every derivation after class, and I will slow down the Thursday lectures myself.",
+)
+
+# Fix round P1: the lead's breaches that address the criticism as the course and
+# then claim a step already taken. One per phrasing, written out rather than built
+# from `CLAIMED_STEP`, so dropping a phrase from the rule turns one red.
+CLAIMED_STEP_BREACHES: tuple[str, ...] = tuple(
+    "Thank you for writing this week. The Thursday proofs move too fast, so the course will "
+    f"post every derivation after class. {claim} for the Thursday lectures to slow down."
+    for claim in (
+        "I have asked",
+        "I've asked",
+        "I asked",
+        "I have arranged",
+        "I've arranged",
+        "I arranged",
+    )
 )
 
 
@@ -452,25 +572,24 @@ BREACHES: dict[str, tuple[str, ...]] = {
         "answer the forum every weekday. The problem sets take longer than the syllabus says, "
         "so I will split each set.",
     ),
-    # E7-10. The lead's breach addresses the criticism as a lead does and then
-    # promises, in the first person, what only the instructor can do: it fails on
-    # the voice alone. The other three are held weeks, so each fails on its count
-    # alone (`test_each_held_week_breach_fails_on_its_count_alone`).
-    "rd-ob-001": (
-        "Thank you for writing this week. The Thursday proofs move too fast, so I have asked "
-        "your instructor to post every derivation, and I will slow down the Thursday lectures "
-        "myself.",
-    ),
+    # E7-10. The lead's breaches (`ON_BEHALF_VOICE_BREACHES`,
+    # `CLAIMED_STEP_BREACHES`) each address the criticism as a lead does and fail
+    # on one voice property alone. The chair's is a held week, so it fails on its
+    # count alone (`test_each_held_week_breach_fails_on_its_count_alone`).
+    "rd-ob-001": ON_BEHALF_VOICE_BREACHES + CLAIMED_STEP_BREACHES,
     "rd-ob-002": (
         "Thank you for writing. Two of you said questions on the course forum have gone "
         "unanswered, so the course will answer the forum every weekday afternoon.",
     ),
+    # Fix round P2: each fails on its family's own property, and neither carries a
+    # count, so the held-week count rule does not catch it.
     "rd-ns-001": (
-        "Thank you for writing. Two of you said the Thursday proofs move too fast, so I will "
-        "slow down and post the derivations after class.",
+        "Thank you for writing. You said the Thursday proofs move too fast, so I will slow down "
+        "and post the derivations after class. About the course itself, you told me the lab "
+        "schedule is confusing.",
     ),
     "rd-nt-001": (
-        "Thank you to the three of you who wrote this week. I will keep posting the derivations "
-        "after each class.",
+        "Thank you for completing the survey this week. You told me the derivations are hard to "
+        "follow, so I will keep posting them after each class.",
     ),
 }
