@@ -52,6 +52,18 @@ NOT_AUTHOR_ROLES = ("DEAN", "instructor")
 PUBLISHED_WEEKS = "published_weeks"
 WEEKS = [1, 2]
 
+# E8-01's members, as a held week carries them (its work order): the course label
+# always, and the streams, the workload median and the release group `None`.
+# Passed explicitly on every construction here, so whether the builder gives the
+# last three a default is not something this file decides (`docs/MISTAKES.md`
+# entry 22: a new member reaches every fixture).
+HELD_E8_01_MEMBERS: dict[str, Any] = {
+    "course_label": "E7-02 BIO 101 F1WW — A course, Fall 2026",
+    "streams": None,
+    "workload_median": None,
+    "released": None,
+}
+
 PLANTED_MEMBERS = ("benchmark", "comparison", "university_mean")
 PLANTED_VALUE: dict[str, Any] = {"points": [{"course_week": 1, "mean": {"figure": 4.2}}]}
 
@@ -101,8 +113,13 @@ def test_both_classes_construct_from_their_own_members() -> None:
     results = the_payload_class(RESULTS_SCHEMA)
     response = the_payload_class(RESPONSE_SCHEMA)
 
-    held = results(state="awaiting", response=None, published_weeks=WEEKS)
-    released = results(state="published", response=response(**A_RESPONSE), published_weeks=WEEKS)
+    held = results(state="awaiting", response=None, published_weeks=WEEKS, **HELD_E8_01_MEMBERS)
+    released = results(
+        state="published",
+        response=response(**A_RESPONSE),
+        published_weeks=WEEKS,
+        **HELD_E8_01_MEMBERS,
+    )
 
     assert held.state == "awaiting" and held.response is None
     assert released.response is not None and released.response.text == A_RESPONSE["text"]
@@ -121,7 +138,8 @@ def test_the_results_payload_declares_the_published_weeks() -> None:
         f"`{RESULTS_SCHEMA}` declares {sorted(results.model_fields)}; the amendment's A1 adds "
         f"`{PUBLISHED_WEEKS}: list[int]`."
     )
-    assert results(state="awaiting", response=None, published_weeks=WEEKS).published_weeks == WEEKS
+    held = results(state="awaiting", response=None, published_weeks=WEEKS, **HELD_E8_01_MEMBERS)
+    assert held.published_weeks == WEEKS
 
 
 @pytest.mark.parametrize("planted", PLANTED_MEMBERS)
@@ -141,7 +159,7 @@ def test_a_planted_benchmark_member_is_refused_by_the_results_payload(
     """
     model = the_payload_class(which)
     whole: dict[str, Any] = (
-        {"state": "awaiting", "response": None, PUBLISHED_WEEKS: WEEKS}
+        {"state": "awaiting", "response": None, PUBLISHED_WEEKS: WEEKS, **HELD_E8_01_MEMBERS}
         if which == RESULTS_SCHEMA
         else dict(A_RESPONSE)
     )
@@ -166,7 +184,8 @@ def test_each_of_the_four_states_is_admitted(state: str) -> None:
     response = the_payload_class(RESPONSE_SCHEMA)
     carried = None if state in ("awaiting", "unanswered") else response(**A_RESPONSE)
 
-    assert results(state=state, response=carried, published_weeks=WEEKS).state == state
+    built = results(state=state, response=carried, published_weeks=WEEKS, **HELD_E8_01_MEMBERS)
+    assert built.state == state
 
 
 @pytest.mark.parametrize("state", NOT_STATES)
@@ -180,7 +199,9 @@ def test_a_state_outside_the_four_is_refused(state: str) -> None:
     results = the_payload_class(RESULTS_SCHEMA)
 
     complaints = complaints_about(
-        results, {"state": state, "response": None, PUBLISHED_WEEKS: WEEKS}, "state"
+        results,
+        {"state": state, "response": None, PUBLISHED_WEEKS: WEEKS, **HELD_E8_01_MEMBERS},
+        "state",
     )
 
     assert complaints, f"`{RESULTS_SCHEMA}` admitted the state {state!r}; decision 4: four states."

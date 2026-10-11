@@ -40,6 +40,18 @@ unknown members removed — whatever mechanism carries it — after which planti
 service change away from being served. The near miss it must spare is a schema
 that still constructs from its own declared members, asserted beside it.
 
+**Since E8-01 it reaches the results payload too** (its done-when 7). The
+student's week — the trend, the distributions, the workload median, the
+comments and the release group — is `StudentWeekResults` in
+`app.schemas.response_loop`, a module this sweep did not read: the enclosure one
+level out (`docs/MISTAKES.md` entry 53). The models swept there are **every
+model reachable from `StudentWeekResults` through its fields' annotations**, so
+a model added under it tomorrow is inside the sweep without an edit here, and
+the walk is run on a planted chain first. The same walk finds no member spelled
+as a count, a rate, a classmate or a workload mean (ruling 6, §5.4), stepping
+around E8-03's `participation` member only, the student's own posted record
+(ruling 4), which those stems would otherwise judge.
+
 **The marker sits at module level**, in the list form, because
 `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
 requires it of any module whose name matches a denial shape — this one matches
@@ -47,6 +59,7 @@ requires it of any module whose name matches a denial shape — this one matches
 """
 
 import importlib
+import typing
 from typing import Any
 
 import pytest
@@ -334,4 +347,189 @@ def test_a_planted_benchmark_member_is_refused_by_every_student_payload_schema(
         "so nothing fails until a student is looking at the page.\n\n"
         f"The model declares {sorted(model.model_fields)}. `{planted}` is not among them and must "
         "not be admitted as an extra."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E8-01, done-when 7: the results payload in `app.schemas.response_loop`.
+# ---------------------------------------------------------------------------
+
+RESPONSE_LOOP_SCHEMA_MODULE = "app.schemas.response_loop"
+RESULTS_ROOT = "StudentWeekResults"
+
+# The models E8-01's work order settles under the root, and E7-02's response. The
+# walk must *find* each (`docs/MISTAKES.md` entry 35: a guard that only reports
+# absence cannot say what it can see); it is not built from this list.
+SETTLED_RESULTS_MODELS = frozenset(
+    {
+        "StudentWeekResults",
+        "StudentResponse",
+        "StudentStream",
+        "TrendPoint",
+        "StudentComment",
+        "StudentReleasedComment",
+    }
+)
+
+# E8-03's member: the student's own posted score and ledger (ruling 4). Stepped
+# around by the count walk only; the benchmark walk and the plants reach it.
+OWN_RECORD_MEMBER = "participation"
+
+# A count, a rate, a classmate, or a workload figure other than the median.
+COUNT_STEMS = ("count", "classmate", "respondent", "responses", "rate", "enrol")
+WORKLOAD_STEM = "workload"
+WORKLOAD_MEDIAN = "workload_median"
+
+
+def models_reachable_from(
+    root: type[BaseModel], *, skipping: frozenset[str] = frozenset()
+) -> dict[str, type[BaseModel]]:
+    """Every pydantic model reachable from `root` through its fields' annotations, by name.
+
+    Annotations are opened all the way down — `list[...]`, `X | None`,
+    `dict[str, ...]`, `Literal` — so a model nested in a list of optionals is
+    found. A field named in `skipping` is not followed.
+    """
+    found: dict[str, type[BaseModel]] = {}
+    waiting: list[Any] = [root]
+    while waiting:
+        node = waiting.pop()
+        if isinstance(node, type) and issubclass(node, BaseModel):
+            if node.__name__ in found:
+                continue
+            found[node.__name__] = node
+            waiting.extend(
+                field.annotation
+                for name, field in node.model_fields.items()
+                if name not in skipping
+            )
+        else:
+            waiting.extend(typing.get_args(node))
+    return found
+
+
+def the_results_root() -> type[BaseModel]:
+    module = importlib.import_module(RESPONSE_LOOP_SCHEMA_MODULE)
+    root = getattr(module, RESULTS_ROOT, None)
+    assert isinstance(root, type) and issubclass(
+        root, BaseModel
+    ), f"`{RESPONSE_LOOP_SCHEMA_MODULE}` declares no pydantic `{RESULTS_ROOT}` (E7-02's payload)."
+    return root
+
+
+def test_the_model_walk_finds_a_model_nested_in_a_list_of_optionals_and_a_dict() -> None:
+    """The walk's instrument, on models declared here. **A red here means this module is broken.**
+
+    **The mutation this kills:** a walk that reads only a field's bare type, which
+    stops at `list[...] | None` and reports the root alone.
+    """
+
+    class Leaf(BaseModel):
+        text: str
+
+    class Middle(BaseModel):
+        leaves: dict[str, Leaf]
+
+    class Root(BaseModel):
+        middles: list[Middle] | None
+        skipped: Leaf
+
+    assert set(models_reachable_from(Root)) == {"Root", "Middle", "Leaf"}
+    assert set(models_reachable_from(Root, skipping=frozenset({"middles"}))) == {"Root", "Leaf"}
+
+
+def test_the_sweep_reaches_every_model_the_results_payload_is_built_from() -> None:
+    """The walk from `StudentWeekResults` finds every model E8-01's work order settles.
+
+    **The mutation this kills:** a student model declared but not reachable from
+    the payload (served some other way, so the sweep would not see it), and the
+    sweep pointed at a root that no longer carries the week's figures.
+    **Red before E8-01 lands**, naming the four models it adds.
+    """
+    reached = set(models_reachable_from(the_results_root()))
+    missing = sorted(SETTLED_RESULTS_MODELS - reached)
+    assert not missing, (
+        f"The walk from `{RESULTS_ROOT}` reaches {sorted(reached)} and not {missing}. E8-01's work "
+        "order puts `StudentStream`, `TrendPoint`, `StudentComment` and `StudentReleasedComment` "
+        "under it."
+    )
+
+
+def test_every_model_the_results_payload_reaches_refuses_a_planted_benchmark_member() -> None:
+    """Every reachable model, both planted spellings: a complaint about the planted key.
+
+    **The mutation this kills:** a new model under the results payload left at
+    pydantic's default `extra="ignore"` (the work order: every new model
+    `extra="forbid"`). **The near miss:** this file's own control, a model with no
+    configuration that swallows the member.
+    """
+    reached = models_reachable_from(the_results_root())
+    assert reached, "The walk reached nothing, so this sweep planted on nothing."
+    silent = sorted(
+        (name, planted)
+        for name, model in reached.items()
+        for planted in PLANTED_MEMBERS
+        if not [
+            complaint
+            for complaint in complaints_about(model, planted)
+            if tuple(complaint.get("loc", ())) == (planted,)
+        ]
+    )
+    assert not silent, (
+        f"These (model, planted member) pairs drew no complaint about the planted key: {silent}. "
+        "SPEC §4.1 item 1: a student payload carries no comparison or benchmark figure, and a "
+        "model that drops an unknown member is one service change away from carrying one."
+    )
+
+
+def test_no_model_the_results_payload_reaches_declares_a_benchmark_shaped_member() -> None:
+    """The stems, over every reachable model's fields (E8-03's member included).
+
+    **The mutation this kills:** a `comparison`, `university_mean` or
+    `cohort_median` added to a stream or to the payload "for context".
+    """
+    reached = models_reachable_from(the_results_root())
+    declared = sorted(
+        (name, field)
+        for name, model in reached.items()
+        for field in model.model_fields
+        if any(stem in field.lower() for stem in BENCHMARK_STEMS)
+    )
+    assert reached and not declared, (
+        f"These results-payload models declare benchmark-shaped members: {declared}. SPEC §4.1 "
+        "item 1 and §5.4: the student's own section only."
+    )
+
+
+def test_no_model_the_results_payload_reaches_declares_a_count_or_a_workload_mean() -> None:
+    """Ruling 6 and §5.4, structurally: no response count, no classmate count, no rate, no mean.
+
+    The workload's only member is `workload_median`. The walk steps around E8-03's
+    `participation`, the student's own record, which the hold and these stems do
+    not govern.
+
+    **The mutations this kills:** `response_count`, `classmates_responded`,
+    `response_rate` or `workload_mean` declared on the payload; and the
+    instructor's `rates` model reused under a stream. **The near miss:**
+    `workload_median`, which is declared and spared.
+    """
+    root = the_results_root()
+    assert WORKLOAD_MEDIAN in root.model_fields, (
+        f"`{RESULTS_ROOT}` declares {sorted(root.model_fields)} and no `{WORKLOAD_MEDIAN}`, so the "
+        "workload walk below has nothing to spare."
+    )
+    reached = models_reachable_from(root, skipping=frozenset({OWN_RECORD_MEMBER}))
+    declared = sorted(
+        (name, field)
+        for name, model in reached.items()
+        for field in model.model_fields
+        if field != OWN_RECORD_MEMBER
+        and (
+            any(stem in field.lower() for stem in COUNT_STEMS)
+            or (WORKLOAD_STEM in field.lower() and field != WORKLOAD_MEDIAN)
+        )
+    )
+    assert not declared, (
+        f"These results-payload models declare {declared}. Ruling 6 and §5.4: no response count, "
+        "no classmate count, no response rate and no workload mean."
     )

@@ -78,9 +78,10 @@ refusals make it seven:
     E7-07's pages ask the question again;
   - `student_results`, E7-06's results page, moved out of `student_survey.` by
     E7-10 (done-when 8): the student's view of a published week and the response
-    to it. It shows only staff-written text today, so it owes item 5 no line;
-    `docs/tickets/e8/carried-from-e7.md` reopens the question when E8 adds
-    anything derived from students to the page.
+    to it. **Since E8-01 it carries item 5's line** (its done-when 10): the page
+    now shows what classmates wrote and how they rated the week, so it says once
+    what happens to a student's identity, as the survey and the report do. The
+    line is `student_results.confidentiality`, in `studentResults.ts`.
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
@@ -306,7 +307,8 @@ GOVERNED_SURFACES = {
     # whose strings E7-06 filed under `student_survey.results_*`, which counted
     # them toward the survey surface and its one confidentiality line. They are a
     # different screen (E7-10 done-when 8), so they are their own prefix and their
-    # own surface, placed in the no-line map below with the reason.
+    # own surface. Since E8-01 the page carries classmates' comments and figures,
+    # and the surface carries its own line (`CONFIDENTIALITY_KEY_OF_SURFACE`).
     #
     # **The mutation this row kills** is the state it replaces: the results
     # page's strings counted on the survey surface, where a confidentiality
@@ -338,11 +340,20 @@ GOVERNED_SURFACES = {
 # queue page and the log page render. Both pages are one surface here because
 # they share one prefix, exactly as the report's regions are one surface, so the
 # surface carries one string and each page renders it.
+#
+# **The results page's line is `student_results.confidentiality`** (E8-01
+# done-when 10), an entry in `studentResults.ts`, spelled as the survey's and the
+# moderation pages' lines are. The page carries what classmates wrote from E8
+# onward, so it moved out of the no-line map below.
 CONFIDENTIALITY_KEY_OF_SURFACE = {
     SURVEY: "student_survey.confidentiality",
     REPORT: "instructor_report_page.comments_note",
     LEADERSHIP_MODERATION: "leadership_moderation.confidentiality",
+    STUDENT_RESULTS: "student_results.confidentiality",
 }
+
+# The frontend copy module the results page renders (E8-01's "Owns").
+STUDENT_RESULTS_COPY_FILENAME = "studentResults.ts"
 
 # The other half of the surface model: a governed surface that owes item 5 no
 # line, with the reason it owes none. Written out as a map rather than inferred
@@ -387,14 +398,6 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
         "E6-05-02 placement for backend refusals alone: whether E7-07's policy, owed and "
         "on-behalf pages owe item 5 a line is that ticket's question, and the on-behalf "
         "composer shows stored summaries, so it is asked again there (MISTAKES entry 22)."
-    ),
-    STUDENT_RESULTS: (
-        "E7-06's results page: a published week's state and the response to it, which only "
-        "staff write — the instructor, or a lead or chair on behalf — shown with its author's "
-        "name and role. Nothing on it is a student's response, comment or rating, so there is "
-        "no student whose identity it could promise anything about, and item 5's sentence would "
-        "have no subject (E7-10 done-when 8). `docs/tickets/e8/carried-from-e7.md` reopens the "
-        "question when E8 adds anything derived from students to the page."
     ),
 }
 
@@ -2992,13 +2995,14 @@ def test_each_line_carrying_surface_carries_exactly_one_confidentiality_line() -
 def test_no_surface_recorded_as_owing_no_confidentiality_line_carries_one() -> None:
     """SPEC §4.1 item 5 over the other half of the surface model.
 
-    Four governed surfaces owe no line, each for a reason written down beside
-    it: the gradebook is a label and an arithmetic ledger rendered inside another
-    product, the unknown-address screen shows nobody's data, the comparison-set
-    screen shows set definitions, two counts and eight refusals — no response,
-    comment or rating of anybody's — and the entry pages say what happened at a
-    door before anybody signed in. Item 5's sentence would have no subject on any
-    of the four.
+    Every surface in `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` owes no line, each
+    for a reason written down beside it: among them, the gradebook is a label and
+    an arithmetic ledger rendered inside another product, the unknown-address
+    screen shows nobody's data, the comparison-set screen shows set definitions,
+    two counts and eight refusals — no response, comment or rating of anybody's —
+    and the entry pages say what happened at a door before anybody signed in.
+    Item 5's sentence would have no subject on any of them. (The list is the map,
+    not a number here: E8-01 moved the results page out of it.)
 
     **Owing none and carrying none are the same requirement here, and that is
     deliberate.** A confidentiality sentence on one of these surfaces is a promise
@@ -3174,50 +3178,65 @@ def test_the_entry_surface_owes_no_line_and_collects_from_the_registry() -> None
 
 
 @pytest.mark.invariant
-def test_the_results_page_is_its_own_surface_and_owes_no_line() -> None:
-    """SPEC §4.1 item 5's answer for E7-06's results page, asserted as a named fact (E7-10 done-when 8).
+def test_the_results_page_is_its_own_surface_and_carries_its_one_line_from_its_copy_module() -> (
+    None
+):
+    """SPEC §4.1 item 5 for the results page, since E8-01 (done-when 10).
 
-    The page's strings move from `student_survey.results_*` to `student_results.`,
-    so they stop counting toward the survey surface, and the surface is recorded
-    as owing no line with the reason: it shows only staff-written text today.
+    > 10. **The surface owes its line.** `student_results` moves out of
+    >     `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` into the governed surfaces, and
+    >     the copy inventory requires exactly one confidentiality line on it, the
+    >     new key.
 
-    **The mutations it kills:** the strings left under `student_survey.` (any
-    collected key still spelled `student_survey.results_…`); the surface moved into
-    `CONFIDENTIALITY_KEY_OF_SURFACE`, which would demand a promise about students
-    on a page showing none of their words; the reason emptied; the frontend copy
-    module dropping out of the collector, which makes the zero meaningless; and a
-    reassuring identity sentence added to the page. **The near miss it spares:**
-    the survey surface's own line, still counted once on `student_survey.`.
+    E7-10 placed the page in the no-line map because it showed only staff-written
+    text. E8-01 puts classmates' comments and figures on it, so it carries one
+    line, `student_results.confidentiality`, collected **from `studentResults.ts`**
+    (the copy module the page renders) and not from the backend registry, beside
+    the page's other strings under the same prefix. The page's strings stay off
+    the survey surface (E7-10's half, kept).
+
+    **The mutations it kills:** the surface left in the no-line map (or in both);
+    the line registered in the backend registry, which no page renders; the line
+    missing, or a second confidentiality sentence on the page (the exactly-once
+    rule above counts them; this names the key); and the results strings filed
+    back under `student_survey.`. **The near miss it spares:** the survey
+    surface's own line, still counted once on `student_survey.`.
     """
-    assert STUDENT_RESULTS in SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
-        f"The {STUDENT_RESULTS} surface is not recorded as owing item 5 no line. Done-when 8: "
-        "placed in the surfaces that owe no confidentiality line, with the reason."
+    expected = CONFIDENTIALITY_KEY_OF_SURFACE.get(STUDENT_RESULTS)
+    assert expected == "student_results.confidentiality", (
+        f"The {STUDENT_RESULTS} surface's line is {expected!r}. Done-when 10: it carries item 5's "
+        "line under the new key."
     )
-    assert (
-        SURFACES_WITH_NO_CONFIDENTIALITY_LINE[STUDENT_RESULTS].strip()
-    ), f"The {STUDENT_RESULTS} row records no reason (ADR 0158: an omission reading as a decision)."
-    assert (
-        STUDENT_RESULTS not in CONFIDENTIALITY_KEY_OF_SURFACE
-    ), f"The {STUDENT_RESULTS} surface is in both line maps."
+    assert STUDENT_RESULTS not in SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
+        f"The {STUDENT_RESULTS} surface is still recorded as owing no line. Done-when 10: it moves "
+        "out of that map."
+    )
 
-    frontend = [string.key for string in collect_frontend_copy(FRONTEND_COPY_DIRECTORY)]
+    frontend = collect_frontend_copy(FRONTEND_COPY_DIRECTORY)
     assert frontend, "The frontend collector read nothing, so this rule passed over nothing."
-    moved = [key for key in frontend if prefix_of(key) == STUDENT_RESULTS]
-    assert moved, (
-        f"No frontend string is collected under `{STUDENT_RESULTS}.`. Done-when 8: the results "
-        "page's strings move to that prefix, so a zero counted over it is not an answer to item 5."
+    from_the_page = sorted(
+        string.key for string in frontend if string.source.endswith(STUDENT_RESULTS_COPY_FILENAME)
     )
-    left_behind = sorted(key for key in frontend if key.startswith("student_survey.results_"))
-    assert not left_behind, (
-        f"These results-page strings are still filed on the survey surface: {left_behind}. "
-        f"Done-when 8: they move to `{STUDENT_RESULTS}.`."
+    assert expected in from_the_page, (
+        f"`{expected}` is not collected from `{STUDENT_RESULTS_COPY_FILENAME}`, which yields "
+        f"{from_the_page}. The page renders that file, so its line is an entry there."
     )
+    assert [
+        key for key in from_the_page if key != expected
+    ], f"`{STUDENT_RESULTS_COPY_FILENAME}` yields only the line; the page's own copy is not there."
+    left_behind = sorted(
+        string.key for string in frontend if string.key.startswith("student_survey.results_")
+    )
+    assert (
+        not left_behind
+    ), f"These results-page strings are filed on the survey surface: {left_behind}."
 
-    inventory = collect_shipped_copy()
-    carrying = sorted(string.key for string in confidentiality_strings(inventory, STUDENT_RESULTS))
-    assert not carrying, (
-        f"The {STUDENT_RESULTS} surface owes item 5 no line and carries {carrying}.\n\n"
-        f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[STUDENT_RESULTS]}"
+    carrying = sorted(
+        string.key for string in confidentiality_strings(collect_shipped_copy(), STUDENT_RESULTS)
+    )
+    assert carrying == [expected], (
+        f"The {STUDENT_RESULTS} surface carries the confidentiality string(s) {carrying}. SPEC §4.1 "
+        f"item 5: exactly once per surface, and the one is `{expected}`."
     )
 
 
