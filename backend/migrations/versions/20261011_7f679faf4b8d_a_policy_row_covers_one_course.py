@@ -23,12 +23,20 @@ instead, and the hold reads the latest row for the section's course.
     the row's course rather than the prefix.
 
 `response_policy` holds no rows anywhere yet (E7-01 shipped no writer), so the new
-column needs no backfill and is added `NOT NULL` at once.
+column needs no backfill and is added `NOT NULL` at once. **The upgrade checks
+that first** and raises a readable `RuntimeError` over a row, having changed
+nothing, rather than failing on a not-null violation half way: a row written
+before this revision says nothing about which course it covered, and no backfill
+could know.
 
 **The downgrade refuses while `response_policy` holds a row**, as M1's does: going
 down drops `course_id`, and with it the only record of which course each policy
 change covered. Over an empty table it restores M1's index and M1's guard, and
 drops the column and the unique pair.
+
+**Both directions lock the table before they count** (`SHARE` mode, which lets
+reads through and blocks writes), so no row can be written between the count and
+the change that would refuse it or destroy it.
 """
 
 from collections.abc import Sequence
@@ -58,8 +66,30 @@ DROP_BOTH_TRIGGERS = (
 )
 
 
+def _policy_rows() -> int:
+    """How many `response_policy` rows there are, with writes to it blocked until commit."""
+    connection = op.get_bind()
+    connection.execute(sa.text(f"LOCK TABLE public.{RESPONSE_POLICY} IN SHARE MODE"))
+    return int(
+        connection.execute(sa.text(f"SELECT count(*) FROM public.{RESPONSE_POLICY}")).scalar_one()  # noqa: S608
+    )
+
+
 def upgrade() -> None:
-    """Apply this revision: the course a policy row covers, its key, its grant and its guard."""
+    """Apply this revision: the course a policy row covers, its key, its grant and its guard.
+
+    Raises `RuntimeError`, having changed nothing, when `response_policy` holds a
+    row: such a row does not say which course it covered.
+    """
+    held = _policy_rows()
+    if held:
+        raise RuntimeError(
+            f"This database holds {held} rows in `public.{RESPONSE_POLICY}`, written before a "
+            "policy row named its course. This revision makes `course_id` required, and nothing "
+            "can tell which course each of those rows covered. Nothing was changed. Export those "
+            "rows and remove them deliberately, then upgrade, and have their setters record "
+            "their policies again."
+        )
     op.create_unique_constraint(COURSE_ID_PREFIX_ID_UNIQUE, "course", ["id", "prefix_id"])
     op.add_column(RESPONSE_POLICY, sa.Column("course_id", sa.Uuid(), nullable=False))
     op.create_foreign_key(
@@ -83,10 +113,7 @@ def downgrade() -> None:
     Raises `RuntimeError`, having changed nothing, when `response_policy` holds a
     row: going down would lose which course each policy change covered.
     """
-    connection = op.get_bind()
-    held = connection.execute(
-        sa.text(f"SELECT count(*) FROM public.{RESPONSE_POLICY}")
-    ).scalar_one()  # noqa: S608
+    held = _policy_rows()
     if held:
         raise RuntimeError(
             f"This database holds {held} rows in `public.{RESPONSE_POLICY}`. Going below this "

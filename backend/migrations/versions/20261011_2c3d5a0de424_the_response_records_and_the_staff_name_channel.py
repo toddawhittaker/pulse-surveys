@@ -205,6 +205,14 @@ def downgrade() -> None:
     `response_policy` holds a row: going down would destroy them.
     """
     connection = op.get_bind()
+    # Writes to both tables are blocked from here to the commit (`SHARE` mode lets
+    # reads through), so no row can land between the count and the drop (E7-02's
+    # fix round, H3).
+    connection.execute(
+        sa.text(
+            f"LOCK TABLE public.{INSTRUCTOR_RESPONSE}, public.{RESPONSE_POLICY} IN SHARE MODE"
+        )
+    )
     held = {
         table: connection.execute(sa.text(f"SELECT count(*) FROM public.{table}")).scalar_one()  # noqa: S608
         for table in (INSTRUCTOR_RESPONSE, RESPONSE_POLICY)
