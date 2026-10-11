@@ -648,3 +648,45 @@
     animation: pulse-terminal-dot 150ms ease-out 560ms both;
   }
 }
+
+/* The student's reply page and the response card (SPEC §5.4, §7.6). One layout
+ * for every author role: the on-behalf byline is the instructor's in size,
+ * weight and colour. */
+@layer components {
+  .pulse-section-instructors {
+    margin: var(--space-1) 0 0;
+    color: var(--spruce-60);
+  }
+
+  .pulse-section-reply-link {
+    margin: var(--space-2) 0 0;
+  }
+
+  .pulse-response-card {
+    margin-top: var(--space-5);
+    padding: var(--space-5);
+    border: 1px solid var(--mist);
+    border-radius: var(--radius-card);
+  }
+
+  .pulse-response-text {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .pulse-response-byline {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-4);
+    margin: var(--space-4) 0 0;
+    color: var(--spruce-60);
+  }
+
+  .pulse-results-week {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    margin: var(--space-3) 0 0;
+  }
+}

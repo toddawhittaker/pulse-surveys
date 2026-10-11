@@ -106,7 +106,7 @@ MAY_READ_THE_CLOCK = (
         "should have written. It is checking a rendering, not deriving a week.",
     ),
     Allowed(
-        "frontend/src/routes/student/StudentWeeklySurvey.tsx",
+        "frontend/src/lib/institutionTime.ts",
         "formats `EnrolledSection.next_window_opens_at` in the institution's timezone for "
         "FIX-01 item 4's dated sentence. Same instant-to-words job, one screen up.",
     ),
