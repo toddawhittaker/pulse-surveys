@@ -408,3 +408,22 @@ E7-10 made every draft gather use the on-behalf summary filter, so the
 `for_on_behalf` keyword no longer changes what is read. **Owner:** the next
 ticket that touches `response_gather`. **Done when:** the keyword is removed
 from the function and its callers.
+
+### The E7-10 graders' closed word lists
+
+From E7-10's prompt-eval re-check (#318), accepted residue. The on-behalf
+grader's list of claimed steps is closed, so "I have requested …" passes it.
+The no-themes rule's list of reported concerns also fails a harmless "many of
+you who completed the survey". **Owner:** E10's floors pull request, with the
+entry "The draft and check evals have no floor". **Done when:** both lists are
+checked against live drafts before a floor is set on either family.
+
+### The composer's busy line is inserted with its text
+
+From E7-10's a11y-copy review (#318), accepted residue. "Drafting…" and
+"Checking…" appear in a status paragraph that is added together with its text,
+so a screen reader may not say that a request has started. The empty advisory
+paragraph also takes one flex gap of blank space. **Owner:** the next ticket
+that touches `InstructorResponse.tsx`. **Done when:** the busy line goes
+through a region that is in the page before the request starts, with a test,
+and the empty advisory paragraph takes no space.
