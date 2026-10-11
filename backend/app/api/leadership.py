@@ -98,8 +98,8 @@ from sqlalchemy.orm import Session
 
 from app.ai.gateway import AIGatewayError
 from app.api.deps import csrf_verified_leadership, person_of, require_leadership
+from app.api.instructor import assistant_busy, assistant_unusable
 from app.config import Settings
-from app.copy.instructor_report import ASSISTANT_UNUSABLE
 from app.copy.leadership_moderation import (
     NO_REVIEW_GRANT,
     NOT_IN_QUEUE,
@@ -149,7 +149,11 @@ from app.services.moderation import (
     exclusion_log,
     review_queue,
 )
-from app.services.reporting import UnusableAnswerError
+from app.services.reporting import (
+    AssistantBusyError,
+    UnusableAnswerError,
+    one_assistant_call_at_a_time,
+)
 from app.services.response_loop import (
     NoPolicyToSetError,
     OnBehalfUnavailableError,
@@ -496,7 +500,8 @@ def _no_review_grant() -> HTTPException:
 # for a sibling lead's section in every state of its week, a section the reader
 # teaches or taught, a week not open on behalf, an answered week and a key
 # nothing holds. The draft and the check answer the instructor's one 502 for any
-# answer they may not hand on.
+# answer they may not hand on, and its one 429 to a second request from a person
+# with one in flight (`app.api.instructor`, where both are defined).
 # ---------------------------------------------------------------------------
 
 POLICY_PATH = "/leadership/response-policy"
@@ -509,7 +514,6 @@ ON_BEHALF_RESPONSE_PATH = f"{ON_BEHALF_PATH}/response"
 
 NO_POLICY_TO_SET_STATUS = 404
 ON_BEHALF_UNAVAILABLE_STATUS = 404
-ASSISTANT_UNUSABLE_STATUS = 502
 
 
 @router.get(POLICY_PATH, summary="The response policy of every course I set or read it for")
@@ -592,18 +596,22 @@ def draft_on_behalf(
     """The instructor's draft task over the on-behalf gather; the gate before any model call."""
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = NO_STORE
+    person_id = person_of(claims)
     try:
-        text = on_behalf_draft(
-            session,
-            person_id=person_of(claims),
-            section_id=section_id,
-            course_week=course_week,
-            settings=settings,
-        )
+        with one_assistant_call_at_a_time(person_id):
+            text = on_behalf_draft(
+                session,
+                person_id=person_id,
+                section_id=section_id,
+                course_week=course_week,
+                settings=settings,
+            )
+    except AssistantBusyError:
+        raise assistant_busy() from None
     except OnBehalfUnavailableError:
         raise _on_behalf_unavailable() from None
     except (UnusableAnswerError, AIGatewayError):
-        raise _assistant_unusable() from None
+        raise assistant_unusable() from None
     return ResponseDraftView(text=text)
 
 
@@ -620,19 +628,23 @@ def check_on_behalf(
     """The instructor's check task over the on-behalf gather; the gate before any model call."""
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = NO_STORE
+    person_id = person_of(claims)
     try:
-        themes = on_behalf_check(
-            session,
-            person_id=person_of(claims),
-            section_id=section_id,
-            course_week=course_week,
-            draft=check.draft,
-            settings=settings,
-        )
+        with one_assistant_call_at_a_time(person_id):
+            themes = on_behalf_check(
+                session,
+                person_id=person_id,
+                section_id=section_id,
+                course_week=course_week,
+                draft=check.draft,
+                settings=settings,
+            )
+    except AssistantBusyError:
+        raise assistant_busy() from None
     except OnBehalfUnavailableError:
         raise _on_behalf_unavailable() from None
     except (UnusableAnswerError, AIGatewayError):
-        raise _assistant_unusable() from None
+        raise assistant_unusable() from None
     return DraftCheckView(unaddressed=themes)
 
 
@@ -699,8 +711,3 @@ def _on_behalf_unavailable() -> HTTPException:
     return HTTPException(
         status_code=ON_BEHALF_UNAVAILABLE_STATUS, detail=ON_BEHALF_UNAVAILABLE.text
     )
-
-
-def _assistant_unusable() -> HTTPException:
-    """The instructor's one 502, for any model answer the draft or the check may not hand on."""
-    return HTTPException(status_code=ASSISTANT_UNUSABLE_STATUS, detail=ASSISTANT_UNUSABLE.text)

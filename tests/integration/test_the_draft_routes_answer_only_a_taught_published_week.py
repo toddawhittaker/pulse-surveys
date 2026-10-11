@@ -22,6 +22,12 @@ the session rides the cookie, the carrier `csrf_verified_instructor` exists for;
 a Bearer request is exempt by design (ADR 0089) and would prove nothing.
 
 **Which failure a red is.** Before E7-04: a FAILED naming the missing route.
+
+**The three refusal tests carry `invariant`** (E7-10 done-when 7): a draft or
+check of a section the instructor does not teach, or of one that does not exist,
+or of a week not yet published, is SPEC §4.1 item 2's surface — another section's
+summaries fed to a model whose answer is shown to this reader. The CSRF and bound
+tests stay unmarked; they are not confidentiality.
 """
 
 from datetime import timedelta
@@ -85,6 +91,7 @@ def assert_the_counter_counts(door: DraftDoor, task: str) -> None:
     )
 
 
+@pytest.mark.invariant
 @pytest.mark.parametrize("task", TASKS)
 def test_a_section_the_instructor_does_not_teach_gets_the_reports_404_and_no_model_call(
     draft_door: DraftDoor, task: str
@@ -126,6 +133,7 @@ def test_a_section_the_instructor_does_not_teach_gets_the_reports_404_and_no_mod
     assert_the_counter_counts(door, task)
 
 
+@pytest.mark.invariant
 @pytest.mark.parametrize("task", TASKS)
 def test_a_section_that_does_not_exist_gets_the_same_refusal_as_one_not_taught(
     draft_door: DraftDoor, task: str
@@ -149,6 +157,7 @@ def test_a_section_that_does_not_exist_gets_the_same_refusal_as_one_not_taught(
     assert len(door.provider.completions) == before, "A refused request reached the model."
 
 
+@pytest.mark.invariant
 @pytest.mark.parametrize("task", TASKS)
 def test_a_week_not_yet_published_gets_the_reports_404_and_opens_with_the_report(
     draft_door: DraftDoor, task: str

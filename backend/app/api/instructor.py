@@ -86,6 +86,7 @@ from app.ai.gateway import AIGatewayError
 from app.api.deps import csrf_verified_instructor, person_of, require_instructor
 from app.config import Settings
 from app.copy.instructor_report import (
+    ASSISTANT_BUSY,
     ASSISTANT_UNUSABLE,
     COMMENT_UNAVAILABLE,
     DECISION_NOT_ALLOWED,
@@ -118,12 +119,14 @@ from app.services.moderation import (
     decide_as_instructor,
 )
 from app.services.reporting import (
+    AssistantBusyError,
     CourseWeekUnavailableError,
     SectionUnavailableError,
     UnusableAnswerError,
     instructor_draft_check,
     instructor_report,
     instructor_response_draft,
+    one_assistant_call_at_a_time,
     published_course_weeks,
     taught_sections,
 )
@@ -172,9 +175,14 @@ CREATED = 201
 # state, which the reader's own report already shows (E7-03, decision 1).
 RESPONSE_CONFLICT_STATUS = 409
 
-# The one refusal of a model answer either route answers (E7-04's work order,
-# decision 2): 502, because the server's upstream gave it nothing it could use.
+# The one refusal of a model answer every draft and check route answers, the
+# instructor's here and the on-behalf ones in `app.api.leadership` (E7-04's work
+# order, decision 2): 502, because the server's upstream gave it nothing it
+# could use. And the one refusal of a second draft or check from a person with
+# one already waiting on the model (E7-10 done-when 3): 429. Both are defined
+# here once and imported there.
 ASSISTANT_UNUSABLE_STATUS = 502
+ASSISTANT_BUSY_STATUS = 429
 
 # The decision route's refusals (E6-03's work order, decision 1). 404 for an answer
 # the reader's report does not return, whatever it is, with one sentence; 409 for an
@@ -379,24 +387,29 @@ def draft_a_response(
     week not yet published get exactly the 404 the report answers, because the
     service raises the report's exceptions from the report's own gate before it
     gathers anything. Every refusal of the model's answer is one 502 and one
-    sentence (`_assistant_unusable`).
+    sentence (`assistant_unusable`), and a second draft or check from a person
+    with one in flight is one 429 before anything is read (`assistant_busy`).
     """
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = NO_STORE
+    person_id = person_of(claims)
     try:
-        text = instructor_response_draft(
-            session,
-            person_id=person_of(claims),
-            section_id=section_id,
-            course_week=course_week,
-            settings=settings,
-        )
+        with one_assistant_call_at_a_time(person_id):
+            text = instructor_response_draft(
+                session,
+                person_id=person_id,
+                section_id=section_id,
+                course_week=course_week,
+                settings=settings,
+            )
+    except AssistantBusyError:
+        raise assistant_busy() from None
     except SectionUnavailableError:
         raise _unavailable(SECTION_UNAVAILABLE) from None
     except CourseWeekUnavailableError:
         raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
     except (UnusableAnswerError, AIGatewayError):
-        raise _assistant_unusable() from None
+        raise assistant_unusable() from None
     return ResponseDraftView(text=text)
 
 
@@ -421,21 +434,25 @@ def check_a_draft(
     """
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = NO_STORE
+    person_id = person_of(claims)
     try:
-        themes = instructor_draft_check(
-            session,
-            person_id=person_of(claims),
-            section_id=section_id,
-            course_week=course_week,
-            draft=check.draft,
-            settings=settings,
-        )
+        with one_assistant_call_at_a_time(person_id):
+            themes = instructor_draft_check(
+                session,
+                person_id=person_id,
+                section_id=section_id,
+                course_week=course_week,
+                draft=check.draft,
+                settings=settings,
+            )
+    except AssistantBusyError:
+        raise assistant_busy() from None
     except SectionUnavailableError:
         raise _unavailable(SECTION_UNAVAILABLE) from None
     except CourseWeekUnavailableError:
         raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
     except (UnusableAnswerError, AIGatewayError):
-        raise _assistant_unusable() from None
+        raise assistant_unusable() from None
     return DraftCheckView(unaddressed=themes)
 
 
@@ -539,15 +556,21 @@ def edit_week_response(
         ) from None
 
 
-def _assistant_unusable() -> HTTPException:
-    """The one 502 both AI routes answer, whatever made the model's answer unusable.
+def assistant_unusable() -> HTTPException:
+    """The one 502 every draft and check route answers, whatever made the model's answer unusable.
 
     The same sentence for a refused answer and for a model that did not answer
     usably at all: a refusal that said which rule an answer broke, or which
-    comment a draft matched, would describe comments the instructor is not shown.
-    The gateway's own error messages never reach the body.
+    comment a draft matched, would describe comments the reader is not shown.
+    The gateway's own error messages never reach the body. `app.api.leadership`'s
+    on-behalf draft and check answer this same one.
     """
     return HTTPException(status_code=ASSISTANT_UNUSABLE_STATUS, detail=ASSISTANT_UNUSABLE.text)
+
+
+def assistant_busy() -> HTTPException:
+    """The one 429 every draft and check route answers to a person with one already in flight."""
+    return HTTPException(status_code=ASSISTANT_BUSY_STATUS, detail=ASSISTANT_BUSY.text)
 
 
 def _unavailable(detail: str) -> HTTPException:

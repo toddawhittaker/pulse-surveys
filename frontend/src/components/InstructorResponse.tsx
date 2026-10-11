@@ -57,8 +57,9 @@ type Busy = 'draft' | 'check' | 'write' | null;
  * as a draft is what `ai_seeded` records, and emptying the editor ends it.
  *
  * After publishing, the page shows the response as students read it, with an
- * Edit path. Whether a response exists, and whether the week is held, are the
- * server's answer (`state`), never worked out here.
+ * Edit path for the person who first published it. Whether a response exists,
+ * whether the week is held, and whether this reader may edit are the server's
+ * answers (`state`, `can_edit`), never worked out here.
  */
 export function InstructorResponse({
   initial,
@@ -74,8 +75,8 @@ export function InstructorResponse({
   /**
    * The lead or chair responding for a section (SPEC §5.3). The same composer
    * pointed at the on-behalf doors through `actions`; this changes the words
-   * that name who is writing, and lets the reader edit what they published,
-   * which the server reports as the `on-behalf` state.
+   * that name who is writing. Whether the reader may edit what they published
+   * is the server's `can_edit`, as for the instructor.
    */
   readonly onBehalf?: boolean;
 }): JSX.Element {
@@ -281,7 +282,7 @@ export function InstructorResponse({
             publishedAt={published.published_at}
             timeZone={timeZone}
           />
-          {view.state === 'published' || (onBehalf && view.state === 'on-behalf') ? (
+          {view.can_edit ? (
             <div className="pulse-instructor-response__actions">
               <button
                 type="button"
@@ -411,11 +412,12 @@ export function InstructorResponse({
               )}
             </p>
           )}
-          {advisory === null ? null : (
-            <p className="pulse-instructor-response__advisory" role="status">
-              {advisory}
-            </p>
-          )}
+          {/* Always in the tree while the composer is, and filled when advice
+              fails to arrive: a status paragraph inserted together with its
+              text may not be announced at all. Empty, it takes no space. */}
+          <p className="pulse-instructor-response__advisory" role="status">
+            {advisory}
+          </p>
           {problem === null ? null : (
             <p className="pulse-instructor-response__problem" id={problemId} role="alert">
               {problem}

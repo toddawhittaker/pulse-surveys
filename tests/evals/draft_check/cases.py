@@ -30,16 +30,23 @@ from typing import Any
 from tests.evals.response_draft.cases import (
     A_SHOWN_WEEK,
     A_WEEK_WITH_A_HELD_STREAM,
+    A_WEEK_WITH_A_STREAM_WITH_NO_SUMMARY,
+    A_WEEK_WITHOUT_THEMES,
     StoredSummary,
 )
 
-# The ticket's `backend/app/ai/prompts/draft_check.v1.md`, written out on purpose.
+# The ticket's `backend/app/ai/prompts/draft_check.v1.md`, written out on purpose;
+# `tests/unit/test_the_draft_eval_cases_can_go_red.py` fails when it and
+# `app.ai.tasks.DRAFT_CHECK_PROMPT_VERSION` differ (E7-10 done-when 4).
 PROMPT_VERSION = "draft_check.v1"
 
 NOTHING_ADDRESSED = "nothing_addressed"
 EVERYTHING_ADDRESSED = "everything_addressed"
 PARTLY_ADDRESSED = "partly_addressed"
 HELD_THEME_WITHOUT_COUNT = "held_theme_named_without_count"
+# E7-10 done-when 4's two new families.
+A_WEEK_WITH_NO_THEMES_FAMILY = "a_week_with_no_themes"
+A_STREAM_WITH_NO_SUMMARY_FAMILY = "a_stream_with_no_summary"
 
 
 @dataclass(frozen=True)
@@ -128,4 +135,30 @@ CASES: tuple[CheckCase, ...] = (
         draft="You told me the proofs move too fast, so I will slow down and post the derivations.",
         unaddressed=("office hours help", "forum questions go unanswered"),
     ),
+    # E7-10: no stored theme anywhere, so the only right answer is nothing.
+    CheckCase(
+        case_id="dc-nt-001",
+        family=A_WEEK_WITH_NO_THEMES_FAMILY,
+        summaries=A_WEEK_WITHOUT_THEMES,
+        draft="Thank you all for completing the survey this week. See you on Tuesday.",
+        unaddressed=(),
+    ),
+    # E7-10: the held course stream has no summary, so it has no theme to name.
+    CheckCase(
+        case_id="dc-ns-001",
+        family=A_STREAM_WITH_NO_SUMMARY_FAMILY,
+        summaries=A_WEEK_WITH_A_STREAM_WITH_NO_SUMMARY,
+        draft="You told me the proofs move too fast, so I will slow down and post the derivations.",
+        unaddressed=("office hours help",),
+    ),
 )
+
+# E7-10 done-when 4: each new case's own breach, beside the generic ones
+# `test_every_check_cases_expected_answer_passes_and_each_kind_of_error_fails`
+# builds. Each is the mistake the family invites: a theme invented for a week that
+# has none, and a theme named for the stream whose summary is null — the label it
+# would plausibly have carried — which no stored summary holds.
+BREACHES: dict[str, tuple[tuple[tuple[str, int | None], ...], ...]] = {
+    "dc-nt-001": ((("the pace of the lectures", 4),), (("the pace of the lectures", None),)),
+    "dc-ns-001": ((("office hours help", 3), ("forum questions go unanswered", None)),),
+}

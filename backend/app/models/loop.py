@@ -27,7 +27,7 @@ a person who both leads courses and chairs the department is keyed (ADR 0192).
 reader only through the staff-name definer (`views_sql/section_staff_names_v001.sql`,
 ADR 0191), whose reader check decides who may read it.
 
-**Who may write a row is checked when it is written** (E7-01's fix round,
+**Who may write a row is checked when it is written** (ADR 0192,
 `views_sql/response_loop_guard_v001.sql`). A `BEFORE INSERT` trigger on each
 table refuses a row unless its author or setter holds the stated role there at
 that moment, and the response trigger also refuses a second author for one

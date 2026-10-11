@@ -21,10 +21,20 @@ import {
 
 afterEach(cleanup);
 
-const AWAITING: WeekResponseRead = { state: 'awaiting', response: null };
-const UNANSWERED: WeekResponseRead = { state: 'unanswered', response: null };
+const AWAITING: WeekResponseRead = { state: 'awaiting', response: null, can_edit: false };
+const UNANSWERED: WeekResponseRead = { state: 'unanswered', response: null, can_edit: false };
 
-function publishedBy(name: string, text: string, state: 'published' | 'on-behalf' = 'published') {
+/**
+ * A published week. `can_edit` is the server's answer for this reader (E7-10):
+ * by default the instructor reading their own response may edit it, and an
+ * instructor reading a response a lead wrote on their behalf may not.
+ */
+function publishedBy(
+  name: string,
+  text: string,
+  state: 'published' | 'on-behalf' = 'published',
+  canEdit: boolean = state === 'published',
+) {
   return {
     state,
     response: {
@@ -33,6 +43,7 @@ function publishedBy(name: string, text: string, state: 'published' | 'on-behalf
       author_role: state === 'published' ? ('INSTRUCTOR' as const) : ('LEAD_FACULTY' as const),
       published_at: '2026-10-12T14:00:00Z',
     },
+    can_edit: canEdit,
   } satisfies WeekResponseRead;
 }
 
@@ -376,6 +387,17 @@ describe('the published response', () => {
     expect(screen.queryByRole('button', { name: 'Edit response' })).toBeNull();
   });
 
+  it('offers no Edit to a co-instructor who did not publish the response', () => {
+    open(publishedBy('Dr. Ada Marsh', 'What I will change.', 'published', false));
+    expect(screen.getByText('What I will change.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Edit response' })).toBeNull();
+  });
+
+  it('offers Edit on an on-behalf response to the lead who published it', () => {
+    open(publishedBy('Dr. Lee Park', 'Written by the lead.', 'on-behalf', true));
+    expect(screen.getByRole('button', { name: 'Edit response' })).toBeTruthy();
+  });
+
   it('shows the server’s sentence when the edit is refused', async () => {
     const sentence = 'This response is not yours to edit.';
     open(
@@ -403,6 +425,30 @@ describe('the published response', () => {
 });
 
 describe('accessibility of the composer', () => {
+  it.each([
+    ['draft', 'Draft with AI', 'A draft could not be written just now. You can still write your own.'],
+    ['check', 'Check draft with AI', 'The check could not run just now. You can still publish.'],
+  ])(
+    'speaks a failed %s through a status region that was in the tree before it failed',
+    async (_which, button, sentence) => {
+      open(
+        UNANSWERED,
+        actions({
+          draft: { kind: 'unavailable', detail: null },
+          check: { kind: 'unavailable', detail: null },
+        }),
+      );
+      type('Words.');
+      const before = screen.getAllByRole('status');
+      press(button);
+      const said = await screen.findByText(sentence);
+      expect(said.getAttribute('role')).toBe('status');
+      // The same node: a live region inserted together with its text may not
+      // be announced at all.
+      expect(before).toContain(said);
+    },
+  );
+
   it('keeps its announcement region in the tree while empty', () => {
     open(UNANSWERED);
     const region = screen.getAllByRole('status').find((node) => node.classList.contains('sr-only'));

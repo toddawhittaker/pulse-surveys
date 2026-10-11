@@ -250,7 +250,7 @@ function SectionSurvey({
       <h2 className="pulse-section-heading">{section.course_label}</h2>
       {section.instructors.length === 0 ? null : (
         <p className="pulse-section-instructors">
-          {fillResultsCopy('student_survey.results_with_instructors', {
+          {fillResultsCopy('student_results.with_instructors', {
             names: section.instructors.join(', '),
           })}
         </p>
@@ -258,11 +258,11 @@ function SectionSurvey({
       <p className="pulse-section-reply-link">
         <a
           href={resultsAddress(section.section_id)}
-          aria-label={fillResultsCopy('student_survey.results_see_reply_link_named', {
+          aria-label={fillResultsCopy('student_results.see_reply_link_named', {
             course: section.course_label,
           })}
         >
-          {resultsCopy('student_survey.results_see_reply_link')}
+          {resultsCopy('student_results.see_reply_link')}
         </a>
       </p>
       {survey === null ? (
