@@ -1026,14 +1026,13 @@ def instructor_report(
     """
     if person_id is None:
         raise SectionUnavailableError
-    section = _readable_section(session, person_id=person_id, section_id=section_id)
-    published = _published_weeks(session, section=section, settings=settings)
-
-    asked = next((week for week in published if week.course_week == course_week), None)
-    if asked is None:
-        raise CourseWeekUnavailableError(
-            "This section has no published report for that course week."
-        )
+    section, asked, published = _published_section_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
     return _payload(
         session,
         section=section,
@@ -1042,6 +1041,37 @@ def instructor_report(
         reader=person_id,
         settings=settings,
     )
+
+
+def _published_section_week(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+) -> tuple[Section, _SectionWeek, list[_SectionWeek]]:
+    """One of this person's own sections, one of its published weeks, and every published week.
+
+    The gate every reader of one section-week passes before anything else is read:
+    the teaching grant through `_readable_section`, then the asked week selected
+    out of the published set (ADR 0184). `instructor_report` and the response
+    draft and check below call it, so the report and the two tasks built on it
+    refuse the same requests with the same exceptions.
+
+    Raises `SectionUnavailableError` and `CourseWeekUnavailableError`.
+    """
+    if person_id is None:
+        raise SectionUnavailableError
+    section = _readable_section(session, person_id=person_id, section_id=section_id)
+    published = _published_weeks(session, section=section, settings=settings)
+
+    asked = next((week for week in published if week.course_week == course_week), None)
+    if asked is None:
+        raise CourseWeekUnavailableError(
+            "This section has no published report for that course week."
+        )
+    return section, asked, published
 
 
 def comment_on_instructor_report(
@@ -1560,11 +1590,7 @@ def _payload(
     # follow. E4-07's security round found exactly that, and
     # `app.services.report_comments.n_threshold` carries the argument.
     threshold = n_threshold()
-    # A section-week not yet fully moderated shows no comment in either stream
-    # (`visible_comments`), so the notice says "held" for it too. Without this a
-    # week above the threshold waiting on one verdict would report itself
-    # unsuppressed and empty, which reads as "nobody commented" (E6-09).
-    moderated = section_week_moderated(session, section_id=section.id, week_id=week.week_id)
+    held = _held_streams(session, section_id=section.id, week_id=week.week_id)
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
     benchmarks_by_stream, workload_benchmark = _benchmark_members(
         session,
@@ -1597,16 +1623,9 @@ def _payload(
             question_text=question_texts[token],
             benchmark=benchmarks_by_stream[token],
             # SPEC §4's suppression is per stream (ADR 0182), so the notice is too:
-            # the comment service's own answer for this stream, or the week still
-            # waiting on a verdict, and the threshold it compared with. No count of
-            # anybody — §5.2's "no count".
-            small_n=schema.SmallNView(
-                suppressed=not moderated
-                or stream_is_suppressed(
-                    session, section_id=section.id, week_id=week.week_id, stream=token
-                ),
-                threshold=threshold,
-            ),
+            # `_held_streams`' answer for this stream, and the threshold it compared
+            # with. No count of anybody — §5.2's "no count".
+            small_n=schema.SmallNView(suppressed=held[token], threshold=threshold),
         )
         for token in REPORT_STREAMS
     }
@@ -1651,6 +1670,28 @@ def _payload(
         released_from_earlier_weeks=_comment_views(released, reader=reader),
         institution_timezone=settings.institution_timezone,
     )
+
+
+def _held_streams(session: Session, *, section_id: UUID, week_id: UUID) -> dict[str, bool]:
+    """Which of this section-week's streams are held, by stream token, as the report shows it.
+
+    A stream is held when the comment service suppresses it (SPEC §4, per stream
+    since ADR 0182) **or** when the section-week is not yet fully moderated: such a
+    week shows no comment in either stream (`visible_comments`), so the notice says
+    "held" for it too. Without the second leg a week above the threshold waiting on
+    one verdict would report itself unsuppressed and empty, which reads as "nobody
+    commented" (E6-09).
+
+    One function, so that the report's notice and every reader that has to agree
+    with it (the response draft and check below) ask the same question the same
+    way.
+    """
+    moderated = section_week_moderated(session, section_id=section_id, week_id=week_id)
+    return {
+        token: not moderated
+        or stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=token)
+        for token in REPORT_STREAMS
+    }
 
 
 def _comment_views(cards: Sequence[CommentCard], *, reader: UUID) -> list["CommentView"]:
@@ -1806,22 +1847,39 @@ def _stored_summaries(
     """
     from app.schemas.report import SummaryView
 
+    return {
+        row.stream: SummaryView(text=row.summary_text, response_count=row.response_count)
+        for row in _served_summary_rows(session, section_id=section_id, week_id=week_id)
+    }
+
+
+def _served_summary_rows(session: Session, *, section_id: UUID, week_id: UUID) -> list[Any]:
+    """This section-week's stored summary rows, less the ones no reader is served.
+
+    The one place the filter `_stored_summaries` describes is written: a row
+    written under `SUMMARY_PROMPT_VERSION` for a stream that is now held is left
+    out. Every reader of a stored summary or its themes goes through here, so a
+    second read of `weekly_summary` cannot forget the filter.
+    """
     stored = session.execute(
         select(
             WeeklySummary.stream,
             WeeklySummary.summary_text,
             WeeklySummary.response_count,
+            WeeklySummary.themes,
             WeeklySummary.prompt_version,
         ).where(WeeklySummary.section_id == section_id, WeeklySummary.week_id == week_id)
     ).all()
-    return {
-        stream: SummaryView(text=summary_text, response_count=response_count)
-        for stream, summary_text, response_count, prompt_version in stored
+    return [
+        row
+        for row in stored
         if not (
-            prompt_version == SUMMARY_PROMPT_VERSION
-            and stream_is_suppressed(session, section_id=section_id, week_id=week_id, stream=stream)
+            row.prompt_version == SUMMARY_PROMPT_VERSION
+            and stream_is_suppressed(
+                session, section_id=section_id, week_id=week_id, stream=row.stream
+            )
         )
-    }
+    ]
 
 
 def _enrolled_students(
