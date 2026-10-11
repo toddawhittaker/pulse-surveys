@@ -51,8 +51,9 @@ reader's view:
   section the reader teaches or has taught (`taught_or_once_taught_section_ids`),
   with the same 404 as a section outside their courses (E6's ruling 7).
 - **No summary written before the week's latest exclusion.** A stored summary
-  whose `generated_at` precedes the latest exclusion decision in that
-  section-week may carry the excluded comment, so this reader is not shown it
+  whose `generated_at` is not strictly later than the latest decision in that
+  section-week that removes a comment from the shown set (an exclusion, or the
+  undo of a keep) may carry that comment, so this reader is not shown it
   and the draft gather for this reader leaves it out. This closes the carried
   entry "A stored summary can carry a comment excluded after it was written"
   for this reader.
@@ -103,35 +104,46 @@ own grant.
    same prefix. A chair's switch holds the department's unled courses in that
    prefix. A chair's attempt to set the policy of a course with a lead is
    refused and writes no row, and the chair can read that course's setting.
-4. **The policy of record is the policy in force at report open.** A toggle
+4. **A sibling lead's setting reaches nobody else.** Sibling lead B sets prefix
+   P to required. Lead A's policy read for P still answers encouraged, carries
+   no attribution, and is byte-identical to the read before B's change. A
+   chair's read of a course in P with a lead shows only that course's own
+   lead's setting. Marked `invariant`.
+5. **The policy of record is the policy in force at report open.** A toggle
    after report open changes nothing for that week, through these routes, in
    both directions.
-5. **The clocks start at report open (ruling 2).** Owed and on-behalf are each
+6. **The clocks start at report open (ruling 2).** Owed and on-behalf are each
    false one second before report open + 48h and + 96h, and true at it, with
    the clock pinned. An encouraged week and a published week are never owed.
-6. **On behalf only past 96 hours.** An on-behalf read, draft, check or publish
+7. **On behalf only past 96 hours.** An on-behalf read, draft, check or publish
    before + 96h is refused and writes no row.
-7. **No taught section.** For a lead who also teaches a section of a course
+8. **No taught section.** For a lead who also teaches a section of a course
    they lead, every on-behalf route refuses that section with the same 404 as a
    section of a sibling lead's course, and writes no row; the course's other
    sections are served. The same holds for a teaching grant the roster ended.
    Marked `invariant`.
-8. **No sibling course.** No route in this ticket reads, sets, lists or
+9. **No sibling course.** No route in this ticket reads, sets, lists or
    publishes for a course outside the reader's own `lead_review_courses`. Each
-   refusal is the same 404 and names nothing of the section. Marked
-   `invariant`.
-9. **No summary written before the week's latest exclusion.** The instructor
-   excludes a comment after the week's summary was written; the lead's
-   on-behalf read carries no summary for that stream, and the draft gather for
-   the lead carries none either. A summary written after the exclusion is
-   served. Marked `invariant`.
-10. **No comment text up-chain.** The on-behalf payload carries no comment text
+   refusal is the same 404 and names nothing of the section. The refusal for a
+   sibling's section is byte-identical whether that week is encouraged or
+   required, before or after + 96h, and answered or not. Marked `invariant`.
+10. **No summary written before the week's latest exclusion.** A summary is
+    withheld when any decision in that section-week that removes a comment
+    from the shown set (an exclusion, or the undo of a keep) is not strictly
+    earlier than the summary's `generated_at`. The instructor excludes a
+    comment after the week's summary was written; the lead's on-behalf read
+    carries no summary for that stream, and the draft gather for the lead
+    carries none either. The undo of a keep withholds the same way. A tie
+    between the decision and `generated_at` withholds, and is tested. A
+    summary written strictly after every such decision is served. Marked
+    `invariant`.
+11. **No comment text up-chain.** The on-behalf payload carries no comment text
     at any threshold; a planted distinctive comment is absent from every
     on-behalf response body. Marked `invariant`.
-11. **The gates run at dispatch.** Each write with no CSRF token, or from
+12. **The gates run at dispatch.** Each write with no CSRF token, or from
     another origin, is refused over HTTP against the built application, beside
     the same write with the token (MISTAKES entry 47).
-12. **The records match.** ADR 0194 is written and indexed.
+13. **The records match.** ADR 0194 is written and indexed.
 
 ## Shares files with
 
