@@ -124,8 +124,8 @@ following from the spec or from an E6 ruling. No ticket reopens them.
 | 02 | [The hold](E7-02-the-hold.md) | `e7/the-hold` | heavy | 01 | The policy of record for a week; the latest response; the student's week state; the one publish writer; the student results route; the student-route sweep extended; ADR 0193. | |
 | 03 | [Publish, policy and on-behalf](E7-03-publish-policy-on-behalf.md) | `e7/publish-policy-on-behalf` | heavy | 02, 04 | The instructor's publish and edit routes; the lead's policy routes; the 48h and 96h predicates; the responses-owed read; the on-behalf read, draft, check and publish; ADR 0194. | |
 | 04 | [The AI draft and the draft check](E7-04-ai-draft-and-check.md) | `e7/ai-draft-and-check` | heavy | none | Two prompts and their tasks; a gather from stored themes and ratings; the structural refusals; the instructor's draft and check routes; mock-ai answers; typed eval cases with no floor; ADR 0195. | |
-| 05 | [The instructor's composer](E7-05-instructor-composer.md) | `e7/instructor-composer` | light | 03, 04 | The composer on the report page: draft, check, publish, the as-students-see-it card with Edit, the hold banner; decisions on released comments; the reason bound checked once. | |
-| 06 | [The student's heading and results page](E7-06-student-heading-and-results-shell.md) | `e7/student-heading-and-results-shell` | light | 02 | The survey heading names the instructor; the results page shows the closed door or the response card with its attribution. | |
+| 05 | [The instructor's composer](E7-05-instructor-composer.md) | `e7/instructor-composer` | light | 03, 04, 06 | The composer on the report page: draft, check, publish, the as-students-see-it card with Edit, the hold banner; decisions on released comments; the reason bound checked once. | |
+| 06 | [The student's heading and results page](E7-06-student-heading-and-results-shell.md) | `e7/student-heading-and-results-shell` | light | 02 | The survey heading names the instructor; the results page shows the closed door or the response card with its attribution; the `ResponseCard` component. | |
 | 07 | [The leadership response pages](E7-07-leadership-response-pages.md) | `e7/leadership-response-pages` | light | 03, 05 | The policy page, the responses-owed list, and the on-behalf composer reusing 05's. | |
 | 08 | [Leadership pages say "not part of your role"](E7-08-leadership-not-your-role.md) | `e7/leadership-not-your-role` | heavy | none | `require_leadership` answers 403 to a signed-in reader in another role; the pages say so; an ended session still reads the ended sentence; the two LOWs on the leadership drive; ADR 0196. | |
 | 09 | [E7 exit](E7-09-e7-exit.md) | `e7/e7-exit` | light | all | The exit driven on the running stack with dates from the seeded calendar; the carried files closed and `../e8/carried-from-e7.md` written; SPEC §14.3; the standing questions re-asked. | |
@@ -137,7 +137,7 @@ following from the spec or from an E6 ruling. No ticket reopens them.
 | 1 | 01, 04, 08 | 01 builds the tables and the channel. 04 reads only stored summaries and ratings, which exist. 08 touches only the leadership gate. They share `openapi.json`, `wire.gen.ts` and `docs/adr/README.md`. |
 | 2 | 02 | Reads 01's tables and writes through 01's grants. |
 | 3 | 03, 06 | 03 builds on 02's gate and writer and calls 04's tasks. 06 renders 02's route and 01's name. They share no files. |
-| 4 | 05 | Calls 03's routes and 04's routes. |
+| 4 | 05 | Calls 03's and 04's routes, and reuses 06's `ResponseCard`. |
 | 5 | 07 | Reuses 05's composer and calls 03's leadership routes. |
 | 6 | 09 | Waits for everything. |
 
@@ -173,6 +173,8 @@ keeping both sides.
 | `frontend/src/api/leadership.ts` | 08, then 07 | 08 the 403 outcome; 07 the new calls. |
 | `frontend/src/api/instructor.ts` | 05 only | |
 | `frontend/src/components/CommentCard.tsx` | 05 only | |
+| `frontend/src/components/ResponseCard.tsx` | 06 creates it; 05 and 07 reuse it | Reuse, never fork. |
+| `frontend/src/components/InstructorResponse.tsx` | 05 creates it; 07 reuses it | 07 adds the on-behalf mode, not a copy. |
 | `frontend/src/api/openapi.json`, `frontend/src/api/wire.gen.ts` | 01, 04, 08 (wave 1); 02; 03 | On conflict, regenerate with `scripts/export_openapi.py` and `npm run gen:wire`; never hand-merge. |
 | `tests/e2e/leadership-moderation.spec.ts` | 08 only | |
 | `docs/SPEC.md` | 01; 02; 03; 09 | 01 §8 and §13; 02 §5.4 if its states need a word; 03 §5.3 only if a built fact differs; 09 §14.3. Keep both sides. |
