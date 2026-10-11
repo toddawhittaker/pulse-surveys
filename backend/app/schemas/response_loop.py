@@ -105,7 +105,7 @@ class StudentWeekResults(BaseModel):
         description=(
             "The student's latest accepted participation score; absent before any score "
             "has been posted. Shown in every state."
-        )
+        ),
     )
 
 
