@@ -15,6 +15,9 @@ import './instructorReportTrend.css';
  * benchmark to arrive in (SPEC §4.1 item 1). The props are the page's own
  * stream trends and nothing else, so no caller can hand one over.
  *
+ * **Both panels draw together, in one 600 ms moment** (`design/Usage Rules.md`
+ * §3's one signature motion), rather than the report's top-then-bottom pair.
+ *
  * **The axis is the weeks published so far.** The student's payload carries
  * neither the section's length nor a term week, and the chart derives neither:
  * `lengthWeeks` is the latest published week, and the tick row shows course
@@ -50,7 +53,6 @@ export function TrendDuo({
         lengthWeeks={lengthWeeks}
         meanHeader={meanHeader}
         absentText={absentText}
-        drawDelayed
       />
     </div>
   );

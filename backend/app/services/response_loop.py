@@ -458,7 +458,7 @@ def student_week_results(
         if clock_.required and not clock_.answered
     }
     readable = [opened for opened in published if opened.week_id not in held_week_ids]
-    streams = reporting.student_streams(
+    streams, workload_median = reporting.student_streams(
         session,
         section_id=section.id,
         week_id=week.week_id,
@@ -476,9 +476,6 @@ def student_week_results(
             ]
             for token in REPORT_STREAMS
         },
-    )
-    workload_median = reporting.student_workload_median(
-        session, section_id=section.id, week_id=week.week_id
     )
     # Ruling 1 (ADR 0197): the release group only on the latest published week's
     # page, only while no published week is held, and only the batches cut

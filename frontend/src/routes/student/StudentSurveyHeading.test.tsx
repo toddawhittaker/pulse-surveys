@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 
 import type { StudentSurveyView } from '../../api/student';
 import { StudentWeeklySurvey } from './StudentWeeklySurvey';
@@ -114,6 +114,8 @@ describe('the lead for a section with no survey open', () => {
     const link = block.getByRole('link', { name: 'See Week 3 results for Course AAAA' });
     expect(link.textContent).toBe('See Week 3 results');
     expect(link.getAttribute('href')).toBe(`/app/student/sections/${FIRST_ID}/weeks/3/results`);
+    // One link to the page, not two.
+    expect(block.queryByRole('link', { name: /See your instructor/ })).toBeNull();
   });
 
   it.each(['on-behalf', 'unanswered'])('leads for a %s week too', async (state) => {
@@ -121,25 +123,40 @@ describe('the lead for a section with no survey open', () => {
     expect(await screen.findByText('Week 2 results are in')).toBeTruthy();
   });
 
-  it('shows no lead when the newest week is awaiting', async () => {
-    const asked = await landingWith(
-      [closedSection(FIRST_ID, 'AAAA', [])],
-      answer(results('awaiting', [1, 2])),
+  // A second section whose lead does show is the control: the test waits for
+  // it, so "the first has no lead" is read after the page has had its say and
+  // not before the reads came back.
+  async function twoSections(firstAnswer: () => Response) {
+    const view: StudentSurveyView = {
+      institution_timezone: 'America/New_York',
+      sections: [closedSection(FIRST_ID, 'AAAA', []), closedSection(SECOND_ID, 'BBBB', [])],
+    };
+    vi.stubGlobal('fetch', (input: string) =>
+      Promise.resolve(
+        input === '/student/survey'
+          ? new Response(JSON.stringify(view), { status: 200 })
+          : input === RESULTS_OF(FIRST_ID)
+            ? firstAnswer()
+            : new Response(JSON.stringify(results('published', [1, 2])), { status: 200 }),
+      ),
     );
-    // The read happened, and it drew nothing.
-    await waitFor(() => {
-      expect(asked).toContain(RESULTS_OF(FIRST_ID));
-    });
-    expect(screen.queryByText(/results are in/)).toBeNull();
-    expect(screen.queryByTestId('pulse-results-lead')).toBeNull();
+    render(<StudentWeeklySurvey />);
+    await screen.findByTestId('survey-section-AAAA');
+    const second = within(screen.getByTestId('survey-section-BBBB'));
+    await second.findByText('Week 2 results are in');
+    return within(screen.getByTestId('survey-section-AAAA'));
+  }
+
+  it('shows no lead when the newest week is awaiting, and keeps the reply link', async () => {
+    const first = await twoSections(answer(results('awaiting', [1, 2])));
+    expect(first.queryByText(/results are in/)).toBeNull();
+    expect(first.queryByTestId('pulse-results-lead')).toBeNull();
+    expect(first.getByRole('link', { name: /See your instructor/ })).toBeTruthy();
   });
 
   it('shows no lead when the section has no published week', async () => {
-    const asked = await landingWith([closedSection(FIRST_ID, 'AAAA', [])], answer({}, 404));
-    await waitFor(() => {
-      expect(asked).toContain(RESULTS_OF(FIRST_ID));
-    });
-    expect(screen.queryByText(/results are in/)).toBeNull();
+    const first = await twoSections(answer({}, 404));
+    expect(first.queryByText(/results are in/)).toBeNull();
   });
 
   it('leads with the survey, and asks nothing about results, when a survey is open', async () => {

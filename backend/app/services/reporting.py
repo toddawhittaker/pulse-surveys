@@ -1981,8 +1981,11 @@ def student_streams(
     week_id: UUID,
     trend: Sequence[tuple[int, UUID]],
     comments: Mapping[str, Sequence[str]],
-) -> list["StudentStream"]:
-    """One released section-week's two streams as its students read them (SPEC §5.4).
+) -> tuple[list["StudentStream"], float | None]:
+    """One released section-week's two streams and its workload median, as its students read them.
+
+    SPEC §5.4. The streams and the median share one count of who answered, so
+    the threshold is read once for both.
 
     Per stream, in the report's order (instructor, then course): the trend over
     `trend`, the `(course_week, week_id)` pairs the caller may show; this week's
@@ -2019,7 +2022,7 @@ def student_streams(
         return answered.get((week, token), 0) >= threshold
 
     held = _held_streams(session, section_id=section_id, week_id=week_id)
-    return [
+    streams = [
         StudentStream(
             # Spelled as the on-behalf read spells a stream: the stored token,
             # lower-cased. `StudentStream` refuses any other spelling.
@@ -2027,7 +2030,7 @@ def student_streams(
             trend=[
                 StudentTrendPoint(
                     course_week=course_week,
-                    mean=_mean_of(ratings.get((trend_week_id, token), {}))
+                    mean=_to_one_decimal(_mean_of(ratings.get((trend_week_id, token), {})))
                     if shown(trend_week_id, token)
                     else None,
                 )
@@ -2039,20 +2042,24 @@ def student_streams(
         )
         for token in REPORT_STREAMS
     ]
+    # The median is `None` when fewer than the threshold of distinct students
+    # answered the workload question (ruling 8): a student who knows her own hours
+    # could read a classmate's from a median of two or three. Never the mean.
+    median = None
+    if answered.get((week_id, None), 0) >= threshold:
+        _mean, median = _workload(session, section_id=section_id, week_id=week_id)
+    return streams, _to_one_decimal(median)
 
 
-def student_workload_median(session: Session, *, section_id: UUID, week_id: UUID) -> float | None:
-    """The week's workload median for its students, or `None` below the threshold (ruling 8).
+def _to_one_decimal(figure: float | None) -> float | None:
+    """A student figure to the one decimal the page shows, on the server (ADR 0197).
 
-    `None` when fewer than `n_threshold()` distinct students answered the
-    workload question that week: a student who knows her own hours could read a
-    classmate's from a median of two or three. The mean is never served (§5.4).
+    Beside whole-number shares, an exact mean such as 30/7 names how many
+    classmates rated, so no student figure leaves with more precision than the
+    page prints. Python's `round`, half to even. The instructor's figures do not
+    pass through here.
     """
-    answered = _people_who_answered(session, section_id=section_id, week_ids=[week_id])
-    if answered.get((week_id, None), 0) < n_threshold():
-        return None
-    _mean, median = _workload(session, section_id=section_id, week_id=week_id)
-    return median
+    return None if figure is None else round(figure, 1)
 
 
 def _people_who_answered(

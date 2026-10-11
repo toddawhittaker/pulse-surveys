@@ -239,6 +239,7 @@ function SectionSurvey({
   readonly onSubmitArea: (sectionId: string, offering: boolean) => void;
 }): JSX.Element {
   const survey = section.survey_is_open ? section.open_survey : null;
+  const leadWeek = useResultsLeadWeek(section.section_id, survey === null);
   return (
     <section className="pulse-survey-section" data-testid={sectionTestid(section.section_code)}>
       {/* One string, and the server composed all of it. The
@@ -256,17 +257,21 @@ function SectionSurvey({
           })}
         </p>
       )}
-      {survey === null ? <ResultsLead section={section} /> : null}
-      <p className="pulse-section-reply-link">
-        <a
-          href={resultsAddress(section.section_id)}
-          aria-label={fillResultsCopy('student_results.see_reply_link_named', {
-            course: section.course_label,
-          })}
-        >
-          {resultsCopy('student_results.see_reply_link')}
-        </a>
-      </p>
+      {leadWeek === null ? null : <ResultsLead section={section} week={leadWeek} />}
+      {/* With the lead showing, its link goes to the same page, so a second link
+          here would be two links to one place on one card. */}
+      {leadWeek === null ? (
+        <p className="pulse-section-reply-link">
+          <a
+            href={resultsAddress(section.section_id)}
+            aria-label={fillResultsCopy('student_results.see_reply_link_named', {
+              course: section.course_label,
+            })}
+          >
+            {resultsCopy('student_results.see_reply_link')}
+          </a>
+        </p>
+      ) : null}
       {survey === null ? (
         <StateNotice
           variant="flat"
@@ -290,22 +295,32 @@ function SectionSurvey({
  * §5.4). It reads the same latest-results call the results page does and keeps
  * no record of what the student has seen. A held (`awaiting`) week, a section
  * with no published week and any failed read give no lead: "results are in" over
- * a closed door would tease what the hold keeps back.
+ * a closed door would tease what the hold keeps back. The section reads this
+ * itself so that it can leave its other link to the page out when a lead shows.
  */
-function ResultsLead({ section }: { readonly section: EnrolledSection }): JSX.Element | null {
+function useResultsLeadWeek(sectionId: string, wanted: boolean): number | null {
   const [week, setWeek] = useState<number | null>(null);
   useEffect(() => {
+    if (!wanted) return;
     let live = true;
-    void readStudentResults(section.section_id).then((answer) => {
+    void readStudentResults(sectionId).then((answer) => {
       if (!live || answer.kind !== 'results' || answer.results.state === 'awaiting') return;
       setWeek(answer.results.published_weeks.at(-1) ?? null);
     });
     return () => {
       live = false;
     };
-  }, [section.section_id]);
+  }, [sectionId, wanted]);
+  return wanted ? week : null;
+}
 
-  if (week === null) return null;
+function ResultsLead({
+  section,
+  week,
+}: {
+  readonly section: EnrolledSection;
+  readonly week: number;
+}): JSX.Element {
   const values = { week: String(week) };
   return (
     <p className="pulse-section-results-lead" data-testid="pulse-results-lead">

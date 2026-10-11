@@ -44,7 +44,10 @@ to "5", and either the comments the caller read or the small-N state. The
 small-N state is `_held_streams`, the instructor report's own answer, so a
 stream below the threshold, or a week still waiting on a verdict, carries no
 comment whatever the caller passed. The workload median is
-`reporting.student_workload_median`; the mean is not served.
+from the same count of who answered in `reporting.student_streams`; the mean is
+not served. The mean and the median leave the server rounded to one decimal, the
+precision the page shows: beside whole-number shares an exact mean such as 30/7
+names how many classmates rated (E8's boundary review).
 
 **Ratings as shares, withheld when small** (the README's ruling 8, SPEC §5.4).
 The instructor's histogram counts sum to the number of classmates who rated, and
@@ -94,10 +97,13 @@ encouraged. `policy_of_record` now reads the course's rows and applies it, and
 
 - One required week nobody answers hides every batch for the rest of the term
   (the accepted cost of ruling 1).
-- The student's comment read reads `answer` for its two gates (the
-  distinct-commenter count and the whole-week moderation check); the text comes
-  from `report_comment` only. Dispute E8-01-02 asks whether done-when 4's "no
-  student read queries `answer` itself" was meant to forbid the gates.
+- The student's comment read reads `answer` in exactly two statements, both
+  gates and neither a text read: `_unmoderated_section_weeks` (the whole-week
+  moderation check, ADR 0187) and `_commenters_by_stream_week` (the
+  distinct-commenter count, ADR 0182). The text comes from `report_comment`
+  only. Dispute E8-01-02 ruled that this is what done-when 4 allows: it forbids
+  reading comment text from `answer`, not the gates, which stay inside the read
+  so it is safe for any caller.
 - The student trend point is `StudentTrendPoint`, not `TrendPoint`: two schema
   classes with one name make FastAPI name both OpenAPI components by module,
   which would rename the instructor report's `TrendPoint` under its frontend.

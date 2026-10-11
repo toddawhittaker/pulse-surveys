@@ -230,12 +230,12 @@ function Body({
   );
 }
 
-const RATING_KEYS = ['1', '2', '3', '4', '5'] as const;
+type RatingKey = '1' | '2' | '3' | '4' | '5';
 
 /** The wire's shares keyed 1 to 5, with a missing bucket read as none. */
 function sharesOf(shares: Readonly<Record<string, number>>): RatingDistribution {
-  const [one, two, three, four, five] = RATING_KEYS.map((key) => shares[key] ?? 0);
-  return { '1': one ?? 0, '2': two ?? 0, '3': three ?? 0, '4': four ?? 0, '5': five ?? 0 };
+  const share = (key: RatingKey): number => shares[key] ?? 0;
+  return { '1': share('1'), '2': share('2'), '3': share('3'), '4': share('4'), '5': share('5') };
 }
 
 /**
@@ -245,9 +245,14 @@ function sharesOf(shares: Readonly<Record<string, number>>): RatingDistribution 
  */
 function Distribution({ stream }: { readonly stream: StudentStream }): JSX.Element {
   if (stream.shares === null) {
+    const title = copy(
+      stream.stream === 'instructor'
+        ? 'student_results.ratings_held_instructor'
+        : 'student_results.ratings_held_course',
+    );
     return (
       <div className="pulse-results-held-chart">
-        <SmallNNotice audience="student" ratingsAbout={stream.stream} />
+        <SmallNNotice title={title} body={copy('student_results.ratings_held_body')} />
       </div>
     );
   }
@@ -266,12 +271,7 @@ function Week({ results }: { readonly results: StudentWeekResults }): JSX.Elemen
   const instructor = streams.find((stream) => stream.stream === 'instructor');
   const course = streams.find((stream) => stream.stream === 'course');
   const released = results.released ?? [];
-  const showsData = results.streams !== null || results.released !== null;
-  const lengthWeeks = Math.max(
-    1,
-    ...results.published_weeks,
-    ...streams.flatMap((stream) => stream.trend.map((point) => point.course_week)),
-  );
+  const lengthWeeks = Math.max(1, ...results.published_weeks);
   const points = (stream: StudentStream | undefined) =>
     (stream?.trend ?? []).map((point) => ({
       courseWeek: point.course_week,
@@ -327,9 +327,7 @@ function Week({ results }: { readonly results: StudentWeekResults }): JSX.Elemen
           </ul>
         </section>
       )}
-      {showsData ? (
-        <p className="pulse-results-confidentiality">{copy('student_results.confidentiality')}</p>
-      ) : null}
+      <p className="pulse-results-confidentiality">{copy('student_results.confidentiality')}</p>
     </>
   );
 }
@@ -359,7 +357,7 @@ function Reply({
 }
 
 /**
- * The student's own posted score and ledger, character for character, with the one
+ * The student's own posted score and ledger, line for line, with the one
  * sentence about re-checking. It is their own record and not an aggregate, so it
  * shows in every state, `awaiting` included. Before any score has been posted
  * there is nothing: no zero and no placeholder (SPEC §3.4).
@@ -374,7 +372,12 @@ function Participation({
     <section className="pulse-results-participation" aria-labelledby="pulse-participation-heading">
       <h2 id="pulse-participation-heading">{copy('student_results.participation_heading')}</h2>
       <p>{fillCopy('student_results.participation_score', { score: participation.score_text })}</p>
-      <p className="pulse-results-ledger">{participation.ledger_text}</p>
+      {/* The server joins the ledger's lines with a newline; one item per line keeps them apart. */}
+      <ul className="pulse-results-ledger">
+        {participation.ledger_text.split('\n').map((line, position) => (
+          <li key={position}>{line}</li>
+        ))}
+      </ul>
       <p>{copy('student_results.participation_note')}</p>
     </section>
   );
