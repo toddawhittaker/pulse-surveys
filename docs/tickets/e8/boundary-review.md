@@ -5,9 +5,9 @@ the reviews and where each finding went, the exit clause driven against the
 running stack, the standing questions every epic boundary re-asks, and CI on
 the exit commit.
 
-The standing questions were answered by E8-04, below. The reviews run after
-E8-04 merges, and their rows and findings are added by the change that records
-them.
+The battery ran on 1ecd5b55, the head of E8-02 (carrying E8-01 and E8-03),
+against `main` at 14bcb93d. Its findings became two fix tickets: E8-05 (#328)
+and E8-06 (#327). The standing questions were answered by E8-04, below.
 
 ## The reviews
 
@@ -16,23 +16,71 @@ context, over the epic's cumulative diff against `main`.
 
 | Review | Head reviewed | Result |
 |---|---|---|
-| `invariant-coverage` | | |
-| `adr-docs-completeness` | | |
-| `spec-conformance` | | |
-| `code-reviewer` | | |
-| `app-security` | | |
-| `privacy-authz` | | |
-| `data-model` | | |
-| `prompt-eval` | | |
-| `a11y-copy` | | |
-| `lti-oidc` | | |
-| `threat-model` | | |
+| `invariant-coverage` | 1ecd5b55 | 2 MED, 1 LOW |
+| `adr-docs-completeness` | 1ecd5b55 | 2 LOW |
+| `spec-conformance` | 1ecd5b55 | 2 LOW; every done-when of E8-01 to E8-03 met |
+| `code-reviewer` | 1ecd5b55 | 3 LOW, 4 simplifications |
+| `app-security` | 1ecd5b55 | Nothing found |
+| `privacy-authz` | 1ecd5b55 | 1 MED, and a note for the owner |
+| `data-model` | 1ecd5b55 | 2 LOW, and a note for E9 |
+| `prompt-eval` | 1ecd5b55 | Nothing found |
+| `a11y-copy` | 1ecd5b55 | 5 MED, 2 LOW |
+| `lti-oidc` | 1ecd5b55 | 1 MED, 1 LOW |
+| `threat-model` |  | not run: SPEC §14.3 does not mark E8 ⚠ |
 | `epic-exit` | | |
 
 ## The findings, and where each went
 
-Recorded with the reviews. Whatever is not fixed in a ticket pull request is
-added to `../e9/carried-from-e8.md` with an owner and a done-when.
+**Fixed in E8-05 (#328):**
+
+- MED (`privacy-authz`): the student trend's mean was an unrounded number, so
+  with the shares it gave back the rater count and the bucket counts. The mean
+  and the workload median are now rounded to one decimal on the server, with a
+  test that a seven-rater week's mean does not identify seven.
+- MED (`invariant-coverage`): the test that the participation score is the
+  reader's own row was not invariant-marked. It now sits in an invariant module.
+- MED (`invariant-coverage`): the student copy keys were not swept for SPEC
+  §4.1 item 1's comparison words in the invariant pass. They are now.
+- LOWs (`adr-docs-completeness`): ADR 0197 named a ruled dispute as open, and
+  ADR 0198 restated the spec. Both corrected.
+- LOW (`data-model`): a comment in `services/identity.py` pointed at the
+  carried file for the index measurement; it now points at ADR 0191.
+- LOW (`data-model`): the workload median re-ran the answerer count; it reuses
+  the first.
+- LOW (`code-reviewer`): `StudentParticipation` was missing from `__all__`.
+
+**Fixed in E8-06 (#327):**
+
+- MED (`lti-oidc`) and MED (`a11y-copy`): the page printed the score with no
+  unit under words saying it was what the gradebook shows, while the platform
+  scales the score to its column. The page now labels it as a percentage, and
+  ADR 0198 and the schema's descriptions are corrected.
+- The other four `a11y-copy` MEDs and both LOWs: the ledger's lines are a list;
+  the trend draws once; the percent histogram has a data table; the held
+  ratings notice names ratings in its visible title; the reply link is not
+  repeated beside the results lead; and hours are spelled out.
+- LOW (`code-reviewer`): the small-N notice no longer gives a cause, since a
+  week can be held while moderation is pending.
+- LOW (`code-reviewer`): the landing lead tests now render a second section
+  before asserting an absence.
+- LOW (`invariant-coverage`): a component test plants comparison and
+  university data and finds it absent from the text and the labels.
+- Simplifications 1 to 3 (`code-reviewer`).
+- A HIGH found by E8-06's own re-check, the histogram's table inside an element
+  marked `role=img` (so screen readers never reached it), fixed in the same
+  pull request.
+
+**Recorded, nothing owed:** `spec-conformance`'s LOW that
+`models.grades.latest_grade_sync` and the grading change were outside E8-03's
+Owns list; the pull request body says so.
+
+**Carried to E9, each with an owner and a done-when in
+`../e9/carried-from-e8.md`:** whole-number shares can still pin the rater count
+at small n (`privacy-authz`'s note for the owner); simplification 4, splitting
+the student read out of `services/response_loop.py`; the landing's full results
+read per section (`spec-conformance`); set-based staff-name reads for E9's
+leadership pages (`data-model`); and the ADR 0198 rejected-alternative line that
+overstates a failed post with no response code (`lti-oidc` LOW, left after E8-05).
 
 ## The exit clause, driven against the running stack
 

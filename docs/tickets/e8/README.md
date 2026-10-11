@@ -121,6 +121,8 @@ breakdown's pull request writes rulings 1 to 4 and 6 into SPEC §3.3, §3.4 and
 | 02 | [The results page](E8-02-the-results-page.md) | `e8/results-page` | light | 01 | The course heading, the response first, TrendDuo, the histograms, the workload median, the two comment groups, the student small-N notice, the from-earlier-weeks group and the confidentiality line; two mockups fixed; `student-results.spec.ts` made re-runnable. | #326 as MERGE_326, 2026-10-11 |
 | 03 | [Participation and next launch](E8-03-participation-and-next-launch.md) | `e8/participation-and-next-launch` | light | none | The student's own posted score and ledger with the fixed sentence (ruling 4); the landing card that leads with the newest results (ruling 3); ADR 0198. | #323 as 7d3cbe17, 2026-10-11 |
 | 04 | [E8 exit](E8-04-e8-exit.md) | `e8/e8-exit` | light | all | The full loop driven from one student's seat on a fresh stack; one drive that publishes on behalf and one that reads an unanswered week as the lead; axe scans if the package has landed; `../e9/carried-from-e8.md`; SPEC §14.3. | |
+| 05 | Boundary fixes, backend and tests (#328) | `e8/boundary-fixes` | heavy | 01–03 | The rounded mean and median, the participation invariant module, the student copy sweep, ADR 0197 and 0198 records, three LOWs. | |
+| 06 | Boundary fixes, page and accessibility (#327) | `e8/results-page-accessibility` | light | 01–03 | Every a11y-copy finding, the score as a percentage, the cause-free notice, landing tests, the comparison-plant test, simplifications 1–3, and the histogram table its re-check found. | |
 
 ## Waves
 
