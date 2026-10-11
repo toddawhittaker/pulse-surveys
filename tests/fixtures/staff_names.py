@@ -155,8 +155,20 @@ RESPONSE_INSERTED = (
     "body",
     "published_at",
 )
-POLICY_COLUMNS = ("id", "mode", "prefix_id", "role", "sequence", "set_at", "set_by_person_id")
-POLICY_INSERTED = ("prefix_id", "set_by_person_id", "role", "mode", "set_at")
+# E7-02's M2 adds `course_id` (ADR 0193: a policy row covers one course, fixed when
+# it is written), inserted by `pulse_app` like the rest.
+POLICY_COLUMNS = (
+    "course_id",
+    "id",
+    "mode",
+    "prefix_id",
+    "role",
+    "sequence",
+    "set_at",
+    "set_by_person_id",
+)
+POLICY_INSERTED = ("course_id", "prefix_id", "set_by_person_id", "role", "mode", "set_at")
+POLICY_COURSE_COLUMN = "course_id"
 RESPONSE_SECTION_COLUMN = "section_id"
 RESPONSE_TERM_COLUMN = "term_id"
 # The fix round's F1 to F3: the two `BEFORE INSERT` triggers' owner.

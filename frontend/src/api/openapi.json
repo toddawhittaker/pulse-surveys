@@ -196,6 +196,103 @@
         }
       }
     },
+    "/student/sections/{section_id}/weeks/{course_week}/results": {
+      "get": {
+        "tags": [
+          "student"
+        ],
+        "summary": "One week's results for one of my sections",
+        "description": "The week's state and the response published to it, for one of this student's sections.\n\n**This route takes a section and a week, which the survey read refuses to,\nand the check is what makes that safe.** The student's results page is one\nweek of one course, so it has to be named. The section is then looked for\namong the session's own live enrollments, never read by its key, so a\nsection the student is not in is not found, exactly as one that does not\nexist is not (`app.services.response_loop.student_week_results`).\n\n**Every refusal is one 404 with one sentence**, byte-identical: not enrolled,\nan ended enrollment, a week whose report has not opened, and a week or a\nsection that does not exist. A session with no `user`, or a `user_id` claim\nthat is not a uuid, is answered the same way, as the submission route does,\nso this route says nothing about which door a session came through.\n\n`Cache-Control: no-store`, as the survey read: the answer is about this\nreader, and an edit changes it.",
+        "operationId": "student_week_results_read_student_sections__section_id__weeks__course_week__results_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentWeekResults"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/student/sections/{section_id}/results": {
+      "get": {
+        "tags": [
+          "student"
+        ],
+        "summary": "The latest published week's results for one of my sections",
+        "description": "The week route's answer for the section's latest published week, where the page opens.\n\nThe same read and the same single 404, which a section with no published week\ngets too.",
+        "operationId": "student_latest_results_read_student_sections__section_id__results_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentWeekResults"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/instructor/sections/{section_id}/report/{course_week}": {
       "get": {
         "tags": [
@@ -1609,6 +1706,16 @@
         "title": "ResponseDraftView",
         "description": "What the response draft answers: the draft text the model wrote, once it has passed.\n\nThe text and nothing else. The prompt version and model id the contract\ncarries stay on the server: nothing on the page acts on them, and the draft is\nnever stored (SPEC \u00a75.3: advisory, never auto-posted)."
       },
+      "ResponseRole": {
+        "type": "string",
+        "enum": [
+          "INSTRUCTOR",
+          "LEAD_FACULTY",
+          "CHAIR"
+        ],
+        "title": "ResponseRole",
+        "description": "The role a response was written under; the value is the stored token.\n\n`LEAD_FACULTY` and `CHAIR` are the on-behalf roles: SPEC \u00a75.3 has the lead\nrespond for the instructor, and ruling 5 has the chair act as lead for a\ncourse with no lead."
+      },
       "ReviewQueue": {
         "properties": {
           "items": {
@@ -1967,6 +2074,40 @@
         "title": "StreamsView",
         "description": "The two groups \u00a75.1 heads separately, never pooled into one."
       },
+      "StudentResponse": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "The response as it now reads."
+          },
+          "author_name": {
+            "type": "string",
+            "title": "Author Name",
+            "description": "The name of the person who wrote it."
+          },
+          "author_role": {
+            "$ref": "#/components/schemas/ResponseRole",
+            "description": "The role it was written under. LEAD_FACULTY or CHAIR means it was written on the instructor's behalf."
+          },
+          "published_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Published At",
+            "description": "When the text now shown was published."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "author_name",
+          "author_role",
+          "published_at"
+        ],
+        "title": "StudentResponse",
+        "description": "The response a student reads for one week, and who wrote it (SPEC \u00a75.3).\n\nThe text and the time are the latest row's: an edit is a new row, and the\nlatest row is what students read (ruling 3). The author and the role are the\nfirst row's, which is the same person, since only the person who first\npublished a week's response may edit it."
+      },
       "StudentSurveyView": {
         "properties": {
           "sections": {
@@ -1991,6 +2132,49 @@
         ],
         "title": "StudentSurveyView",
         "description": "Everything a student's weekly survey form needs, in one answer.\n\nA list rather than a single section, because a student may be enrolled in\nseveral and the form asks about all of them at once. An empty list is an\nordinary answer: somebody between terms is enrolled in nothing today and is\ntold so, rather than refused.\n\n**`institution_timezone` is deployment configuration, not person data**\n(FIX-01 item 4). SPEC \u00a73.1 puts every window at a wall-clock time in the\ninstitution's zone, and the screen renders the next opening with an\nabbreviation derived from the date; a browser handed an instant and no zone\nrenders it in the reader's own, so a student travelling \u2014 or one whose\nlaptop is set to UTC \u2014 would be told an hour nobody's institution keeps. It\nis the same string for every reader of the deployment and says nothing about\nany of them."
+      },
+      "StudentWeekResults": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "awaiting",
+              "published",
+              "on-behalf",
+              "unanswered"
+            ],
+            "title": "State",
+            "description": "Whether the week is held, answered, or neither."
+          },
+          "response": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudentResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The published response; absent while awaiting and when unanswered."
+          },
+          "published_weeks": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Published Weeks",
+            "description": "The section's course weeks whose report has opened, ascending: the weeks the page may page through."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "response",
+          "published_weeks"
+        ],
+        "title": "StudentWeekResults",
+        "description": "One week's state for one of the student's own sections, its response if any, and the\ncourse weeks a student may page through (SPEC \u00a75.4: published weeks only)."
       },
       "SubmissionAccepted": {
         "properties": {

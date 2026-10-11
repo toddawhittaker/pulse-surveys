@@ -135,6 +135,54 @@ def plant(database: Any, tables: dict[str, Any], name: str) -> None:
         seed_row(session, tables, name, chain, **values)
 
 
+def a_lead_in_a_fresh_prefix(session: Any, tables: dict[str, Any]) -> tuple[Any, Any]:
+    """A section's whole chain and a person who leads its course; (the prefix key, the lead's key)."""
+    from fixtures.supervision import SupervisionGraph
+
+    chain: dict[str, Any] = {}
+    seed_row(session, tables, SECTION_TABLE, chain)
+    lead = seed_row(session, tables, PERSON_TABLE, {})["id"]
+    graph = SupervisionGraph(session, tables)
+    graph.assign("LEAD_FACULTY", scope=chain["course"]["id"], person=lead)
+    graph.lead_mapping(person=lead, course=chain["course"]["id"])
+    return chain[PREFIX_TABLE]["id"], lead
+
+
+# M1's own `response_policy` columns, written out: `Base.metadata` describes head,
+# where E7-02's M2 has added `course_id`, so a row planted at M1 is written in SQL
+# naming exactly the columns M1 created (ADR 0192).
+POLICY_ROW_AT_M1 = (
+    "INSERT INTO public.response_policy (prefix_id, set_by_person_id, role, mode, set_at) "
+    "VALUES (CAST(:prefix AS uuid), CAST(:setter AS uuid), 'LEAD_FACULTY', 'REQUIRED', now())"
+)
+
+
+def write_a_policy_row_at_m1(database: Any, *, prefix: Any, setter: Any) -> BaseException | None:
+    """One M1-shaped policy row, committed on its own session; the error it raised, or `None`."""
+    from sqlalchemy.exc import DatabaseError
+
+    try:
+        with session_on(database) as session:
+            session.execute(text(POLICY_ROW_AT_M1), {"prefix": str(prefix), "setter": str(setter)})
+    except DatabaseError as failure:
+        return failure
+    return None
+
+
+def plant_a_policy_row_at_m1(database: Any, tables: dict[str, Any]) -> None:
+    """One policy row in a database standing at M1, written by the course's lead.
+
+    For E7-02's fix round (H1): M2's downgrade refuses while `response_policy`
+    holds a row, so a policy row planted at head is refused by M2 and never
+    reaches M1's own check. The row is planted *after* stepping down to M1, so the
+    refusal measured is M1's.
+    """
+    with session_on(database) as session:
+        prefix, lead = a_lead_in_a_fresh_prefix(session, tables)
+    failure = write_a_policy_row_at_m1(database, prefix=prefix, setter=lead)
+    assert failure is None, f"The lead's policy row at M1 was refused: {failure!r}. A broken world."
+
+
 @pytest.mark.parametrize(
     ("planted", "other"),
     [(INSTRUCTOR_RESPONSE, RESPONSE_POLICY), (RESPONSE_POLICY, INSTRUCTOR_RESPONSE)],
@@ -148,6 +196,14 @@ def test_the_m1_downgrade_refuses_while_one_record_holds_a_row(
 ) -> None:
     """One row in `planted`, none in `other`: `RuntimeError`, and the row is still there.
 
+    **E7-02's fix round (H1) moves where the policy row is planted.** M2 sits on
+    top of M1 and its downgrade refuses while `response_policy` holds a row, so a
+    policy row planted at head would be refused by M2 — a `RuntimeError` with the
+    row intact, green for a reason that is not M1's (`docs/MISTAKES.md` entry 3).
+    So the database steps down to M1 over an empty policy table first, and the
+    policy row is planted there. The response row is still planted at head: M2's
+    downgrade counts no response, so it steps through to M1's check.
+
     **The mutation this kills:** a downgrade that drops both tables over their
     rows, and a guard that counts only `other` (which this row does not trip).
     """
@@ -155,7 +211,11 @@ def test_the_m1_downgrade_refuses_while_one_record_holds_a_row(
     config = alembic_config_pointed_at(empty_database)
     m1 = the_m1_revision(config)
     migrate(config, "upgrade", MODEL_SCHEMA, "putting an empty database into the models' shape")
-    plant(empty_database, metadata_tables, planted)
+    if planted == RESPONSE_POLICY:
+        migrate(config, "downgrade", m1, "stepping below M2 over an empty policy table")
+        plant_a_policy_row_at_m1(empty_database, metadata_tables)
+    else:
+        plant(empty_database, metadata_tables, planted)
     assert count(empty_database, planted) == 1, f"The planted `{planted}` row is not there."
     assert count(empty_database, other) == 0, f"`{other}` holds a row this test did not plant."
 

@@ -329,6 +329,65 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/student/sections/{section_id}/weeks/{course_week}/results": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One week's results for one of my sections
+         * @description The week's state and the response published to it, for one of this student's sections.
+         *
+         *     **This route takes a section and a week, which the survey read refuses to,
+         *     and the check is what makes that safe.** The student's results page is one
+         *     week of one course, so it has to be named. The section is then looked for
+         *     among the session's own live enrollments, never read by its key, so a
+         *     section the student is not in is not found, exactly as one that does not
+         *     exist is not (`app.services.response_loop.student_week_results`).
+         *
+         *     **Every refusal is one 404 with one sentence**, byte-identical: not enrolled,
+         *     an ended enrollment, a week whose report has not opened, and a week or a
+         *     section that does not exist. A session with no `user`, or a `user_id` claim
+         *     that is not a uuid, is answered the same way, as the submission route does,
+         *     so this route says nothing about which door a session came through.
+         *
+         *     `Cache-Control: no-store`, as the survey read: the answer is about this
+         *     reader, and an edit changes it.
+         */
+        readonly get: operations["student_week_results_read_student_sections__section_id__weeks__course_week__results_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/student/sections/{section_id}/results": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The latest published week's results for one of my sections
+         * @description The week route's answer for the section's latest published week, where the page opens.
+         *
+         *     The same read and the same single 404, which a section with no published week
+         *     gets too.
+         */
+        readonly get: operations["student_latest_results_read_student_sections__section_id__results_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/instructor/sections/{section_id}/report/{course_week}": {
         readonly parameters: {
             readonly query?: never;
@@ -1310,6 +1369,16 @@ export interface components {
             readonly text: string;
         };
         /**
+         * ResponseRole
+         * @description The role a response was written under; the value is the stored token.
+         *
+         *     `LEAD_FACULTY` and `CHAIR` are the on-behalf roles: SPEC §5.3 has the lead
+         *     respond for the instructor, and ruling 5 has the chair act as lead for a
+         *     course with no lead.
+         * @enum {string}
+         */
+        readonly ResponseRole: "INSTRUCTOR" | "LEAD_FACULTY" | "CHAIR";
+        /**
          * ReviewQueue
          * @description The reader's review queue, in an order drawn for this request.
          */
@@ -1518,6 +1587,35 @@ export interface components {
             readonly course: components["schemas"]["StreamReport"];
         };
         /**
+         * StudentResponse
+         * @description The response a student reads for one week, and who wrote it (SPEC §5.3).
+         *
+         *     The text and the time are the latest row's: an edit is a new row, and the
+         *     latest row is what students read (ruling 3). The author and the role are the
+         *     first row's, which is the same person, since only the person who first
+         *     published a week's response may edit it.
+         */
+        readonly StudentResponse: {
+            /**
+             * Text
+             * @description The response as it now reads.
+             */
+            readonly text: string;
+            /**
+             * Author Name
+             * @description The name of the person who wrote it.
+             */
+            readonly author_name: string;
+            /** @description The role it was written under. LEAD_FACULTY or CHAIR means it was written on the instructor's behalf. */
+            readonly author_role: components["schemas"]["ResponseRole"];
+            /**
+             * Published At
+             * Format: date-time
+             * @description When the text now shown was published.
+             */
+            readonly published_at: string;
+        };
+        /**
          * StudentSurveyView
          * @description Everything a student's weekly survey form needs, in one answer.
          *
@@ -1546,6 +1644,26 @@ export interface components {
              * @description The IANA zone this deployment's survey windows are written in (SPEC §8).
              */
             readonly institution_timezone: string;
+        };
+        /**
+         * StudentWeekResults
+         * @description One week's state for one of the student's own sections, its response if any, and the
+         *     course weeks a student may page through (SPEC §5.4: published weeks only).
+         */
+        readonly StudentWeekResults: {
+            /**
+             * State
+             * @description Whether the week is held, answered, or neither.
+             * @enum {string}
+             */
+            readonly state: "awaiting" | "published" | "on-behalf" | "unanswered";
+            /** @description The published response; absent while awaiting and when unanswered. */
+            readonly response: components["schemas"]["StudentResponse"] | null;
+            /**
+             * Published Weeks
+             * @description The section's course weeks whose report has opened, ascending: the weeks the page may page through.
+             */
+            readonly published_weeks: readonly number[];
         };
         /**
          * SubmissionAccepted
@@ -2038,6 +2156,69 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["SubmissionAccepted"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly student_week_results_read_student_sections__section_id__weeks__course_week__results_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StudentWeekResults"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly student_latest_results_read_student_sections__section_id__results_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StudentWeekResults"];
                 };
             };
             /** @description Validation Error */

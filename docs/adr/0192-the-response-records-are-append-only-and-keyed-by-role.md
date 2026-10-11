@@ -1,6 +1,6 @@
 # 0192 — The response loop's two records are append-only, keyed by role, and are their own audit
 
-**Status:** Accepted
+**Status:** Accepted. Superseded in part by [ADR 0193](0193-the-hold-reads-a-per-course-policy-row-fixed-at-report-open.md): a policy row now covers one course, and its index is `(course_id, sequence)`.
 **Date:** 2026-10-11
 **Ticket:** [E7-01](../tickets/e7/E7-01-response-records-and-name-channel.md)
 

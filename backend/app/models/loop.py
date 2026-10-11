@@ -158,29 +158,40 @@ class InstructorResponse(UuidPrimaryKey, Base):
 
 
 class ResponsePolicy(UuidPrimaryKey, Base):
-    """One change to a prefix's response policy, appended (SPEC §5.3, ADR 0192).
+    """One change to the response policy for one course, appended (SPEC §5.3, ADR 0192, ADR 0193).
 
-    Keyed by prefix and by the person responsible (ruling 1), and by the role
-    they set it under: a lead's row covers the courses in the prefix that
-    `authz.lead_review_courses` gives them as `LEAD_FACULTY`, and a chair's row
-    the ones it gives them as `CHAIR`. The latest row for a (prefix, person,
-    role) is the policy in force.
+    **A row covers one course, fixed when it is written** (E7-02's M2, ADR 0193).
+    Lead mappings keep no history, so "who was responsible for this course when
+    the week's report opened" cannot be asked afterwards; the row names the course
+    instead. A setter's switch for a prefix (ruling 1) is written as one row per
+    course `authz.lead_review_courses` gives them there under the role they set it
+    as (`services.response_loop.record_policy`), and the policy of record for a
+    section-week is the latest row by `sequence` for the section's course recorded
+    by the week's report opening (`services.response_loop.policy_of_record`).
+
+    The row still names the prefix, the person and the role it was set under,
+    because that is what the setter did; the composite key holds the course
+    inside that prefix, and the guard trigger holds the setter to that course.
     """
 
     __tablename__ = "response_policy"
     __table_args__ = (
         CheckConstraint(_in_the_vocabulary("role", POLICY_ROLES), name="role_is_a_policy_role"),
         CheckConstraint(_in_the_vocabulary("mode", POLICY_MODES), name="mode_is_a_policy_mode"),
-        # The one read the policy is made for: the latest row for a prefix, person
-        # and role.
-        Index(
-            "ix_response_policy_prefix_id_set_by_person_id_role_sequence",
-            "prefix_id",
-            "set_by_person_id",
-            "role",
-            "sequence",
+        # The course is in the row's prefix: a composite key, as `instructor_response`
+        # holds its week in its section's term.
+        ForeignKeyConstraint(
+            ["course_id", "prefix_id"],
+            ["course.id", "course.prefix_id"],
+            ondelete="RESTRICT",
         ),
+        # The one read the policy is made for: the latest row for a course.
+        Index("ix_response_policy_course_id_sequence", "course_id", "sequence"),
     )
+
+    # The course this row covers (M2). `NOT NULL`: a row covering no course is a
+    # switch the hold never finds.
+    course_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
 
     prefix_id: Mapped[UUID] = mapped_column(
         ForeignKey("prefix.id", ondelete="RESTRICT"), nullable=False

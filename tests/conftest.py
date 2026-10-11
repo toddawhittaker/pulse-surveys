@@ -293,6 +293,7 @@ pytest_plugins = (
     "fixtures.instructor_decisions",
     "fixtures.lead_review",
     "fixtures.staff_names",
+    "fixtures.the_hold",
     "fixtures.response_draft",
 )
 

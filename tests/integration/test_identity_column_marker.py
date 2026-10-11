@@ -3096,9 +3096,24 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "design (SPEC §5.3), through the staff-name definer rather than through this row. No "
         "student is reachable from it.",
     ),
+    # **E7-02's M2 adds `course_id`, and this is the re-reading.** ADR 0193: a
+    # policy row covers one course, fixed when it is written, because lead
+    # mappings keep no history and "who is responsible" cannot be asked about a
+    # past moment. A course is org structure the LMS owns and names nobody, the
+    # argument `comparison_set_member` makes about its own `course_id`.
     "response_policy": CarriesNothing(
-        ("id", "mode", "prefix_id", "role", "sequence", "set_at", "set_by_person_id"),
-        "One policy change, append-only (E7-01, ruling 7: the table is the record): the prefix, "
+        (
+            "course_id",
+            "id",
+            "mode",
+            "prefix_id",
+            "role",
+            "sequence",
+            "set_at",
+            "set_by_person_id",
+        ),
+        "One policy change for one course, append-only (E7-01, ruling 7: the table is the record; "
+        "E7-02, ADR 0193: the course it covers, fixed when written): the course and its prefix, "
         "the person who set it as a key and the role they set it under, the mode, when, and the "
         "database's insertion order. Nothing about the setter beyond the key, the argument "
         "`moderation_state`'s decider makes, and no student at all.",
