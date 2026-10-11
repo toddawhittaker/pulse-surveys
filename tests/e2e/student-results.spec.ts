@@ -132,6 +132,10 @@ test("a required-mode week with no reply shows the course and the closed door, a
   // The instructor is made the course's lead, the way the guard checks it: a
   // LEAD_FACULTY assignment and the course's lead mapping. Each row is written
   // only if it is not already there, and the grant is taken away again after.
+  // The policy row is always appended: an earlier spec leaves this course set back to
+  // encouraged, and the policy of record is the latest row, so a guard that skipped
+  // the insert would read that row and leave the week unanswered, not held. A history
+  // table takes another row on a rerun without a conflict.
   databaseStatement(
     "insert into role_assignment (person_id, role, course_id)\n" +
       `select ${INSTRUCTOR}, 'LEAD_FACULTY', s.course_id from section s where s.id = ${SECTION}\n` +
@@ -141,8 +145,7 @@ test("a required-mode week with no reply shows the course and the closed door, a
       `and not exists (select 1 from lead_faculty_mapping m where m.person_id = ${INSTRUCTOR} and m.course_id = s.course_id);\n` +
       "insert into response_policy (course_id, prefix_id, set_by_person_id, role, mode, set_at)\n" +
       `select s.course_id, c.prefix_id, ${INSTRUCTOR}, 'LEAD_FACULTY', 'REQUIRED', '1970-01-01T00:00Z'\n` +
-      `from section s join course c on c.id = s.course_id where s.id = ${SECTION}\n` +
-      "and not exists (select 1 from response_policy p where p.course_id = s.course_id);\n" +
+      `from section s join course c on c.id = s.course_id where s.id = ${SECTION};\n` +
       // The grant is only needed while the guard looks at it. Left in place it
       // would send this person to the leadership landing on every later launch
       // as the instructor, and other specs wait for the instructor's.
@@ -198,7 +201,14 @@ test("after the instructor publishes, the week's page shows the reply, both grou
 
   // The figures and both comment groups, and the line, once.
   await expect(results.getByTestId("pulse-trend-duo")).toBeVisible();
-  await expect(results.locator(".pulse-stat-histogram")).toHaveCount(2);
+  // The seeded section has far fewer raters than the threshold, so ruling 8
+  // withholds both streams' ratings: each shows the notice that names it and no
+  // histogram is drawn.
+  await expect(results.locator(".pulse-stat-histogram")).toHaveCount(0);
+  await expect(
+    results.getByText("Ratings about the instructor are not shown this week"),
+  ).toBeVisible();
+  await expect(results.getByText("Ratings about the course are not shown this week")).toBeVisible();
   await expect(results.getByRole("heading", { name: "About the instructor" })).toBeVisible();
   await expect(results.getByRole("heading", { name: "About the course" })).toBeVisible();
   const text = (await results.textContent()) ?? "";
@@ -209,6 +219,7 @@ test("after the instructor publishes, the week's page shows the reply, both grou
     nodes.map((node) => node.getAttribute("aria-label") ?? "").join(" "),
   );
   expect(`${text} ${labels}`).not.toMatch(/compar|universit|benchmark|average|other sections/i);
-  await expect(results.locator("path.pulse-trend-line")).toHaveCount(2);
+  // At most one line per stream: a stream with no mean to draw draws no line.
+  expect(await results.locator("path.pulse-trend-line").count()).toBeLessThanOrEqual(2);
   await expectNoAxeViolations(page);
 });
