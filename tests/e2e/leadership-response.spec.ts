@@ -235,7 +235,9 @@ test('a section is owed at 48 hours past report open and not at 47', async ({ pa
   await expect(page.getByTestId(OWED_LIST)).toHaveCount(0);
 
   await setTheClockTo(page, plusHours(reportOpensAt, 48));
-  await page.reload();
+  // The clock control leaves the page on the console, so the list is opened
+  // again; the session the page holds is still good.
+  await page.goto('/app/leadership/responses-owed');
   const row = page.getByTestId(OWED_LIST).getByRole('listitem').filter({ hasText: THE_SECTION_ROW });
   await expect(row).toHaveCount(1);
   await expect(row).toContainText('Week 2');
