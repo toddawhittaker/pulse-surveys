@@ -13,8 +13,8 @@ the same world and the same comment and is what keeps the refusals honest.
 **Three refused subjects, each a different layer:**
 
   - the teaching instructor's **own launched session** — refused at the door by
-    `require_leadership`, which the body pins: the `NOT_LEADERSHIP` sentence and
-    the `WWW-Authenticate: Bearer` challenge E5-06 put on that dependency;
+    `require_leadership`, which the body pins: since E7-08, the 403 and the
+    gate's not-your-role sentence (ruling 11 of `docs/tickets/e7/README.md`);
   - a **leadership-role session minted for that same instructor**, who holds no
     leadership grant — past the door, refused by the own-grant scope (work order
     decision 3);
@@ -48,16 +48,14 @@ from fixtures.lead_review import (
     is_a_client_refusal,
     is_success,
 )
+from fixtures.leadership_gate import not_your_role_sentence
 from fixtures.moderation import HARMFUL
-from fixtures.named_sets import NOT_LEADERSHIP, detail_of, refusal_sentence
 from fixtures.report_api import FIRST_HELD_WEEK, TAUGHT_COHORT
 from fixtures.report_views import COURSE_STREAM
-from fixtures.student_read import AUTHENTICATE_HEADER
 
 pytestmark = pytest.mark.integration
 
 ROUTES = ("queue", "log", "decision")
-ROLE_REFUSED = 401
 
 QUEUED_TEXT = "E6-05 the held harmful comment every refused reader is asked about"
 
@@ -109,17 +107,25 @@ def test_a_lead_holding_a_grant_is_answered_by_every_route(
 def test_the_instructors_own_session_is_refused_at_the_door_by_every_route(
     route: str, lead_review: LeadReviewWorld
 ) -> None:
-    """Criterion 5 through the instructor's launched session: 401, `NOT_LEADERSHIP`, no row.
+    """Criterion 5 through the instructor's launched session: the gate's 403, its sentence, no row.
 
     The instructor teaches the very section the queued comment is in, which is
     the strongest subject for the refusal: their own report holds the section.
 
-    **The body pins the layer**, as the named-set module's refusals do: a 401 is
-    answered by several things in this stack, and `NOT_LEADERSHIP` belongs to the
-    dependency alone. **The mutations this kill:** a route carrying
-    `require_instructor` or no role dependency at all; a POST wired to
-    `csrf_verified_instructor` (the instructor's Bearer session is admitted and a
-    row is written). **The control** is the admitted test beside this one.
+    **Amended by E7-08 (ruling 11).** This session is real, verified and live, in
+    another role, so `require_leadership` answers it **403** with the gate's
+    not-your-role sentence; it was a 401 carrying `NOT_LEADERSHIP` until then,
+    and that pair now belongs to absent, malformed, expired and forged tokens
+    (`test_the_leadership_gate_tells_another_role_from_an_ended_session.py`).
+
+    **The body pins the layer**, as the named-set module's refusals do: a 403 is
+    answered by several things in this stack (the CSRF check, the queue's own
+    refusal of a dean), and the not-your-role sentence belongs to the dependency
+    alone (`fixtures/leadership_gate.py::not_your_role_sentence`). **The
+    mutations this kills:** a route carrying `require_instructor` or no role
+    dependency at all; a POST wired to `csrf_verified_instructor` (the
+    instructor's Bearer session is admitted and a row is written). **The
+    control** is the admitted test beside this one.
     """
     review = lead_review
     comment = a_queued_comment(review)
@@ -127,18 +133,7 @@ def test_the_instructors_own_session_is_refused_at_the_door_by_every_route(
 
     answered = ask(review, route, review.instructor_token, comment)
 
-    assert answered.status_code == ROLE_REFUSED, (
-        f"The {route} route answered {answered.status_code} to the teaching instructor's own "
-        f"session; `require_leadership` refuses it with {ROLE_REFUSED}. Body begins "
-        f"{answered.text[:400]!r}."
-    )
-    assert detail_of(answered) == refusal_sentence(NOT_LEADERSHIP), (
-        f"The {route} route refused the instructor's session with {detail_of(answered)!r} rather "
-        "than the `NOT_LEADERSHIP` sentence, so the refusal did not come from the leadership gate."
-    )
-    assert answered.headers.get(
-        AUTHENTICATE_HEADER
-    ), f"The {route} route's refusal carries no `{AUTHENTICATE_HEADER}` challenge."
+    not_your_role_sentence(answered, f"The {route} route, asked by the teaching instructor")
     assert review.rows_of(comment) == before, f"The refused {route} request wrote a row."
 
 

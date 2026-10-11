@@ -30,9 +30,12 @@ reaches for.
 **A refusal pins the layer through the body, not the status.** 401 is a status
 several things in this stack answer with; `NOT_LEADERSHIP` is a sentence exactly
 one of them holds, and the work order puts it on the dependency. So each
-refusal asserts the sentence and the `WWW-Authenticate: Bearer` challenge
-together — which is what says the gate ran in `app.api.deps` rather than
-somewhere inside a handler that had already read a set.
+refusal of the call with no session asserts the sentence and the
+`WWW-Authenticate: Bearer` challenge together — which is what says the gate ran
+in `app.api.deps` rather than somewhere inside a handler that had already read a
+set. **Since E7-08** a real session in another role gets the gate's 403 and its
+own not-your-role sentence instead (ruling 11), pinned the same way through
+`fixtures/leadership_gate.py`.
 
 **Why the refused sessions are minted.** Three of the four are tokens no launch
 in this suite can issue for this world: a second launch would build a second
@@ -54,6 +57,7 @@ never errors in setup (`docs/MISTAKES.md` entry 44).
 from typing import Any
 
 import pytest
+from fixtures.leadership_gate import not_your_role_sentence
 from fixtures.named_sets import NamedSetDoor
 
 pytestmark = pytest.mark.integration
@@ -74,8 +78,12 @@ ROUTES = tuple(ADMITTED_STATUS)
 
 # The four sessions that are not a leadership session. `none` is criterion 1's
 # unauthenticated call — no header and an emptied cookie jar — and the other
-# three are minted.
-REFUSED_SESSIONS = ("none", "student", "instructor", "two-hat instructor")
+# three are minted. Since E7-08 (ruling 11) they are refused two ways: the call
+# with no session gets the 401, and the three real sessions in another role get
+# the gate's 403.
+SIGNED_OUT_SESSIONS = ("none",)
+ANOTHER_ROLE_SESSIONS = ("student", "instructor", "two-hat instructor")
+REFUSED_SESSIONS = SIGNED_OUT_SESSIONS + ANOTHER_ROLE_SESSIONS
 
 
 def ask(door: NamedSetDoor, route: str, *, token: Any, set_id: Any = None) -> Any:
@@ -256,15 +264,46 @@ def test_a_leadership_session_is_answered_by_every_named_set_route(
 # why the marker is per test rather than module-wide.
 @pytest.mark.invariant
 @pytest.mark.parametrize("route", ROUTES, ids=ROUTES)
-@pytest.mark.parametrize("session", REFUSED_SESSIONS, ids=REFUSED_SESSIONS)
-def test_a_session_that_is_not_leadership_is_refused_by_every_named_set_route(
+@pytest.mark.parametrize("session", ANOTHER_ROLE_SESSIONS, ids=ANOTHER_ROLE_SESSIONS)
+def test_a_session_in_another_role_gets_the_gates_403_from_every_named_set_route(
+    named_sets: NamedSetDoor, route: str, session: str
+) -> None:
+    """The refused half of criterion 1 for a signed-in reader in another role, layer pinned.
+
+    Three sessions: a student, an instructor, and the two-hat person's
+    instructor session — the last being criterion 2's trap, where the person
+    *is* a leader and the session is not.
+
+    **Amended by E7-08 (ruling 11 of `docs/tickets/e7/README.md`).** Each of
+    these is a real, verified session in another role, so the gate answers it
+    **403** with its not-your-role sentence rather than E5-06's 401; the 401 and
+    `NOT_LEADERSHIP` stay with the call that carries no session (the test below)
+    and with expired and forged tokens
+    (`test_the_leadership_gate_tells_another_role_from_an_ended_session.py`).
+
+    **The body is what pins the layer.** A 403 is also what the named-set scope
+    read answers (`NOT_THE_SETS_DEFINER`), and the gate's sentence is the one
+    that belongs to the dependency alone (`fixtures/leadership_gate.py`).
+
+    **The mutations it kills:** a role gate written as "not a student", which
+    admits the instructor sessions; a gate keyed on the person's *assignments*
+    rather than on the session's role, which admits the two-hat person's
+    instructor session and is the exact defect the trap exists to catch; a
+    dependency declared on some routes and not others; and the gate left
+    answering 401, which the page reads as an ended session.
+    """
+    answered = ask(named_sets, route, token=token_for(named_sets, session))
+
+    not_your_role_sentence(answered, f"The `{route}` route, asked by the {session} session")
+
+
+@pytest.mark.invariant
+@pytest.mark.parametrize("route", ROUTES, ids=ROUTES)
+@pytest.mark.parametrize("session", SIGNED_OUT_SESSIONS, ids=SIGNED_OUT_SESSIONS)
+def test_a_call_with_no_session_is_refused_by_every_named_set_route(
     named_sets: NamedSetDoor, named_set_contract: Any, route: str, session: str
 ) -> None:
-    """The refused half of criterion 1, per route and per session, with the layer pinned.
-
-    Four sessions: none at all, a student, an instructor, and the two-hat
-    person's instructor session — the last being criterion 2's trap, where the
-    person *is* a leader and the session is not.
+    """The refused half of criterion 1 for the unauthenticated call, with the layer pinned.
 
     **The body is what pins the layer.** A 401 is answered by several things in
     this stack; `NOT_LEADERSHIP` is the one sentence the work order puts on the
@@ -273,16 +312,10 @@ def test_a_session_that_is_not_leadership_is_refused_by_every_named_set_route(
     satisfied by a route that refused for a reason nobody chose
     (`docs/MISTAKES.md` entry 3, and the ticket's second known trap).
 
-    **The mutations it kills:** a role gate written as "not a student", which
-    admits the instructor sessions; a gate keyed on the person's *assignments*
-    rather than on the session's role, which admits the two-hat person's
-    instructor session and is the exact defect the trap exists to catch; a
-    dependency declared on some routes and not others; and a 403 in place of the
-    401 + Bearer challenge, which tells a client it is authenticated when it is
-    not.
-
-    **Expected red before E5-06 lands:** a FAILED naming the copy constant
-    `NOT_LEADERSHIP`, which no module under `app.copy` declares yet.
+    **The mutations it kills:** a dependency declared on some routes and not
+    others; and a 403 in place of the 401 + Bearer challenge, which tells a
+    client with no session that it is authenticated — the one case E7-08's 403
+    must never reach.
     """
     expected = named_set_contract.sentence(named_set_contract.not_leadership)
 
@@ -352,20 +385,13 @@ def test_the_two_hat_persons_leadership_session_is_admitted_where_her_instructor
     target = world.the_two_hats.set_id if route in SCOPED_BY_CREATOR else None
 
     if route in SCOPED_BY_CREATOR:
+        # Since E7-08 the role gate answers her instructor session 403 with its
+        # own sentence; `not_your_role_sentence` refuses `NOT_THE_SETS_DEFINER`,
+        # so a 403 from the scope read here — the scope read running before the
+        # role gate, the ordering the dependency chain exists to fix — is red.
         refused = ask(named_sets, route, token=instructor, set_id=target)
-        assert refused.status_code == named_set_contract.role_refused, (
-            f"The `{route}` route answered {refused.status_code} to the **instructor** session of "
-            f"the person who defined this set; it is refused with "
-            f"{named_set_contract.role_refused} whoever holds it, because the session names a role "
-            f"this surface does not serve. Body begins {refused.text[:400]!r}."
-        )
-        assert named_set_contract.detail_of(refused) == named_set_contract.sentence(
-            named_set_contract.not_leadership
-        ), (
-            f"Her instructor session was refused the `{route}` of her own set with "
-            f"{named_set_contract.detail_of(refused)!r} rather than with the `NOT_LEADERSHIP` "
-            "sentence. A 403 carrying the definer sentence here would mean the scope read ran "
-            "before the role gate, which is the ordering the whole dependency chain exists to fix."
+        not_your_role_sentence(
+            refused, f"The `{route}` of her own set, asked by her **instructor** session"
         )
 
     answered = ask(named_sets, route, token=leadership, set_id=target)

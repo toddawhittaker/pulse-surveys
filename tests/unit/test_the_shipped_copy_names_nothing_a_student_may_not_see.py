@@ -63,8 +63,10 @@ string.
 
 **The exemption is by key and not by surface**, because the same surface has a
 refusal a student can be served, `leadership_comparison_sets.not_leadership`,
-which `app.api.deps.require_leadership` answers to any session that is not a
-leadership session — a student's included. That key stays inside the sweep, and a control
+which `app.api.deps.require_leadership` answers to any call carrying no live
+session — a student's expired one included (since E7-08, a live session in another
+role gets the gate's 403 sentence, which is served to students and is swept too).
+That key stays inside the sweep, and a control
 next door asserts it is published and not exempt. A leadership-only refusal that
 later becomes reachable by a student leaves the tuple in the same change.
 

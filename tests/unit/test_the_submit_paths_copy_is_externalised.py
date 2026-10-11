@@ -188,9 +188,11 @@ LEADERSHIP_ONLY_REFUSAL_KEYS = (
 )
 
 # The refusal of that surface a student can actually be served, which is *not*
-# exempt: `require_leadership` answers it to any session that is not a leadership
-# session, a student's included, so §4.1 item 1 governs it exactly as it governs
-# a bounce.
+# exempt: `require_leadership` answers it to any call that carries no live
+# session — absent, malformed, expired or forged, a student's stale tab included
+# — so §4.1 item 1 governs it exactly as it governs a bounce. (Since E7-08 a live
+# session in another role is answered the gate's 403 sentence instead, which is
+# served to students too and is likewise not exempt.)
 NOT_LEADERSHIP_KEY = f"{LEADERSHIP_SETS_PREFIX}not_leadership"
 
 # A student-facing prefix and a sentence of this module's own, for the reader's
@@ -691,8 +693,8 @@ def test_every_exempt_key_is_a_key_the_registry_publishes() -> None:
 def test_the_not_leadership_refusal_is_published_and_is_not_exempt() -> None:
     """The one refusal of that surface a student can be served stays inside the sweep.
 
-    `app.api.deps.require_leadership` answers this sentence to any session that is
-    not a leadership session, a student's included, which is why
+    `app.api.deps.require_leadership` answers this sentence to any call carrying
+    no live session, a student's expired one included, which is why
     `docs/disputes/E5-13-01.md` exempted some of that surface's refusals and not
     all eight.
 
@@ -705,9 +707,9 @@ def test_the_not_leadership_refusal_is_published_and_is_not_exempt() -> None:
     unpublished, not that the copy is wrong.**
     """
     assert NOT_LEADERSHIP_KEY in every_entry(), (
-        f"The registry publishes no {NOT_LEADERSHIP_KEY!r}. It is the 401 any session that is not "
-        "a leadership session is refused with, so it is a string a student reads and the sweep "
-        "next door has to be reading it."
+        f"The registry publishes no {NOT_LEADERSHIP_KEY!r}. It is the 401 any call without a live "
+        "session is refused with, a student's expired one included, so it is a string a student "
+        "reads and the sweep next door has to be reading it."
     )
     assert NOT_LEADERSHIP_KEY not in LEADERSHIP_ONLY_REFUSAL_KEYS, (
         f"{NOT_LEADERSHIP_KEY!r} is in the exemption. The dispute's ruling exempts the "
