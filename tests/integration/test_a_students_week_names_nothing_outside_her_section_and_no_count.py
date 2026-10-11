@@ -75,11 +75,13 @@ def counts_and_means(body: Any) -> list[tuple[str, str]]:
     found = []
     for where, key in keys_in(body):
         lowered = key.lower()
-        if any(stem in lowered for stem in COUNT_STEMS):
-            found.append((where, key))
-        elif WORKLOAD_STEM in lowered and key != WORKLOAD_MEDIAN:
-            found.append((where, key))
-        elif lowered == "mean" and f".{TREND}[" not in where:
+        if (
+            any(stem in lowered for stem in COUNT_STEMS)
+            or WORKLOAD_STEM in lowered
+            and key != WORKLOAD_MEDIAN
+            or lowered == "mean"
+            and f".{TREND}[" not in where
+        ):
             found.append((where, key))
     return sorted(found)
 

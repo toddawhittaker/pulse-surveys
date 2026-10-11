@@ -361,7 +361,7 @@ def payload_of(answered: Any, what: str) -> dict[str, Any]:
     body = decoded(answered, what)
     members = set(body) if isinstance(body, dict) else set()
     unsettled = members - PAYLOAD_MEMBERS - MEMBERS_LATER_TICKETS_ADD
-    if not isinstance(body, dict) or not PAYLOAD_MEMBERS <= members or unsettled:
+    if not isinstance(body, dict) or not members >= PAYLOAD_MEMBERS or unsettled:
         pytest.fail(
             f"{what} answered {str(body)[:400]!r}. Decision 4 settles `StudentWeekResults` as "
             f"{sorted(PAYLOAD_MEMBERS)}, and E8's tickets add only "
