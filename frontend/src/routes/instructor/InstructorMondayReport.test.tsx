@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import { SECTIONS_PATH, decisionsPath, publishedWeeksPath, reportPath } from '../../api/instructor';
+import {
+  SECTIONS_PATH,
+  decisionsPath,
+  publishedWeeksPath,
+  reportPath,
+  weekResponsePath,
+} from '../../api/instructor';
 import { InstructorMondayReport } from './InstructorMondayReport';
 import {
   A_PUBLISHED_WEEK,
@@ -461,7 +467,13 @@ describe('a published week with data in it', () => {
     open(null);
     await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
 
-    expect(asked).toEqual([publishedWeeksPath(SECTION_ID), reportPath(SECTION_ID, 7)]);
+    // The third read is the week's response, which the composer asks for once the
+    // report is drawn; it is for the same week 7 and not for another.
+    expect(asked).toEqual([
+      publishedWeeksPath(SECTION_ID),
+      reportPath(SECTION_ID, 7),
+      weekResponsePath(SECTION_ID, 7),
+    ]);
   });
 
   it('moves focus to the heading when another week arrives, and not on the first one', async () => {

@@ -171,6 +171,57 @@ export const INSTRUCTOR_REPORT_PAGE_COPY = {
   'instructor_report_page.released_heading': 'Comments from earlier weeks',
   'instructor_report_page.released_body':
     'These were written in earlier weeks of this section and are shown now that enough responses have arrived. They are not part of this week’s figures.',
+
+  // The composer below the comments (SPEC §5.3): the instructor's response to
+  // the week, in the "you said, we heard, here's what changes" shape. It asks
+  // for nothing and names no deadline; the held-results notice says what
+  // publishing does and not what waiting costs.
+  'instructor_report_page.response_heading': 'Your response to this week',
+  'instructor_report_page.response_intro':
+    'Tell your students what you heard and what you will change. They read it with this week’s results.',
+  'instructor_report_page.response_hold_title': 'Students will see this week’s results once you respond',
+  'instructor_report_page.response_hold_body':
+    'This week’s results open for students when a response is published. Write a few lines below when you are ready.',
+  'instructor_report_page.response_field_label': 'Your response',
+  'instructor_report_page.response_remaining': '{remaining} characters left',
+  'instructor_report_page.response_use_draft': 'Use draft',
+  'instructor_report_page.response_check': 'Check draft with AI',
+  'instructor_report_page.response_publish': 'Publish',
+  'instructor_report_page.response_publish_changes': 'Publish changes',
+  'instructor_report_page.response_cancel_edit': 'Cancel',
+  'instructor_report_page.response_edit': 'Edit response',
+  'instructor_report_page.response_drafting': 'Writing a draft…',
+  'instructor_report_page.response_checking': 'Checking your draft…',
+  'instructor_report_page.response_publishing': 'Publishing…',
+  'instructor_report_page.response_draft_ready':
+    'The draft is in the editor. Nothing is published until you press Publish.',
+  'instructor_report_page.response_replace_prompt':
+    'Replace what you have written with the draft?',
+  'instructor_report_page.response_replace_yes': 'Replace with draft',
+  'instructor_report_page.response_replace_no': 'Keep mine',
+  'instructor_report_page.response_check_heading': 'Themes your draft has not addressed',
+  'instructor_report_page.response_check_none':
+    'Your draft addresses every theme in this week’s comments.',
+  'instructor_report_page.response_check_some':
+    'These themes from this week’s comments do not appear in your draft. You can publish without addressing them.',
+  'instructor_report_page.response_check_theme': '{label} ({count} comments)',
+  'instructor_report_page.response_check_theme_one': '{label} (1 comment)',
+  'instructor_report_page.response_card_heading': 'As students see it',
+  'instructor_report_page.response_published_announce': 'Response published. Students can now read it.',
+  'instructor_report_page.response_edited_announce':
+    'Response updated. Students now read the new text.',
+  // A call that got no sentence from the server. The server's own refusals are
+  // shown as sent and are not here.
+  'instructor_report_page.response_unavailable':
+    'This week’s response could not be loaded just now. Reload the page to try again.',
+  'instructor_report_page.response_draft_unavailable':
+    'A draft could not be written just now. You can still write your own.',
+  'instructor_report_page.response_check_unavailable':
+    'The check could not run just now. You can still publish.',
+  'instructor_report_page.response_write_unavailable':
+    'Your response could not be sent just now. Try again in a moment.',
+  'instructor_report_page.response_session_ended':
+    'Your session has ended. Open the report again from your course to continue.',
 } as const satisfies Record<string, string>;
 
 /** Every key this surface publishes. */
@@ -189,8 +240,9 @@ export function copy(key: InstructorReportPageCopyKey): string {
 /**
  * One entry with its `{placeholders}` filled in.
  *
- * One entry takes them today — the subline's section code and its two response
- * counts, each a value the payload supplies. The substitution lives here rather
+ * A few entries take them — the subline's section code and its two response
+ * counts, the histogram's question, the composer's characters left and its
+ * check themes, each a value the payload or the editor supplies. The substitution lives here rather
  * than in the page so that a sentence and the shape of its holes stay in one
  * file, which is the shape the three sibling copy modules already use.
  */

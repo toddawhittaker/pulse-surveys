@@ -7,11 +7,16 @@ import {
   readInstructorReport,
   readPublishedWeeks,
   readTaughtSections,
+  readWeekResponse,
+  requestDraftCheck,
+  requestResponseDraft,
+  writeWeekResponse,
   type CommentView,
   type InstructorReportView,
   type StreamReportView,
   type SummaryView,
   type TrendPointView,
+  type WeekResponseOutcome,
 } from '../../api/instructor';
 import {
   CommentCard,
@@ -20,6 +25,7 @@ import {
   type ReportComment,
 } from '../../components/CommentCard';
 import { CommentGroup, type GroupComment } from '../../components/CommentGroup';
+import { InstructorResponse, type ResponseActions } from '../../components/InstructorResponse';
 import { PulseDivider } from '../../components/PulseDivider';
 import { RatingHistogram, type RatingDistribution } from '../../components/RatingHistogram';
 import { ResponseRateBar } from '../../components/ResponseRateBar';
@@ -283,13 +289,19 @@ export function InstructorMondayReport({
         </p>
       )}
       <PulseDivider />
-      <ReportBody load={load} />
+      <ReportBody load={load} sectionId={sectionId} />
     </main>
   );
 }
 
 /** Whichever one of the page's states is true, and never two of them. */
-function ReportBody({ load }: { readonly load: Load }): JSX.Element {
+function ReportBody({
+  load,
+  sectionId,
+}: {
+  readonly load: Load;
+  readonly sectionId: string;
+}): JSX.Element {
   if (load.kind === 'loading') {
     return (
       <p className="pulse-report-status" role="status">
@@ -344,13 +356,19 @@ function ReportBody({ load }: { readonly load: Load }): JSX.Element {
       data-testid={INSTRUCTOR_REPORT_TESTID}
       key={load.report.week.course_week}
     >
-      <ReportWeek report={load.report} />
+      <ReportWeek report={load.report} sectionId={sectionId} />
     </div>
   );
 }
 
 /** One published week of one section, in the order §5.1 and the prototype give it. */
-function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.Element {
+function ReportWeek({
+  report,
+  sectionId,
+}: {
+  readonly report: InstructorReportView;
+  readonly sectionId: string;
+}): JSX.Element {
   const { rates, streams } = report;
 
   return (
@@ -462,6 +480,12 @@ function ReportWeek({ report }: { readonly report: InstructorReportView }): JSX.
       />
 
       <ReleasedFromEarlierWeeks comments={report.released_from_earlier_weeks} />
+
+      <WeekResponse
+        sectionId={sectionId}
+        courseWeek={report.week.course_week}
+        timeZone={report.institution_timezone}
+      />
     </>
   );
 }
@@ -500,14 +524,68 @@ function ReleasedFromEarlierWeeks({
       <ul className="pulse-report-released-cards">
         {comments.map((comment, position) => (
           // The key is the comment's position in the array the server
-          // randomized, never its handle. These cards are read-only.
+          // randomized, never its handle. The handle is only bound into the
+          // card's decision call (SPEC §5.2; ADR 0189 lets a release batch be
+          // decided on like the week's own).
           <li key={position}>
-            <CommentCard {...cardOf(comment)} stream={cardStream(comment.stream)} />
+            <CommentCard
+              {...cardOf(comment)}
+              stream={cardStream(comment.stream)}
+              decide={(decision) => decide(comment.answer_id, decision)}
+            />
           </li>
         ))}
       </ul>
     </section>
   );
+}
+
+/**
+ * The composer for this week's response (SPEC §5.3), below the comments.
+ *
+ * It reads the week's state and response itself, after the report, so a slow or
+ * failed read leaves the report as it was and says so only here. What it shows
+ * — composer, held notice, or the published card — is the server's `state`.
+ */
+function WeekResponse({
+  sectionId,
+  courseWeek,
+  timeZone,
+}: {
+  readonly sectionId: string;
+  readonly courseWeek: number;
+  readonly timeZone: string | undefined;
+}): JSX.Element | null {
+  const [read, setRead] = useState<WeekResponseOutcome | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void readWeekResponse(sectionId, courseWeek).then((outcome) => {
+      if (live) setRead(outcome);
+    });
+    return () => {
+      live = false;
+    };
+  }, [sectionId, courseWeek]);
+
+  if (read === null) return null;
+  if (read.kind !== 'read') {
+    return (
+      <p className="pulse-report-note" role="status">
+        {read.kind === 'session-ended'
+          ? copy('instructor_report_page.response_session_ended')
+          : (read.detail ?? copy('instructor_report_page.response_unavailable'))}
+      </p>
+    );
+  }
+
+  const actions: ResponseActions = {
+    draft: () => requestResponseDraft(sectionId, courseWeek),
+    check: (draft) => requestDraftCheck(sectionId, courseWeek, draft),
+    publish: (write) => writeWeekResponse('POST', sectionId, courseWeek, write),
+    edit: (write) => writeWeekResponse('PUT', sectionId, courseWeek, write),
+  };
+  return <InstructorResponse initial={read.view} actions={actions} timeZone={timeZone} />;
 }
 
 /**
