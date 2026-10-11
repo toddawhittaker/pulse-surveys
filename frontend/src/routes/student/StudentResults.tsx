@@ -13,6 +13,7 @@ import { CommentGroup } from '../../components/CommentGroup';
 import { PulseDivider } from '../../components/PulseDivider';
 import { RatingHistogram, type RatingDistribution } from '../../components/RatingHistogram';
 import { ResponseCard } from '../../components/ResponseCard';
+import { SmallNNotice } from '../../components/SmallNNotice';
 import { StateNotice } from '../../components/StateNotice';
 import { TrendDuo } from '../../components/TrendDuo';
 import { WeekNav } from '../../components/WeekNav';
@@ -231,10 +232,28 @@ function Body({
 
 const RATING_KEYS = ['1', '2', '3', '4', '5'] as const;
 
-/** The wire's distribution keyed 1 to 5, with a missing bucket read as none. */
-function distributionOf(stream: StudentStream): RatingDistribution {
-  const [one, two, three, four, five] = RATING_KEYS.map((key) => stream.distribution[key] ?? 0);
+/** The wire's shares keyed 1 to 5, with a missing bucket read as none. */
+function sharesOf(shares: Readonly<Record<string, number>>): RatingDistribution {
+  const [one, two, three, four, five] = RATING_KEYS.map((key) => shares[key] ?? 0);
   return { '1': one ?? 0, '2': two ?? 0, '3': three ?? 0, '4': four ?? 0, '5': five ?? 0 };
+}
+
+/**
+ * One stream's ratings as shares, or the student notice when too few students
+ * rated to show them: the payload sends `shares` null then, and nothing here
+ * draws a number in its place.
+ */
+function Distribution({ stream }: { readonly stream: StudentStream }): JSX.Element {
+  if (stream.shares === null) {
+    return (
+      <div className="pulse-results-held-chart">
+        <SmallNNotice audience="student" />
+      </div>
+    );
+  }
+  return (
+    <RatingHistogram stream={stream.stream} distribution={sharesOf(stream.shares)} unit="percent" />
+  );
 }
 
 /**
@@ -270,8 +289,8 @@ function Week({ results }: { readonly results: StudentWeekResults }): JSX.Elemen
             course={points(course)}
             lengthWeeks={lengthWeeks}
           />
-          <RatingHistogram stream="instructor" distribution={distributionOf(instructor)} />
-          <RatingHistogram stream="course" distribution={distributionOf(course)} />
+          <Distribution stream={instructor} />
+          <Distribution stream={course} />
         </section>
       )}
       {results.workload_median === null ? null : (

@@ -33,6 +33,7 @@ export function TrendDuo({
   readonly lengthWeeks: number;
 }): JSX.Element {
   const meanHeader = copy('student_results.trend_mean_header');
+  const absentText = copy('student_results.trend_no_figure');
   return (
     <div className="pulse-trend-pair" data-testid="pulse-trend-duo">
       <PulseTrendChart
@@ -41,12 +42,14 @@ export function TrendDuo({
         lengthWeeks={lengthWeeks}
         showTicks={false}
         meanHeader={meanHeader}
+        absentText={absentText}
       />
       <PulseTrendChart
         points={course}
         label={copy('student_results.trend_course')}
         lengthWeeks={lengthWeeks}
         meanHeader={meanHeader}
+        absentText={absentText}
         drawDelayed
       />
     </div>

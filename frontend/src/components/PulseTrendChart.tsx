@@ -360,6 +360,7 @@ export function PulseTrendChart({
   showLegend = false,
   drawDelayed = false,
   meanHeader,
+  absentText,
 }: {
   /** One stream's published weeks, oldest first. */
   readonly points: readonly TrendPoint[];
@@ -395,6 +396,8 @@ export function PulseTrendChart({
   readonly drawDelayed?: boolean;
   /** The table's last column header, for a surface that words the mean its own way. */
   readonly meanHeader?: string;
+  /** What a week with no mean says, where "no responses" would claim too much. */
+  readonly absentText?: string;
 }): JSX.Element {
   // What each comparison series actually contributes to the drawing. Absent and
   // suppressed both come out empty here, and they part company below: absent
@@ -568,7 +571,7 @@ export function PulseTrendChart({
               )}
               <td>
                 {point.mean === null
-                  ? copy('instructor_report_trend.no_responses')
+                  ? (absentText ?? copy('instructor_report_trend.no_responses'))
                   : point.mean.toFixed(1)}
               </td>
             </tr>

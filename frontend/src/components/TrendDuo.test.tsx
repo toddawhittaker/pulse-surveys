@@ -40,7 +40,7 @@ describe('TrendDuo', () => {
     );
     expect(rows).toEqual([
       ['WK 01', '3.0'],
-      ['WK 02', 'No responses that week'],
+      ['WK 02', 'No figure for this week'],
     ]);
     expect(container.textContent).not.toContain('Term week');
     expect(container.textContent).not.toContain('TERM');

@@ -242,7 +242,7 @@ function stream(
       { course_week: 2, mean: null },
       { course_week: 3, mean: 4.2 },
     ],
-    distribution: { '1': 0, '2': 1, '3': 2, '4': 4, '5': 3 },
+    shares: small ? null : { '1': 0, '2': 10, '3': 20, '4': 40, '5': 30 },
     small_n: small,
     comments: small ? [] : (options.comments ?? []).map((text) => ({ text })),
   };
@@ -423,5 +423,40 @@ describe('the closed door', () => {
       expect(text).not.toContain(leaked);
     }
     expect(text).not.toContain(CONFIDENTIALITY);
+  });
+});
+
+describe('ratings as shares', () => {
+  it('draws percentages and no count, total or mean', async () => {
+    await mountWith(withFigures('published'));
+    await screen.findByText(CONFIDENTIALITY);
+    const histograms = page().querySelectorAll('.pulse-stat-histogram');
+    expect(histograms).toHaveLength(2);
+    const first = histograms[0];
+    expect(first?.textContent).toContain('40%');
+    expect(first?.getAttribute('aria-label')).toContain('0, 10, 20, 40, 30');
+    expect(first?.getAttribute('aria-label')).not.toMatch(/responses|mean/);
+    expect(first?.querySelector('.pulse-stat-histogram-summary')).toBeNull();
+  });
+
+  it('puts the student notice in place of a stream’s chart when shares are null', async () => {
+    await mountWith(
+      withFigures('published', {
+        streams: [stream('instructor', { small: true }), stream('course', { comments: [] })],
+      }),
+    );
+    await screen.findByText(CONFIDENTIALITY);
+    expect(page().querySelectorAll('.pulse-stat-histogram')).toHaveLength(1);
+    const held = page().querySelector('.pulse-results-held-chart');
+    expect(held?.querySelector('.pulse-small-n-notice')).not.toBeNull();
+    expect(held?.textContent).not.toMatch(/\d/);
+  });
+
+  it('says a week with no mean has no figure, with no number or reason', async () => {
+    await mountWith(withFigures('published'));
+    await screen.findByText(CONFIDENTIALITY);
+    const cells = Array.from(page().querySelectorAll('tbody td')).map((cell) => cell.textContent);
+    expect(cells).toContain('No figure for this week');
+    expect(page().textContent).not.toMatch(/no responses|too few/i);
   });
 });

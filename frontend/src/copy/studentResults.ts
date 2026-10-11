@@ -41,7 +41,12 @@ export const STUDENT_RESULTS_COPY = {
   'student_results.class_heading': 'Your class this week',
   'student_results.trend_instructor': 'Instructor',
   'student_results.trend_course': 'Course',
+  // A week with no mean says only that it has no figure: no count, no reason.
+  'student_results.trend_no_figure': 'No figure for this week',
   'student_results.trend_mean_header': 'Mean rating',
+  // The histogram's spoken form: shares of the week's ratings, never counts.
+  'student_results.distribution_reading':
+    '{stream}, ratings this week as percentages for ratings 1 to 5: {shares}.',
   'student_results.workload_median': 'Class median: {hours} h on this course',
 
   // The comments. A stream held back says why in one voice to the student and

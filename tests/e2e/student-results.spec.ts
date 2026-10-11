@@ -34,7 +34,8 @@
 // This spec cannot be run without a seeded, running Compose stack; its green is
 // the stack-up run and CI.
 
-import { test, expect } from "@playwright/test";
+import AxeBuilder from "@axe-core/playwright";
+import { test, expect, type Page } from "@playwright/test";
 
 import { clearTheClock, setTheClockTo } from "./support/clock";
 import { databaseStatement, stopTheScheduler } from "./support/stack";
@@ -46,6 +47,15 @@ import {
   standTheLearnerIn,
 } from "./support/survey";
 import { launchAs } from "./support/doors";
+
+/** An accessibility scan of the page as it stands; any violation fails the test. */
+async function expectNoAxeViolations(page: Page): Promise<void> {
+  const scan = await new AxeBuilder({ page }).analyze();
+  expect(
+    scan.violations.map((violation) => `${violation.id}: ${violation.help}`),
+    "The results page has accessibility violations.",
+  ).toEqual([]);
+}
 
 const MATHEMATICS: SectionUnderTest = { label: "MATH-140-E1FF", code: "E1FF" };
 
@@ -113,6 +123,7 @@ test("the survey names the instructor in the section's heading and links to the 
   const block = await landOnTheSurvey(page, placement, MATHEMATICS.code);
   await expect(block.getByText(`with ${INSTRUCTOR_NAME}`, { exact: true })).toBeVisible();
   await expect(block.getByRole("link", { name: LINK })).toBeVisible();
+  await expectNoAxeViolations(page);
 });
 
 test("a required-mode week with no reply shows the course and the closed door, and nothing about the week", async ({
@@ -158,6 +169,7 @@ test("a required-mode week with no reply shows the course and the closed door, a
   await expect(results.locator(".pulse-stat-histogram")).toHaveCount(0);
   await expect(results.locator(".pulse-comment-group")).toHaveCount(0);
   await expect(results.locator(".pulse-small-n-notice")).toHaveCount(0);
+  await expectNoAxeViolations(page);
 });
 
 test("after the instructor publishes, the week's page shows the reply, both groups and the one confidentiality line", async ({
@@ -198,4 +210,5 @@ test("after the instructor publishes, the week's page shows the reply, both grou
   );
   expect(`${text} ${labels}`).not.toMatch(/compar|universit|benchmark|average|other sections/i);
   await expect(results.locator("path.pulse-trend-line")).toHaveCount(2);
+  await expectNoAxeViolations(page);
 });
