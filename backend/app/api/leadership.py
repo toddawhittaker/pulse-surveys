@@ -42,10 +42,14 @@ define the same cohort twice. Only the leader whose `person` row defined a set
 may edit or delete it, which is what `editable` on the list says and what the
 403 below answers. Purview over the supervision graph is E9's.
 
-**Three refusals and three layers, which is why they are three sentences.** A
-session that is not a leadership session is refused by the dependency with a 401
-and a `Bearer` challenge; a set id nothing defined is a 404; another leader's set
-on a write is a 403. The 404 comes before the 403 on a write, deliberately: a set
+**Four refusals and three layers, which is why they are four sentences.** The
+dependency answers two (E7-08, ADR 0196): a request carrying no session it can
+verify — absent, malformed, expired or signed with another key — gets one 401
+with a `Bearer` challenge, and a real, verified session in another role gets a
+403 with an `insufficient_scope` challenge, so the pages can say "not part of
+your role" rather than that the session ended. Past the gate, a set id nothing
+defined is a 404, and another leader's set on a write is a 403 with no
+challenge. The 404 comes before the 403 on a write, deliberately: a set
 that is not there is not there for anybody, and answering 403 for an unknown id
 would tell a caller that a set exists and belongs to somebody else — the
 enumeration `app.api.instructor`'s own refusal pair exists to prevent, in the one

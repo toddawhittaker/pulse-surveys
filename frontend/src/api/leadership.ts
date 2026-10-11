@@ -27,7 +27,12 @@
  * **Every type below is the wire's own**, snake case included, aliased from
  * `wire.gen.ts`, which describes E5-06's Pydantic schemas.
  *
- * **A refusal is shown, never re-derived.** SPEC §5.1 puts the rules about which
+ * **Two refusals are the page's own words, not the server's** (E7-08, ADR
+ * 0196): a 401 is `session-ended`, and the leadership gate's 403 for a real
+ * session in another role is `not-your-role`, on every call. The pages say "not
+ * part of your role" for the second, where they once said the session had ended.
+ *
+ * **Every other refusal is shown, never re-derived.** SPEC §5.1 puts the rules about which
  * length and level may be combined, who may edit a set and what a duplicate name
  * means on the server; `api/leadership.py` answers each with one sentence under
  * `detail`, and the screen renders the sentence it was sent. The form makes the
@@ -101,12 +106,14 @@ export type ComparisonSetPreviewView = Omit<Schemas['SetPreview'], 'section_coun
 export type ComparisonSetsRead =
   | { readonly kind: 'sets'; readonly sets: readonly ComparisonSetSummaryView[] }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'unavailable'; readonly detail: string | null };
 
 /** What a read of the choice lists answered. */
 export type ComparisonSetOptionsRead =
   | { readonly kind: 'options'; readonly options: ComparisonSetOptionsView }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'unavailable'; readonly detail: string | null };
 
 /** What a read of one set answered. */
@@ -114,6 +121,7 @@ export type ComparisonSetRead =
   | { readonly kind: 'set'; readonly set: ComparisonSetDetailView }
   | { readonly kind: 'not-found'; readonly detail: string | null }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'unavailable'; readonly detail: string | null };
 
 /** What a read of one set's preview answered. */
@@ -121,6 +129,7 @@ export type ComparisonSetPreviewRead =
   | { readonly kind: 'preview'; readonly preview: ComparisonSetPreviewView }
   | { readonly kind: 'not-found'; readonly detail: string | null }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'unavailable'; readonly detail: string | null };
 
 /**
@@ -136,6 +145,7 @@ export type ComparisonSetWriteOutcome =
   | { readonly kind: 'saved'; readonly set: ComparisonSetDetailView }
   | { readonly kind: 'refused'; readonly detail: string | null }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'unavailable'; readonly detail: string | null };
 
 /** What a delete answered. The same shape, with nothing to carry back. */
@@ -143,10 +153,33 @@ export type ComparisonSetDeleteOutcome =
   | { readonly kind: 'deleted' }
   | { readonly kind: 'refused'; readonly detail: string | null }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'unavailable'; readonly detail: string | null };
 
-/** No leadership session on the request (`require_leadership`). */
+/** No session the server could verify (`require_leadership`): the session ended. */
 const UNAUTHORIZED_STATUS = 401;
+
+/**
+ * A real session in another role (`require_leadership`, E7-08, ADR 0196).
+ *
+ * **The status alone does not say it.** These routes answer 403 for other
+ * reasons too — a leader with no review grant, another leader's set on a
+ * write, a write without its double-submit token — and each of those carries
+ * its own sentence for the page to show. Only the gate's 403 carries RFC 6750's
+ * `insufficient_scope` challenge, so that is what this reads. A page that read
+ * every 403 as "not your role" would tell a dean with no review queue that the
+ * page is not part of their role, which ADR 0190 answers differently.
+ */
+const FORBIDDEN_STATUS = 403;
+const NOT_YOUR_ROLE_CHALLENGE = 'error="insufficient_scope"';
+
+/** Whether `response` is the leadership gate's 403 for a session in another role. */
+function isNotYourRole(response: Response): boolean {
+  return (
+    response.status === FORBIDDEN_STATUS &&
+    (response.headers.get('WWW-Authenticate') ?? '').includes(NOT_YOUR_ROLE_CHALLENGE)
+  );
+}
 
 /** The set is not there, or is not one this reader may read. */
 const NOT_FOUND_STATUS = 404;
@@ -161,6 +194,7 @@ export async function readComparisonSets(): Promise<ComparisonSetsRead> {
   }
 
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
   const body = await jsonBody(response);
   if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
 
@@ -183,6 +217,7 @@ export async function readComparisonSetOptions(): Promise<ComparisonSetOptionsRe
   }
 
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
   const body = await jsonBody(response);
   if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
 
@@ -210,6 +245,7 @@ export async function readComparisonSet(setId: string): Promise<ComparisonSetRea
   }
 
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
   const body = await jsonBody(response);
   if (response.status === NOT_FOUND_STATUS) {
     return { kind: 'not-found', detail: refusalSentence(body) };
@@ -233,6 +269,7 @@ export async function readComparisonSetPreview(setId: string): Promise<Compariso
   }
 
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
   const body = await jsonBody(response);
   if (response.status === NOT_FOUND_STATUS) {
     return { kind: 'not-found', detail: refusalSentence(body) };
@@ -287,6 +324,7 @@ async function sendComparisonSet(
   }
 
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
   const body = await jsonBody(response);
   if (!response.ok) return { kind: 'refused', detail: refusalSentence(body) };
 
@@ -310,6 +348,7 @@ export async function deleteComparisonSet(setId: string): Promise<ComparisonSetD
   }
 
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
   if (response.ok) return { kind: 'deleted' };
   return { kind: 'refused', detail: refusalSentence(await jsonBody(response)) };
 }
@@ -318,9 +357,9 @@ export async function deleteComparisonSet(setId: string): Promise<ComparisonSetD
 // Moderation review: the queue, a leader's decision, and the exclusion log
 // (SPEC §5.2, ADR 0190).
 //
-// The same three-part shape as the sets above: a read answers its payload, a
-// 401 is a session that ended, and any other refusal carries the server's own
-// sentence. `api/leadership.py` answers a reader whose grant puts no course under
+// The same shape as the sets above: a read answers its payload, a 401 is a
+// session that ended, the gate's 403 is a session in another role, and any
+// other refusal carries the server's own sentence. `api/leadership.py` answers a reader whose grant puts no course under
 // review with a 403 and one sentence; the pages show that sentence rather than an
 // empty queue, because "nothing to review" is a claim about the reader that a
 // refusal does not entitle a page to make.
@@ -350,12 +389,14 @@ export type LogRowView = Schemas['LogRow'];
 export type ReviewQueueRead =
   | { readonly kind: 'queue'; readonly items: readonly QueueItemView[] }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'unavailable'; readonly detail: string | null };
 
 /** What a read of the exclusion log answered. */
 export type ExclusionLogRead =
   | { readonly kind: 'log'; readonly rows: readonly LogRowView[] }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'unavailable'; readonly detail: string | null };
 
 /**
@@ -369,6 +410,7 @@ export type LeadDecisionOutcome =
   | { readonly kind: 'decided' }
   | { readonly kind: 'refused'; readonly detail: string | null }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'unavailable' };
 
 /** The comments awaiting this reader's review, in the order the server drew. */
@@ -381,6 +423,7 @@ export async function readReviewQueue(): Promise<ReviewQueueRead> {
   }
 
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
   const body = await jsonBody(response);
   if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
 
@@ -408,6 +451,7 @@ export async function decideOnQueuedComment(
   }
 
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
   if (response.ok) return { kind: 'decided' };
   return { kind: 'refused', detail: refusalSentence(await jsonBody(response)) };
 }
@@ -422,6 +466,7 @@ export async function readExclusionLog(): Promise<ExclusionLogRead> {
   }
 
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
   const body = await jsonBody(response);
   if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
 

@@ -132,7 +132,10 @@ WEEK_PARAMETER = "course_week"
 # Decision 4: the payload, exactly.
 STATE = "state"
 RESPONSE = "response"
-PAYLOAD_MEMBERS = frozenset({STATE, RESPONSE})
+# The amendment before review, A1: the section's course weeks whose report has
+# opened at `now`, ascending, in every state (E7-06's page pages through them).
+PUBLISHED_WEEKS = "published_weeks"
+PAYLOAD_MEMBERS = frozenset({STATE, RESPONSE, PUBLISHED_WEEKS})
 TEXT = "text"
 AUTHOR_NAME = "author_name"
 AUTHOR_ROLE = "author_role"
@@ -184,7 +187,8 @@ NOT_A_REFUSAL = ("42703", "42P01")
 ROUTE_IS_OWED = (
     "E7-02's work order (decision 4) settles one route in `app.api.student`, behind "
     "`require_student`: `GET …/student/sections/{section_id}/weeks/{course_week}/results`, "
-    "answering `StudentWeekResults {state, response}` for one of the student's own sections and "
+    "answering `StudentWeekResults {state, response, published_weeks}` (the last is the "
+    "amendment's A1) for one of the student's own sections and "
     "one published course week, through the student's live enrollment."
 )
 WRITERS_ARE_OWED = (
@@ -269,8 +273,22 @@ def report_opens(course_week: int) -> datetime:
 # ---------------------------------------------------------------------------
 
 
-def results_route(application: Any) -> str:
-    """The results route's path template, found in `app.api.student` (decision 4)."""
+PATH_PARAMETERS = re.compile(r"\{([^}/:]+)(?::[^}/]+)?\}")
+
+LATEST_ROUTE_IS_OWED = (
+    "E7-02's amendment before review (A2) settles a second route in `app.api.student`, behind "
+    "`require_student`: `GET …/student/sections/{section_id}/results`, with no week, answering "
+    "the same payload for the section's latest published week, and the same single 404 when the "
+    "section has no published week or for every case the week route refuses."
+)
+
+
+def _results_route_with(application: Any, parameters: set[str], owed: str) -> str:
+    """The one GET route of `app.api.student` ending `/results` whose path parameters are these.
+
+    The week route (decision 4) and the latest route (A2) both end `/results`, so
+    each is told apart by the parameters its path declares rather than by count.
+    """
     mounted = [
         route
         for route in every_route(application)
@@ -283,27 +301,36 @@ def results_route(application: Any) -> str:
     def path(route: Any) -> str:
         return str(getattr(route, "path", "")).rstrip("/")
 
-    found = [r for r in mounted if "GET" in methods(r) and path(r).endswith(RESULTS_ENDING)]
+    found = [
+        r
+        for r in mounted
+        if "GET" in methods(r)
+        and path(r).endswith(RESULTS_ENDING)
+        and set(PATH_PARAMETERS.findall(path(r))) == parameters
+    ]
     if len(found) != 1:
         pytest.fail(
-            f"`{STUDENT_API_MODULE}` mounts {len(found)} GET routes ending `{RESULTS_ENDING}`; it "
-            f"mounts {sorted(f'{sorted(methods(r))} {path(r)}' for r in mounted)}.\n\n"
-            f"{ROUTE_IS_OWED}"
+            f"`{STUDENT_API_MODULE}` mounts {len(found)} GET routes ending `{RESULTS_ENDING}` with "
+            f"path parameters {sorted(parameters)}; it mounts "
+            f"{sorted(f'{sorted(methods(r))} {path(r)}' for r in mounted)}.\n\n{owed}"
         )
-    template = path(found[0])
-    parameters = set(re.findall(r"\{([^}/:]+)(?::[^}/]+)?\}", template))
-    if parameters != {SECTION_PARAMETER, WEEK_PARAMETER}:
-        pytest.fail(
-            f"The results route {template!r} declares path parameters {sorted(parameters)}; "
-            f"decision 4 settles `{SECTION_PARAMETER}` and `{WEEK_PARAMETER}`.\n\n{ROUTE_IS_OWED}"
-        )
-    return template
+    return path(found[0])
 
 
-def results_url(template: str, *, section_id: Any, course_week: Any) -> str:
-    """The template with both parameters filled by name."""
+def results_route(application: Any) -> str:
+    """The week route's path template, found in `app.api.student` (decision 4)."""
+    return _results_route_with(application, {SECTION_PARAMETER, WEEK_PARAMETER}, ROUTE_IS_OWED)
+
+
+def latest_results_route(application: Any) -> str:
+    """The no-week route's path template, found in `app.api.student` (amendment A2)."""
+    return _results_route_with(application, {SECTION_PARAMETER}, LATEST_ROUTE_IS_OWED)
+
+
+def results_url(template: str, *, section_id: Any, course_week: Any = None) -> str:
+    """The template with its parameters filled by name (the latest route takes no week)."""
     values = {SECTION_PARAMETER: str(section_id), WEEK_PARAMETER: str(course_week)}
-    return re.sub(r"\{([^}/:]+)(?::[^}/]+)?\}", lambda match: values[match.group(1)], template)
+    return PATH_PARAMETERS.sub(lambda match: values[match.group(1)], template)
 
 
 def payload_of(answered: Any, what: str) -> dict[str, Any]:
@@ -333,7 +360,20 @@ def payload_of(answered: Any, what: str) -> dict[str, Any]:
             f"{what} carries `response` = {str(response)[:400]!r}. Decision 4 settles "
             f"`StudentResponse` as exactly {sorted(RESPONSE_MEMBERS)}, or `None`."
         )
+    weeks = body[PUBLISHED_WEEKS]
+    if not isinstance(weeks, list) or not all(
+        isinstance(week, int) and not isinstance(week, bool) for week in weeks
+    ):
+        pytest.fail(
+            f"{what} carries `{PUBLISHED_WEEKS}` = {weeks!r}. The amendment's A1 settles "
+            "`list[int]`, the course weeks whose report has opened."
+        )
     return body
+
+
+def outside_the_week_list(body: dict[str, Any]) -> dict[str, Any]:
+    """The payload without `published_weeks`, whose numbers are course weeks and not counts."""
+    return {key: value for key, value in body.items() if key != PUBLISHED_WEEKS}
 
 
 def numbers_in(body: Any) -> list[Any]:
@@ -710,6 +750,18 @@ class HoldWorld:
         return payload_of(
             answered, f"The results read of course week {course_week} for {student.label}"
         )
+
+    def latest(self, student: Student, *, section_id: Any = None) -> Any:
+        """One read of the no-week route (A2) as `student`; their own section unless named."""
+        url = results_url(
+            latest_results_route(self.door.application),
+            section_id=student.section_id if section_id is None else section_id,
+        )
+        return self.review.ask("GET", url, token=student.token)
+
+    def latest_payload(self, student: Student, *, section_id: Any = None) -> dict:
+        answered = self.latest(student, section_id=section_id)
+        return payload_of(answered, f"The latest-week results read for {student.label}")
 
     def rows_of(self, table_name: str, column: str, value: Any) -> list[dict[str, Any]]:
         """Every row of `table_name` whose `column` is `value`, by `sequence`, as the superuser."""

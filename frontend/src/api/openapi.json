@@ -249,6 +249,50 @@
         }
       }
     },
+    "/student/sections/{section_id}/results": {
+      "get": {
+        "tags": [
+          "student"
+        ],
+        "summary": "The latest published week's results for one of my sections",
+        "description": "The week route's answer for the section's latest published week, where the page opens.\n\nThe same read and the same single 404, which a section with no published week\ngets too.",
+        "operationId": "student_latest_results_read_student_sections__section_id__results_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StudentWeekResults"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/instructor/sections/{section_id}/report/{course_week}": {
       "get": {
         "tags": [
@@ -405,6 +449,122 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CommentView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instructor/sections/{section_id}/weeks/{course_week}/response-draft": {
+      "post": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "An AI draft of my response to one week of my report",
+        "description": "SPEC \u00a75.3's draft: advisory, never stored, never posted.\n\n**The report's own refusals, byte for byte, and no model call behind\nthem.** A section the reader does not teach, one that does not exist, and a\nweek not yet published get exactly the 404 the report answers, because the\nservice raises the report's exceptions from the report's own gate before it\ngathers anything. Every refusal of the model's answer is one 502 and one\nsentence (`_assistant_unusable`).",
+        "operationId": "draft_a_response_instructor_sections__section_id__weeks__course_week__response_draft_post",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseDraftView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/instructor/sections/{section_id}/weeks/{course_week}/draft-check": {
+      "post": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "The themes of one week of my report a draft does not address",
+        "description": "SPEC \u00a75.3's draft check: instructor-initiated, never blocking, re-runnable.\n\nThe draft arrives bounded (`DraftCheckRequest`), and the refusals are the\ndraft route's: the report's 404s before any model call, and one 502 for an\nanswer that names anything but the week's stored themes as the stream may\nshow them.",
+        "operationId": "check_a_draft_instructor_sections__section_id__weeks__course_week__draft_check_post",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftCheckView"
                 }
               }
             }
@@ -830,6 +990,37 @@
         "title": "BenchmarkSeriesPoint",
         "description": "One course week of one comparison line, and the sealed mean for that week.\n\n**A suppressed week is a point, not an absence.** E5-04 decides suppression\nweek by week from that week's own contributors, so a week below either\nminimum arrives here with a suppressed figure in `mean` rather than being\nleft out of the series: a gap in a chart invites the reader to conclude that\nnothing happened that week, and the notice \u00a74.1 item 5 governs says something\nelse entirely.\n\nNothing else sits on a point. A count of sections or of respondents beside\nthe week would hand back the inference the minimum exists to prevent, whether\nor not the figure beside it is shown."
       },
+      "CheckTheme": {
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Label",
+            "description": "The theme's label, exactly as the stored summary holds it."
+          },
+          "comment_count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment Count",
+            "description": "How many comments carry the theme, exactly as the stored summary holds it; null for a theme of a stream held below the reporting threshold."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "label",
+          "comment_count"
+        ],
+        "title": "CheckTheme",
+        "description": "A theme the draft check names, with its comment count where one may be shown.\n\nSPEC \u00a75.3: the check \"quietly names any theme not yet addressed (with its\ncomment count). For a stream held below the n-threshold, the check names the\ntheme without a count, because a per-week count of a small stream's comments\nis the participation trace \u00a75.2 rules out.\" So the count is optional here, and\nonly here: `CommentTheme` keeps its required count for the weekly summary\n(ADR 0195).\n\n**The optional type is not the rule** (`docs/MISTAKES.md` entry 23). Which\nthemes may carry a count is decided after the model answers, in\n`app.services.reporting`: a shown stream's theme must carry its stored count\nand a held stream's theme must carry none. This type only makes the held case\nexpressible."
+      },
       "CommentDecision": {
         "properties": {
           "action": {
@@ -966,6 +1157,41 @@
         ],
         "title": "CourseOption",
         "description": "One course a set may name, as the definition form offers it.\n\nThe level is carried beside the label so the form can offer only the courses\na chosen level admits \u2014 the cross-level refusal exists for the API caller who\nis not using the form, and a form that let the choice be made would be\noffering a set the database will refuse at the moment of saving."
+      },
+      "DraftCheckRequest": {
+        "properties": {
+          "draft": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Draft",
+            "description": "The response draft to check, as the instructor has it now."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "draft"
+        ],
+        "title": "DraftCheckRequest",
+        "description": "What the draft check is sent: the instructor's draft, and nothing else.\n\nBounded at the edge, so a body far over any response's length is refused with\na 422 before any model is asked (E7-04 done-when 6)."
+      },
+      "DraftCheckView": {
+        "properties": {
+          "unaddressed": {
+            "items": {
+              "$ref": "#/components/schemas/CheckTheme"
+            },
+            "type": "array",
+            "title": "Unaddressed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "unaddressed"
+        ],
+        "title": "DraftCheckView",
+        "description": "What the draft check answers: the week's themes the draft does not yet address.\n\nEach is a `CheckTheme`, the contract's own part, rather than a copy of it\n(E0-12: compose, never fork): a shown stream's theme with its stored comment\ncount, a held stream's theme with `null`. Empty when the draft addresses them\nall."
       },
       "EnrolledSection": {
         "properties": {
@@ -1466,6 +1692,20 @@
         "title": "RatesView",
         "description": "SPEC \u00a75.1's two rates and the counts they are ratios of.\n\nADR 0147 keeps every division out of SQL and here instead, so that the rule\nfor a zero denominator is written in one reviewable place. `response_rate` and\n`validity_rate` are `None` where that rule leaves them undefined."
       },
+      "ResponseDraftView": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "ResponseDraftView",
+        "description": "What the response draft answers: the draft text the model wrote, once it has passed.\n\nThe text and nothing else. The prompt version and model id the contract\ncarries stay on the server: nothing on the page acts on them, and the draft is\nnever stored (SPEC \u00a75.3: advisory, never auto-posted)."
+      },
       "ResponseRole": {
         "type": "string",
         "enum": [
@@ -1916,16 +2156,25 @@
               }
             ],
             "description": "The published response; absent while awaiting and when unanswered."
+          },
+          "published_weeks": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Published Weeks",
+            "description": "The section's course weeks whose report has opened, ascending: the weeks the page may page through."
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "state",
-          "response"
+          "response",
+          "published_weeks"
         ],
         "title": "StudentWeekResults",
-        "description": "One week's state for one of the student's own sections, and its response if any."
+        "description": "One week's state for one of the student's own sections, its response if any, and the\ncourse weeks a student may page through (SPEC \u00a75.4: published weeks only)."
       },
       "SubmissionAccepted": {
         "properties": {

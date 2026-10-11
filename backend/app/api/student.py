@@ -10,8 +10,10 @@ sentence a student reads is in `app.copy`.
 **Three routes and no others.** `GET /student/survey` (E2-09) answers the form's
 whole question, and `POST /student/submissions` (E2-08) is the weekly submission.
 The form itself is E2-10's. `GET /student/sections/{section_id}/weeks/{course_week}/results`
-(E7-02) answers one week's state and the response published to it; see its
-handler for why it takes the parameters the survey read refuses to.
+(E7-02) answers one week's state and the response published to it, and
+`GET /student/sections/{section_id}/results` the same for the latest published
+week; see the first handler for why they take the parameters the survey read
+refuses to.
 
 **Both carry `app.api.deps.require_student` rather than a check of their own**,
 which is what puts every route this module serves inside SPEC §4.1 item 1's sweep
@@ -113,6 +115,8 @@ router = APIRouter(tags=["student"])
 SURVEY_PATH = "/student/survey"
 SUBMIT_PATH = "/student/submissions"
 RESULTS_PATH = "/student/sections/{section_id}/weeks/{course_week}/results"
+# The same answer for the section's latest published week: where the page opens.
+LATEST_RESULTS_PATH = "/student/sections/{section_id}/results"
 
 # Every refused results read: not enrolled, an ended enrollment, an unopened week, a
 # week or a section that does not exist (E7-02, decision 5).
@@ -296,6 +300,39 @@ def student_week_results_read(
     `Cache-Control: no-store`, as the survey read: the answer is about this
     reader, and an edit changes it.
     """
+    return _results(
+        request, response, claims, session, section_id=section_id, course_week=course_week
+    )
+
+
+@router.get(
+    LATEST_RESULTS_PATH, summary="The latest published week's results for one of my sections"
+)
+def student_latest_results_read(
+    section_id: UUID,
+    response: Response,
+    request: Request,
+    claims: SessionClaims = Depends(require_student),
+    session: Session = Depends(get_session),
+) -> StudentWeekResults:
+    """The week route's answer for the section's latest published week, where the page opens.
+
+    The same read and the same single 404, which a section with no published week
+    gets too.
+    """
+    return _results(request, response, claims, session, section_id=section_id, course_week=None)
+
+
+def _results(
+    request: Request,
+    response: Response,
+    claims: SessionClaims,
+    session: Session,
+    *,
+    section_id: UUID,
+    course_week: int | None,
+) -> StudentWeekResults:
+    """Both results routes: `no-store`, the reader from the session, and one 404 for every refusal."""
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = "no-store"
     refused = HTTPException(status_code=RESULTS_UNAVAILABLE_STATUS, detail=RESULTS_UNAVAILABLE.text)

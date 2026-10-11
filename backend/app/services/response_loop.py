@@ -299,10 +299,16 @@ def student_week_results(
     *,
     user_id: UUID,
     section_id: UUID,
-    course_week: int,
+    course_week: int | None,
     settings: Settings,
 ) -> StudentWeekResults:
     """One week's state and response, for a student of the section, once its report has opened.
+
+    `course_week` names the week; `None` asks for the latest published week, which
+    is the week the student's page opens on. Either way the payload lists every
+    course week of the section whose report has opened, ascending, so the page
+    can page back through published weeks only (SPEC §5.4). A section with no
+    published week is refused, as an unopened week is.
 
     **The section is found among the student's own live enrollments**, through
     the survey read's `_live_enrollments`, and never read by its key first: a
@@ -333,16 +339,17 @@ def student_week_results(
     )
     if section is None:
         raise ResultsUnavailableError
-    week = next(
-        (
-            published
-            for published in reporting._published_weeks(session, section=section, settings=settings)
-            if published.course_week == course_week
-        ),
-        None,
+    published = sorted(
+        reporting._published_weeks(session, section=section, settings=settings),
+        key=lambda opened: opened.course_week,
     )
+    if course_week is None:
+        week = published[-1] if published else None
+    else:
+        week = next((opened for opened in published if opened.course_week == course_week), None)
     if week is None:
         raise ResultsUnavailableError
+    published_weeks = [opened.course_week for opened in published]
 
     opens_at = reporting.report_opens_at(
         week.closes_at, zone=ZoneInfo(settings.institution_timezone)
@@ -351,7 +358,7 @@ def student_week_results(
     first = first_response(session, section_id=section.id, week_id=week.week_id)
     state = week_state(policy=policy, first=first)
     if first is None:
-        return StudentWeekResults(state=state, response=None)
+        return StudentWeekResults(state=state, response=None, published_weeks=published_weeks)
 
     latest = latest_response(session, section_id=section.id, week_id=week.week_id)
     if latest is None:  # pragma: no cover - the first row exists, so a latest one does
@@ -373,6 +380,7 @@ def student_week_results(
             author_role=ResponseRole(first.role),
             published_at=latest.published_at,
         ),
+        published_weeks=published_weeks,
     )
 
 

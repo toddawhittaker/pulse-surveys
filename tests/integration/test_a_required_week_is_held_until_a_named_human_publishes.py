@@ -63,6 +63,7 @@ from fixtures.the_hold import (
     HoldWorld,
     instant,
     numbers_in,
+    outside_the_week_list,
     report_opens,
 )
 
@@ -130,9 +131,12 @@ def test_a_required_week_with_no_response_reads_awaiting_with_no_response_name_o
         body[STATE] == AWAITING
     ), f"A required week with no response read {body[STATE]!r}. Done-when 1: `awaiting`."
     assert body[RESPONSE] is None, f"The held week carries a response: {body[RESPONSE]!r}."
+    # The amendment's A1 puts the published course weeks on every payload; they are
+    # week numbers, not a count, and every other number is still forbidden.
+    rest = outside_the_week_list(body)
     assert (
-        numbers_in(body) == []
-    ), f"The held week carries the number(s) {numbers_in(body)}. Done-when 1: no count."
+        numbers_in(rest) == []
+    ), f"The held week carries the number(s) {numbers_in(rest)}. Done-when 1: no count."
     surface = response_surface(answered)
     named = [name for name in (TEACHER_NAME, SIBLING_SECTION_TEACHER_NAME) if name in surface]
     assert not named, f"The held week names {named}. Done-when 1: no name."

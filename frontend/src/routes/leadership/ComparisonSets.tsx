@@ -80,6 +80,7 @@ export const COMPARISON_SET_DELETE_CONFIRM_TESTID = 'pulse-leadership-set-delete
 type Load =
   | { readonly kind: 'loading' }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'error'; readonly detail: string | null }
   | {
       readonly kind: 'sets';
@@ -226,6 +227,12 @@ export function ComparisonSetsRoute(): JSX.Element {
           title={copy('leadership_comparison_sets.session_ended_title')}
           body={copy('leadership_comparison_sets.session_ended_body')}
         />
+      ) : load.kind === 'not-your-role' ? (
+        <StateNotice
+          variant="flat"
+          title={copy('leadership_comparison_sets.not_your_role_title')}
+          body={copy('leadership_comparison_sets.not_your_role_body')}
+        />
       ) : load.kind === 'error' ? (
         <StateNotice
           variant="flat"
@@ -274,7 +281,9 @@ export function ComparisonSetsRoute(): JSX.Element {
                         outcome.kind === 'refused'
                           ? (outcome.detail ??
                               copy('leadership_comparison_sets.delete_unavailable'))
-                          : copy('leadership_comparison_sets.delete_unavailable'),
+                          : outcome.kind === 'not-your-role'
+                            ? copy('leadership_comparison_sets.not_your_role_body')
+                            : copy('leadership_comparison_sets.delete_unavailable'),
                       );
                     });
                   }}
@@ -343,6 +352,9 @@ export function ComparisonSetsRoute(): JSX.Element {
 function loadFrom(setsRead: ComparisonSetsRead, optionsRead: ComparisonSetOptionsRead): Load {
   if (setsRead.kind === 'session-ended' || optionsRead.kind === 'session-ended') {
     return { kind: 'session-ended' };
+  }
+  if (setsRead.kind === 'not-your-role' || optionsRead.kind === 'not-your-role') {
+    return { kind: 'not-your-role' };
   }
   if (setsRead.kind !== 'sets') return { kind: 'error', detail: setsRead.detail };
   return {

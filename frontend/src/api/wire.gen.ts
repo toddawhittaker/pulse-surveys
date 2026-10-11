@@ -365,6 +365,29 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/student/sections/{section_id}/results": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The latest published week's results for one of my sections
+         * @description The week route's answer for the section's latest published week, where the page opens.
+         *
+         *     The same read and the same single 404, which a section with no published week
+         *     gets too.
+         */
+        readonly get: operations["student_latest_results_read_student_sections__section_id__results_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/instructor/sections/{section_id}/report/{course_week}": {
         readonly parameters: {
             readonly query?: never;
@@ -488,6 +511,58 @@ export interface paths {
          *     FastAPI's parsing of the path, which says nothing about any comment.
          */
         readonly post: operations["decide_on_comment_instructor_comments__answer_id__decisions_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/instructor/sections/{section_id}/weeks/{course_week}/response-draft": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * An AI draft of my response to one week of my report
+         * @description SPEC §5.3's draft: advisory, never stored, never posted.
+         *
+         *     **The report's own refusals, byte for byte, and no model call behind
+         *     them.** A section the reader does not teach, one that does not exist, and a
+         *     week not yet published get exactly the 404 the report answers, because the
+         *     service raises the report's exceptions from the report's own gate before it
+         *     gathers anything. Every refusal of the model's answer is one 502 and one
+         *     sentence (`_assistant_unusable`).
+         */
+        readonly post: operations["draft_a_response_instructor_sections__section_id__weeks__course_week__response_draft_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/instructor/sections/{section_id}/weeks/{course_week}/draft-check": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * The themes of one week of my report a draft does not address
+         * @description SPEC §5.3's draft check: instructor-initiated, never blocking, re-runnable.
+         *
+         *     The draft arrives bounded (`DraftCheckRequest`), and the refusals are the
+         *     draft route's: the report's 404s before any model call, and one 502 for an
+         *     answer that names anything but the week's stored themes as the stream may
+         *     show them.
+         */
+        readonly post: operations["check_a_draft_instructor_sections__section_id__weeks__course_week__draft_check_post"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -750,6 +825,35 @@ export interface components {
             readonly mean: components["schemas"]["ComparisonFigure"];
         };
         /**
+         * CheckTheme
+         * @description A theme the draft check names, with its comment count where one may be shown.
+         *
+         *     SPEC §5.3: the check "quietly names any theme not yet addressed (with its
+         *     comment count). For a stream held below the n-threshold, the check names the
+         *     theme without a count, because a per-week count of a small stream's comments
+         *     is the participation trace §5.2 rules out." So the count is optional here, and
+         *     only here: `CommentTheme` keeps its required count for the weekly summary
+         *     (ADR 0195).
+         *
+         *     **The optional type is not the rule** (`docs/MISTAKES.md` entry 23). Which
+         *     themes may carry a count is decided after the model answers, in
+         *     `app.services.reporting`: a shown stream's theme must carry its stored count
+         *     and a held stream's theme must carry none. This type only makes the held case
+         *     expressible.
+         */
+        readonly CheckTheme: {
+            /**
+             * Label
+             * @description The theme's label, exactly as the stored summary holds it.
+             */
+            readonly label: string;
+            /**
+             * Comment Count
+             * @description How many comments carry the theme, exactly as the stored summary holds it; null for a theme of a stream held below the reporting threshold.
+             */
+            readonly comment_count: number | null;
+        };
+        /**
          * CommentDecision
          * @description What the instructor sends to exclude, keep or undo one comment (E6-03).
          *
@@ -869,6 +973,33 @@ export interface components {
             readonly label: string;
             /** Level */
             readonly level: string;
+        };
+        /**
+         * DraftCheckRequest
+         * @description What the draft check is sent: the instructor's draft, and nothing else.
+         *
+         *     Bounded at the edge, so a body far over any response's length is refused with
+         *     a 422 before any model is asked (E7-04 done-when 6).
+         */
+        readonly DraftCheckRequest: {
+            /**
+             * Draft
+             * @description The response draft to check, as the instructor has it now.
+             */
+            readonly draft: string;
+        };
+        /**
+         * DraftCheckView
+         * @description What the draft check answers: the week's themes the draft does not yet address.
+         *
+         *     Each is a `CheckTheme`, the contract's own part, rather than a copy of it
+         *     (E0-12: compose, never fork): a shown stream's theme with its stored comment
+         *     count, a held stream's theme with `null`. Empty when the draft addresses them
+         *     all.
+         */
+        readonly DraftCheckView: {
+            /** Unaddressed */
+            readonly unaddressed: readonly components["schemas"]["CheckTheme"][];
         };
         /**
          * EnrolledSection
@@ -1226,6 +1357,18 @@ export interface components {
             readonly valid_responses: number;
         };
         /**
+         * ResponseDraftView
+         * @description What the response draft answers: the draft text the model wrote, once it has passed.
+         *
+         *     The text and nothing else. The prompt version and model id the contract
+         *     carries stay on the server: nothing on the page acts on them, and the draft is
+         *     never stored (SPEC §5.3: advisory, never auto-posted).
+         */
+        readonly ResponseDraftView: {
+            /** Text */
+            readonly text: string;
+        };
+        /**
          * ResponseRole
          * @description The role a response was written under; the value is the stored token.
          *
@@ -1504,7 +1647,8 @@ export interface components {
         };
         /**
          * StudentWeekResults
-         * @description One week's state for one of the student's own sections, and its response if any.
+         * @description One week's state for one of the student's own sections, its response if any, and the
+         *     course weeks a student may page through (SPEC §5.4: published weeks only).
          */
         readonly StudentWeekResults: {
             /**
@@ -1515,6 +1659,11 @@ export interface components {
             readonly state: "awaiting" | "published" | "on-behalf" | "unanswered";
             /** @description The published response; absent while awaiting and when unanswered. */
             readonly response: components["schemas"]["StudentResponse"] | null;
+            /**
+             * Published Weeks
+             * @description The section's course weeks whose report has opened, ascending: the weeks the page may page through.
+             */
+            readonly published_weeks: readonly number[];
         };
         /**
          * SubmissionAccepted
@@ -2052,6 +2201,37 @@ export interface operations {
             };
         };
     };
+    readonly student_latest_results_read_student_sections__section_id__results_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StudentWeekResults"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly read_report_instructor_sections__section_id__report__course_week__get: {
         readonly parameters: {
             readonly query?: never;
@@ -2157,6 +2337,74 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["CommentView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly draft_a_response_instructor_sections__section_id__weeks__course_week__response_draft_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ResponseDraftView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly check_a_draft_instructor_sections__section_id__weeks__course_week__draft_check_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["DraftCheckRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["DraftCheckView"];
                 };
             };
             /** @description Validation Error */

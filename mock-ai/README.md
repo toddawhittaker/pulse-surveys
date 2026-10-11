@@ -37,10 +37,12 @@ disagree, the route is right — it is built from the constants
 
 ## What it does with a prompt
 
-**Two tasks, told apart by a line.** A prompt carrying the summary prompt's
-marker line is asking for SPEC §7.4's weekly summary; anything else is a
-comment-validity request, which is what this service answered to everything
-before E4-05.
+**Tasks, told apart by a line.** A prompt carrying the summary prompt's
+marker line is asking for SPEC §7.4's weekly summary; one carrying the
+moderation prompt's is asking for a moderation verdict; one whose first task
+line is the response draft's or the draft check's is one of those (rule 5
+below); anything else is a comment-validity request, which is what this service
+answered to everything before E4-05.
 
 For **comment validity**, the student's comment is everything after the last
 occurrence of the line the validity prompt's instructions end with, with
@@ -121,6 +123,21 @@ comment. Two different weeks are answered differently and the same week twice is
 answered identically: the first is what makes a stack prove the week's text
 actually left the tool, and the second is what lets the gateway's one bounded
 re-ask reach the same answer twice.
+
+**5. The response draft and the draft check** (E7-04). A prompt whose first task
+line is the draft prompt's (`The week this response answers follows this line,
+as one JSON document.`) or the check prompt's (`The week the draft is checked
+against follows this line, as one JSON document.`) is one of these two. Neither
+carries a comment: the week is one JSON document of stored summaries and themes,
+and the check's draft follows a line of its own after it. After the wrong-answer
+markers, the draft is a fixed thank-you that names which streams have a summary
+and states no number, and the check names every theme whose label the draft does
+not contain, with its count exactly as the week gives it (`null` for a held
+stream's). Two markers drive the tool's refusals end to end:
+`mock-ai:draft-quotes-the-week` anywhere in the week makes the draft repeat every
+summary and label verbatim, and `mock-ai:check-invents-a-theme` in the draft makes
+the check name a theme no week holds. `GET /mock/rules` publishes the three lines
+and the two markers under `response_markers`.
 
 ## What it is not
 
