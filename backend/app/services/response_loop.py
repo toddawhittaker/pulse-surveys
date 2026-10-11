@@ -62,7 +62,7 @@ Every door here decides who may write or read, then calls the writers above.
 """
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
@@ -208,16 +208,26 @@ def policy_of_record(session: Session, *, course_id: UUID, report_opens_at: date
     `set_at`, decides "latest" (ADR 0187's reasoning, ADR 0192); `set_at` decides
     only which rows were in force at the opening (ruling 6).
     """
-    mode = session.execute(
-        select(ResponsePolicy.mode)
-        .where(
-            ResponsePolicy.course_id == course_id,
-            ResponsePolicy.set_at <= report_opens_at,
-        )
-        .order_by(ResponsePolicy.sequence.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    return PolicyMode.ENCOURAGED if mode is None else PolicyMode(mode)
+    rows = session.execute(
+        select(ResponsePolicy.set_at, ResponsePolicy.mode)
+        .where(ResponsePolicy.course_id == course_id)
+        .order_by(ResponsePolicy.sequence)
+    ).tuples()
+    return _mode_in_force(rows, report_opens_at=report_opens_at)
+
+
+def _mode_in_force(
+    rows: Iterable[tuple[datetime, str]], *, report_opens_at: datetime
+) -> PolicyMode:
+    """The policy rule, written once: the last of a course's rows set at or before the opening.
+
+    `rows` are one course's `(set_at, mode)` pairs in `sequence` order. With none
+    set at or before `report_opens_at`, the week is encouraged. `policy_of_record`
+    asks it about one course and `_week_clocks` about many, over rows each read
+    in its own shape (ADR 0193, ADR 0197).
+    """
+    in_force = [mode for set_at, mode in rows if set_at <= report_opens_at]
+    return PolicyMode(in_force[-1]) if in_force else PolicyMode.ENCOURAGED
 
 
 def first_response(
@@ -845,10 +855,8 @@ def _week_clocks(
 
     **Set-based**: one read of the windows, one of the policy rows of the
     sections' courses, one of which section-weeks have a response, however many
-    sections are asked about. The policy of record is `policy_of_record`'s rule
-    applied to the rows read once: the latest by `sequence` among the course's
-    rows set at or before the week's report opening, and encouraged with none
-    (ADR 0193). The opening is `reporting.report_opens_at` over the stored close,
+    sections are asked about. The policy of record is `_mode_in_force`, the rule
+    `policy_of_record` applies too, over the rows read once (ADR 0193). The opening is `reporting.report_opens_at` over the stored close,
     as the report computes it (ADR 0184).
     """
     if not sections:
@@ -885,7 +893,7 @@ def _week_clocks(
     for section_id, week_id, number, closes_at, term_start in windows:
         section = by_id[section_id]
         opens_at = reporting.report_opens_at(closes_at, zone=zone)
-        in_force = [mode for set_at, mode in policies[section.course_id] if set_at <= opens_at]
+        policy = _mode_in_force(policies[section.course_id], report_opens_at=opens_at)
         clocks.append(
             _WeekClock(
                 section=section,
@@ -894,7 +902,7 @@ def _week_clocks(
                     number, section_start=section.start_date, term_start=term_start
                 ),
                 opens_at=opens_at,
-                required=bool(in_force) and in_force[-1] == PolicyMode.REQUIRED.value,
+                required=policy is PolicyMode.REQUIRED,
                 answered=(section_id, week_id) in answered,
             )
         )
