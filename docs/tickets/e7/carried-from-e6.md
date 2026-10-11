@@ -153,23 +153,95 @@ reviewer SPEC §5.2 names and an assistant dean's own grant is empty until then.
 **Owner:** E9. **Done when:** E9 decides what each of the three roles reads,
 through the purview walk, and the refusal is replaced or restated in a record.
 
-## Two older copies of "closed"
+## Two older copies of "closed" — closed by E6-09
 
 E6-03 defined a closed window once, as `survey_windows.closed_by`
-(`closes_at < now`), and moved the moderation path onto it. Two older copies of
-the comparison remain, one in `backend/app/services/report_comments.py` and one
-in `backend/app/services/reporting.py`; find them by grepping for
-`closes_at <`, not by line. **Owner:** the next epic that touches either file.
-**Done when:** both use `survey_windows.closed_by`, and no other copy is left
-under `backend/app/`.
+(`closes_at < now`), and moved the moderation path onto it. The two older copies,
+in `backend/app/services/report_comments.py` (the release cut) and
+`backend/app/services/reporting.py` (the summary walk), now ask `closed_by` too,
+so no `closes_at <` copy is left under `backend/app/`. The opposite boundary in
+`grading.py` is a different question and is carried below.
 
-## Two behaviours no test covers
+## Two behaviours no test covers — one closed by E6-09
 
 E6-05's pull request (#296) names them: the exclusion log's excerpt rule for a
 released comment, and the error-level log line written when the moderation
-sweep's unlock finds no lock. **Owner:** the next ticket that touches the
-exclusion log or the moderation sweep; E10's Care sweep is the likely one.
-**Done when:** a test covers each.
+sweep's unlock finds no lock. **The first is closed by E6-09:** an
+`invariant`-marked test covers every excerpt case (a held stream, a week not yet
+fully moderated, a comment shown only by a release batch, and a shown week as the
+control). **The second is still open.** **Owner:** the next ticket that touches
+the moderation sweep; E10's Care sweep is the likely one. **Done when:** a test
+covers the unlock log line.
+
+## From the E6 boundary review
+
+E6-09 fixed every confirmed HIGH and MED the boundary battery found, except the
+keyboard focus finding E6-10 owns. These are the rest, each with an owner.
+
+### The import cycle between moderation and the report services
+
+`services/moderation.py` imports its report-service helpers inside functions,
+because `report_comments` imports `holds_no_verdict` from it and `reporting`
+imports `report_comments`. The deferred imports work but hide the dependency.
+**Owner:** the next ticket that touches `services/moderation.py`. **Done when:**
+the moderation state tokens are a `StrEnum` in `models/report.py`,
+`holds_no_verdict` lives in `report_comments`, and every import between the
+three modules is at module level.
+
+### `services/moderation.py` does two jobs
+
+The module writes verdicts and runs the sweep, and it also holds people's
+decisions, the review queue and the exclusion log. **Owner:** the next ticket
+that touches `services/moderation.py`. **Done when:** verdicts and the sweep stay
+in `moderation.py`, decisions, the queue and the log move to
+`moderation_review.py`, and SPEC §13's module list has a line for the new file.
+
+### Small redundancies in `services/moderation.py`
+
+`review_queue`, `decide_as_leader` and `exclusion_log` check `person_id is None`
+and then call `_review_courses`, which checks it again; `decide_as_leader`'s
+`if action not in LEAVES` cannot be reached through its typed parameter; and the
+queue's harmful-verdict `EXISTS` repeats what `report_comments._flag_of` decides.
+**Owner:** the next ticket that touches `services/moderation.py`. **Done when:**
+each check is made once, the unreachable branch is gone or argued, and the queue
+reads the flag through one definition.
+
+### The reason bound is written twice
+
+`frontend/src/components/CommentCard.tsx`'s `REASON_MAX_LENGTH` and
+`backend/app/models/report.py`'s `REASON_BOUND` must agree, and nothing checks
+that they do. **Owner:** the next UI ticket that touches the comment card.
+**Done when:** a unit test reads both and fails when they differ.
+
+### Comments that tell ticket history
+
+Several E6 docstrings and comments say which ticket, ruling or review round
+changed a rule rather than citing the record that owns it. **Owner:** the next
+ticket that touches each file. **Done when:** those comments cite ADRs 0187 to
+0190 for the why, and say what the code does now.
+
+### The review queue has no index of its own
+
+The queue's harmful-verdict test scans `classification` per comment. **Owner:**
+E10, or the first ticket about scale. **Done when:** a partial index on
+`classification (answer_id) WHERE task = 'MODERATION' AND verdict = 'harmful'`
+exists, and `EXPLAIN` of the queue's select over a seed the size of a term's
+history starts from it.
+
+### No precision or recall floor for moderation
+
+The moderation eval cases (harmful, privacy and nonsense included) ship with no
+floor. **Owner:** E10. **Done when:** a moderation slot exists in the eval
+registry with its `floors.py`, and the assertion that the registry has no
+moderation slot, in `tests/unit/test_the_moderation_eval_cases_cover_every_verdict.py`
+(near line 69), is flipped.
+
+### Grading reads the close the other way
+
+`backend/app/services/grading.py` (near line 209) treats a window as closed when
+`closes_at <= right_now`, the opposite boundary from
+`survey_windows.closed_by` (`closes_at < now`). **Owner:** the next grading
+ticket. **Done when:** it uses `<` and a comment says it matches `closed_by`.
 
 ## Two mockups still pass a count to the small-N notice
 
@@ -289,4 +361,15 @@ Every source entry, in its source file's order, with what happened to it.
 
 ### The E6 boundary (`../e6/boundary-review.md`)
 
-Pending: the reviews run after this file is written.
+| Finding | Disposition |
+|---|---|
+| Two older copies of "closed" (carried by E6-07) | Closed by E6-09 |
+| The excerpt rule for a released comment has no test (#296) | Closed by E6-09; the unlock log line is still carried |
+| The import cycle between moderation and the report services | Carried (the next ticket touching `services/moderation.py`) |
+| `services/moderation.py` does two jobs | Carried (the next ticket touching `services/moderation.py`) |
+| Small redundancies in `services/moderation.py` | Carried (the next ticket touching `services/moderation.py`) |
+| The reason bound is written twice | Carried (the next UI ticket on the comment card) |
+| Comments that tell ticket history | Carried (the next ticket touching each file) |
+| The review queue has no index of its own | Carried (E10, or the first scale ticket) |
+| No precision or recall floor for moderation | Carried (E10) |
+| Grading reads the close the other way | Carried (the next grading ticket) |
