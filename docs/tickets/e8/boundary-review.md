@@ -130,11 +130,12 @@ development database. So the drive's first run is CI's, and the claim that a
 second run on one stack stays green rests on how the drive is built. The
 response and policy tables are append-only and are never cleaned. Each run takes
 fresh section-weeks: the seeder takes the first of `MATH-140-E1FF`'s course
-weeks 5 and 6 with no response, and the response-path block takes the first
-week of `NURS-8100-Q2FF` with no response. Each run's required row is set the
-day before its own week's report opens, which is after the previous run's
-encouraged row, and its encouraged row is set before the next week's report
-opens. The posted score and the lead mappings are deleted on the way out. A
+weeks 5 and 6 with no response, and the response-path block takes the latest
+week of `NURS-8100-Q2FF` with no response, short of the last, and deletes the
+section's enrollments on the way out if its own launch created them. Each
+run's required row is set the day before its own week's report opens and its
+encouraged row before the next week's report opens, so no other run's row is in
+force for its week. The posted score and the lead mappings are deleted on the way out. A
 third run of the student's week on one stack is refused by the seeder, with a
 sentence saying the stack needs to be fresh.
 

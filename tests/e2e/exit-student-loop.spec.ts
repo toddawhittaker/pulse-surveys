@@ -33,11 +33,15 @@
 // **Re-runnable on one stack, by fresh weeks, not by cleaning up.** The response
 // and policy tables are append-only. The student's week is the first of course
 // weeks 5 and 6 that holds no response (the seeder chooses it and prints it), so
-// a second run takes week 6. The response paths take the first course week of
-// `NURS-8100-Q2FF` with no response, short of the last. Each run sets its own
-// policy row the day before its week's report opens and sets the course back to
-// encouraged before the next week's report opens, so a later run's rows always
-// come after an earlier run's.
+// a second run takes week 6. The response paths take the latest course week of
+// `NURS-8100-Q2FF` with no response, short of the last, so a second run takes
+// the week before. Each run sets its own policy row the day before its week's
+// report opens and sets the course back to encouraged before the next week's
+// report opens; an earlier run's rows are all set after a later run's week
+// opens, so none of them governs it. If this run's launch enrolled the
+// `NURS-8100-Q2FF` roster, the enrollments are deleted on the way out: the
+// student-survey drives read the learner's landing while that section is live
+// and expect only their own section on it.
 //
 // **No date is pinned.** Every instant is read from the section's own
 // `survey_window` rows and moved to with the `/dev` clock; the enrollments are
@@ -476,6 +480,7 @@ test.describe('the two response paths, as the lead and then the student', () => 
   let reportOpens = '';
   let nextReportOpens = '';
   let mappedTheLead = false;
+  let enrolledBefore = '';
 
   const SECTION = sectionOf(NURSING);
   const THE_SECTION_ROW = 'NURS 8100 Q2FF';
@@ -492,19 +497,23 @@ test.describe('the two response paths, as the lead and then the student', () => 
   test.beforeAll(async ({ browser }) => {
     test.setTimeout(WORLD_TIMEOUT_MS);
     stopTheScheduler();
+    enrolledBefore = databaseStatement(
+      `select count(*) from enrollment where section_id in (select id from section where lms_section_code = '${NURSING.code}');`,
+    );
     placement = await standTheLearnerIn(browser, [NURSING], sectionStartClock(NURSING.code));
     sectionId = databaseStatement(`select ${SECTION};`);
     expect(sectionId, 'The section was not provisioned by the staff launch.').toMatch(/^[0-9a-f-]{36}$/);
 
-    // The first course week that holds no response, short of the last, so a
-    // next week's opening bounds the run's policy.
+    // The latest course week that holds no response, short of the last, so a
+    // next week's opening bounds the run's policy, and the published response
+    // sits after every pinned date the other drives read.
     courseWeek = Number(
       databaseStatement(
         'select n from (select w.week_id, row_number() over (order by w.opens_at) as n ' +
           `from survey_window w where w.section_id = ${SECTION}) weeks ` +
           `where n < (select count(*) from survey_window where section_id = ${SECTION}) ` +
           'and not exists (select 1 from instructor_response r ' +
-          `where r.section_id = ${SECTION} and r.week_id = weeks.week_id) order by n limit 1;`,
+          `where r.section_id = ${SECTION} and r.week_id = weeks.week_id) order by n desc limit 1;`,
       ),
     );
     expect(
@@ -525,6 +534,15 @@ test.describe('the two response paths, as the lead and then the student', () => 
     try {
       try {
         if (mappedTheLead) unmapTheLeadFrom(NURSING);
+        // The student-survey drives read the learner's landing at dates when
+        // this section is live, and expect it not to be on her screen. If this
+        // run's launch enrolled the roster, its enrollments go again; the next
+        // staff launch syncs them back.
+        if (enrolledBefore === '0') {
+          databaseStatement(
+            `delete from enrollment where section_id in (select id from section where lms_section_code = '${NURSING.code}');`,
+          );
+        }
       } finally {
         await clearTheClock(await context.newPage());
       }

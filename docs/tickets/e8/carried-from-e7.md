@@ -495,7 +495,7 @@ as the lead, each on a fresh stack and leaving no rows a rerun trips over.
 **Closed by E8-04** (this pull request): `tests/e2e/exit-student-loop.spec.ts`
 reads a required, unanswered week as the lead at 48 hours (owed, no on-behalf
 door) and at 96 hours on the on-behalf page, then publishes on behalf, and the
-student reads the lead's name and role. Each run takes the first unanswered
+student reads the lead's name and role. Each run takes the latest unanswered
 week of `NURS-8100-Q2FF`, so a second run on one stack meets none of the
 first's rows.
 
