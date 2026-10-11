@@ -105,6 +105,12 @@ COUNT_DECIDED = (
 )
 COUNT_MODERATION_STATE = "SELECT count(*) FROM public.moderation_state"
 COUNT_THREAT_CASES = "SELECT count(*) FROM public.threat_case"
+COUNT_MODERATION_ATTEMPTS = "SELECT count(*) FROM public.moderation_attempt"
+MODERATION_ATTEMPT = "moderation_attempt"
+
+
+def moderation_attempts(database: Any) -> int:
+    return count(database, COUNT_MODERATION_ATTEMPTS)
 
 
 def decided_rows(database: Any) -> int:
@@ -253,6 +259,48 @@ def test_the_routing_revision_refuses_to_drop_a_threat_case(
         failure
     ), f"The downgrade failed with {failure!r}, not the precedent's `RuntimeError`."
     assert threat_cases(empty_database) == 1, "After the refusal the `threat_case` row is gone."
+
+
+def test_the_routing_revision_refuses_to_drop_a_moderation_attempt(
+    empty_database: Any, metadata_tables: dict[str, Any], alembic_config_pointed_at: Any
+) -> None:
+    """`f14324ab936c` down, over one `moderation_attempt` row alone: `RuntimeError`, row intact.
+
+    The revision creates `moderation_attempt`, one row per failed moderation call,
+    which the attempt cap counts (ADR 0188). Dropping it on the way down loses
+    those rows, so a comment at the cap starts counting again from nothing. The
+    database holds no `moderation_state` and no `threat_case` row, so only this
+    table can make the guard refuse.
+
+    **The mutation this kills:** `moderation_attempt` left out of the tables the
+    guard counts, so the downgrade drops it and completes. **The near miss:** the
+    other two `f14324ab936c` refusals in this module plant a `threat_case` or a
+    `moderation_state` row, which the guard counted before this fix, so neither
+    goes red under that mutation; only this test does.
+    """
+    config = alembic_config_pointed_at(empty_database)
+    require_revision(config, ROUTING_REVISION, WHAT_THE_ROUTING_REVISION_IS)
+    migrate(config, "upgrade", MODEL_SCHEMA, "putting an empty database into the models' shape")
+
+    with session_on(empty_database) as session:
+        chain: dict[str, Any] = {}
+        a_comment_answer(session, metadata_tables, chain)
+        seed_row(session, metadata_tables, MODERATION_ATTEMPT, chain)
+    assert moderation_attempts(empty_database) == 1, "The planted attempt row is not there."
+    assert moderation_rows(empty_database) == 0 and threat_cases(empty_database) == 0, (
+        "A `moderation_state` or `threat_case` row exists, so a refusal below could be about that "
+        "row rather than the attempt."
+    )
+
+    failure = refused(config, the_revision_below(config, ROUTING_REVISION))
+    assert failure is not None, (
+        f"`alembic downgrade` below {ROUTING_REVISION} completed over a `moderation_attempt` row, "
+        "which drops the record the attempt cap counts. E6-09's fix round: the downgrade raises."
+    )
+    assert is_a_runtime_error(
+        failure
+    ), f"The downgrade failed with {failure!r}, not the precedent's `RuntimeError`."
+    assert moderation_attempts(empty_database) == 1, "After the refusal the attempt row is gone."
 
 
 def test_the_routing_revision_refuses_to_drop_a_router_flag(
