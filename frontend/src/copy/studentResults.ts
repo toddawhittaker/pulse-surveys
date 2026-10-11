@@ -47,18 +47,27 @@ export const STUDENT_RESULTS_COPY = {
   // The histogram's spoken form: shares of the week's ratings, never counts.
   'student_results.distribution_reading':
     '{stream}, ratings this week, percent of ratings 1 to 5: {shares}.',
-  'student_results.workload_median': 'Class median: {hours} h on this course',
+  'student_results.workload_median': 'Class median: {hours} hours on this course',
 
   // The comments. A stream held back says why in one voice to the student and
   // states no number: how many commented is what the hold exists to keep.
   'student_results.comments_none': 'No comments this week.',
-  'student_results.small_n_title': 'Comments in this group stay private this week',
-  'student_results.small_n_body':
-    'Comments appear here once enough classmates have commented. They may appear later among comments from earlier weeks.',
+  'student_results.small_n_title': 'Comments in this group are not shown this week',
+  'student_results.small_n_body': 'They may appear here later.',
   // A stream whose ratings are held. It names the stream and says nothing about comments.
   'student_results.ratings_held_instructor': 'Ratings about the instructor are not shown this week',
   'student_results.ratings_held_course': 'Ratings about the course are not shown this week',
   'student_results.ratings_held_body': 'They appear once enough classmates have rated.',
+  // The percent histogram: a title naming what is rated, and the table behind it.
+  'student_results.ratings_title_instructor': 'Ratings about the instructor',
+  'student_results.ratings_title_course': 'Ratings about the course',
+  'student_results.ratings_table_caption': '{stream}, percent of ratings',
+  'student_results.ratings_table_rating': 'Rating',
+  'student_results.ratings_table_percent': 'Percent',
+  'student_results.ratings_show_button': 'Show the numbers',
+  'student_results.ratings_hide_button': 'Hide the numbers',
+  'student_results.ratings_show_numbers': 'Show the numbers: {stream}',
+  'student_results.ratings_hide_numbers': 'Hide the numbers: {stream}',
   'student_results.released_heading': 'Comments from earlier weeks',
 
   // A refusal of any kind, one calm sentence that says nothing about why.
@@ -82,7 +91,7 @@ export const STUDENT_RESULTS_COPY = {
   // The student's own posted participation score, shown in every state. The one
   // sentence says only that a count can change; it names no cause and no fault.
   'student_results.participation_heading': 'Your participation score',
-  'student_results.participation_score': 'Score posted to your gradebook: {score}',
+  'student_results.participation_score': 'Your participation: {score}%',
   'student_results.participation_note':
     'A comment counted when you submitted it can be re-checked later, so a week’s count can go down.',
 

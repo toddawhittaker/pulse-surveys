@@ -1,35 +1,22 @@
 import type { JSX } from 'react';
 
 import './instructorReportComments.css';
-import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
-import { copy as studentCopy } from '../copy/studentResults';
 
 /**
- * Why one comment group's raw comments are not on the page — SPEC §7.6's
- * `SmallNNotice`, in two audiences whose words are different sentences to
- * different people. The **student** audience frames the hold as protecting the
- * student, says comments appear once enough classmates comment, and states no
- * number at all: not the threshold, which would tell a student how many
- * classmates must write before theirs shows, and not a count of anyone.
+ * Why one comment group's raw comments, or one stream's ratings, are not on the
+ * page — SPEC §7.6's `SmallNNotice`.
  *
- * SPEC §4 hides a stream's raw comments when fewer than the threshold of
- * distinct students commented in that stream that week; the design brief asks
- * that the state be designed explicitly with "an honest explanation of why",
- * and `design/Usage Rules.md` §4 keeps the instructor register formative and
- * factual. So this says what is hidden, why, where held comments go, and that
- * the summary above still drew on everything received.
+ * **The words are the caller's.** The instructor's notice states the configured
+ * threshold, because SPEC §4 makes it a setting; the student's states no number
+ * at all, since a threshold tells a student how many classmates must write before
+ * theirs shows, and a count of anyone below it is the disclosure the hold exists
+ * to prevent (SPEC §5.2). A component that took a threshold or a count would be a
+ * component a number could arrive through, so it takes two strings and nothing
+ * else.
  *
- * **The one number here is the threshold, and it is the payload's** — the
- * stream's `small_n.threshold`, because SPEC §4 makes it configurable and a 5
- * written into a component is a second, wrong copy of a configured value the
- * day anybody changes it.
- *
- * **Nothing here counts anybody**. §5.2 forbids a count below the
- * threshold, and the notice now sits inside one group, where any count reads as
- * that group's: in a stream of one commenter, a count of commenters is the
- * whole disclosure, and a count of the week's respondents beside it is a
- * subtraction away from one. So the component takes the threshold and nothing
- * else; there is no prop a count could arrive through.
+ * The design brief asks that the state be designed explicitly with "an honest
+ * explanation of why", and `design/Usage Rules.md` §4 keeps the register
+ * formative and factual.
  *
  * **Where it appears is `CommentGroup`'s decision**: inside each suppressed
  * group, after its summary, because suppression is a fact about a stream
@@ -42,43 +29,20 @@ import { copy as studentCopy } from '../copy/studentResults';
  * with the same title, and WCAG 2.2 asks landmarks of one type to be told apart;
  * the group's own labelled section and heading already say which stream this is.
  */
-export function SmallNNotice(
-  props:
-    | {
-        readonly audience?: 'instructor';
-        /** The configured number of distinct commenters a stream's raw comments are held until. */
-        readonly threshold: number;
-      }
-    | {
-        readonly audience: 'student';
-        /** Set for a stream whose ratings are held: the notice then speaks of ratings, not comments. */
-        readonly ratingsAbout?: 'instructor' | 'course';
-      },
-): JSX.Element {
-  const student = props.audience === 'student';
+export function SmallNNotice({
+  title,
+  body,
+}: {
+  /** The notice's heading line, in the audience's own words. */
+  readonly title: string;
+  /** Why the group is held and where its comments go; the caller's words, with any number the audience may see. */
+  readonly body: string;
+}): JSX.Element {
   return (
     <div className="pulse-small-n-notice">
       <FlatPulseLine />
-      <p className="pulse-small-n-notice__title">
-        {props.audience === 'student' && props.ratingsAbout !== undefined
-          ? studentCopy(
-              props.ratingsAbout === 'instructor'
-                ? 'student_results.ratings_held_instructor'
-                : 'student_results.ratings_held_course',
-            )
-          : student
-          ? studentCopy('student_results.small_n_title')
-          : copy('instructor_report_comments.small_n.title')}
-      </p>
-      <p className="pulse-small-n-notice__body">
-        {'threshold' in props
-          ? fillCopy('instructor_report_comments.small_n.body', {
-              threshold: String(props.threshold),
-            })
-          : props.ratingsAbout !== undefined
-            ? studentCopy('student_results.ratings_held_body')
-            : studentCopy('student_results.small_n_body')}
-      </p>
+      <p className="pulse-small-n-notice__title">{title}</p>
+      <p className="pulse-small-n-notice__body">{body}</p>
     </div>
   );
 }
