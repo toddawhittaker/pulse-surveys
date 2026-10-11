@@ -49,14 +49,24 @@ export function SmallNNotice(
         /** The configured number of distinct commenters a stream's raw comments are held until. */
         readonly threshold: number;
       }
-    | { readonly audience: 'student' },
+    | {
+        readonly audience: 'student';
+        /** Set for a stream whose ratings are held: the notice then speaks of ratings, not comments. */
+        readonly ratingsAbout?: 'instructor' | 'course';
+      },
 ): JSX.Element {
   const student = props.audience === 'student';
   return (
     <div className="pulse-small-n-notice">
       <FlatPulseLine />
       <p className="pulse-small-n-notice__title">
-        {student
+        {props.audience === 'student' && props.ratingsAbout !== undefined
+          ? studentCopy(
+              props.ratingsAbout === 'instructor'
+                ? 'student_results.ratings_held_instructor'
+                : 'student_results.ratings_held_course',
+            )
+          : student
           ? studentCopy('student_results.small_n_title')
           : copy('instructor_report_comments.small_n.title')}
       </p>
@@ -65,7 +75,9 @@ export function SmallNNotice(
           ? fillCopy('instructor_report_comments.small_n.body', {
               threshold: String(props.threshold),
             })
-          : studentCopy('student_results.small_n_body')}
+          : props.ratingsAbout !== undefined
+            ? studentCopy('student_results.ratings_held_body')
+            : studentCopy('student_results.small_n_body')}
       </p>
     </div>
   );

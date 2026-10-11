@@ -32,11 +32,15 @@
 
     <h2 style="font-family:var(--font-display);font-weight:600;font-size:var(--text-3);margin:var(--space-7) 0 var(--space-4);color:var(--spruce)">Your class this week</h2>
     <dc-import name="TrendDuo" instr-section="{{ trendI }}" course-section="{{ trendC }}" total-weeks="{{ totalWeeks }}" term-offset="{{ termOffset }}" hint-size="100%,340px"></dc-import>
+    <sc-if value="{{ showFigures }}" hint-placeholder-val="{{ true }}">
     <div style="font-family:var(--font-mono);font-size:var(--text-2);color:var(--spruce);margin-top:var(--space-5)">Class median: {{ medianH }} h on this course</div>
+    </sc-if>
 
+    <sc-if value="{{ showFigures }}" hint-placeholder-val="{{ true }}">
     <div style="margin-top:var(--space-7)">
       <dc-import name="RatingHistogram" title="“My instructor supported my learning”" counts="{{ q1Counts }}" unit="percent" hint-size="100%,180px"></dc-import>
     </div>
+    </sc-if>
     <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
       <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-5) 0 var(--space-3)">About the instructor</div>
       <sc-if value="{{ hasInstr }}" hint-placeholder-val="{{ true }}">
@@ -51,9 +55,11 @@
       </sc-if>
     </sc-if>
 
+    <sc-if value="{{ showFigures }}" hint-placeholder-val="{{ true }}">
     <div style="margin-top:var(--space-7)">
       <dc-import name="RatingHistogram" title="“Materials and activities supported my learning”" counts="{{ q2Counts }}" unit="percent" hint-size="100%,180px"></dc-import>
     </div>
+    </sc-if>
     <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
       <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-5) 0 var(--space-3)">About the course</div>
       <sc-if value="{{ hasCourse }}" hint-placeholder-val="{{ true }}">
@@ -130,7 +136,7 @@ class Component extends DCLogic {
       nextWeek: () => this.setState({ viewWeek: Math.min(current, week + 1) }),
       courseLine: 'BIOL 2150 — Principles of Ecology · R3WW',
       showAwaiting: awaiting, showResults: !awaiting,
-      smallN, showComments: !awaiting && !smallN,
+      smallN, showFigures: !smallN, showComments: !awaiting && !smallN,
       responseVariant: (mode === 'on-behalf' && week === current) ? 'on-behalf' : 'instructor',
       responseDate: this.DATES[week - 1]
     };
@@ -140,8 +146,8 @@ class Component extends DCLogic {
         courseLine: 'BIOL 2150 — Principles of Ecology · R1WW',
         responseBody: 'Thanks to everyone who has responded so far. The reading load note is heard \u2014 I\u2019m posting a priority guide for the midterm chapters this week.',
         trendI: [3.7, 4.0, 3.3, 3.7, 4.0, 3.7, 3.7], trendC: [3.3, 3.7, 3.0, 3.3, 3.7, 3.3, 4.0],
-        q1Counts: [0, 0, 33, 67, 0], q2Counts: [0, 0, 34, 33, 33],
-        medianH: '5.5',
+        q1Counts: [], q2Counts: [],
+        medianH: '',
         instrComments: [], courseComments: [],
         hasInstr: false, noInstr: false, hasCourse: false, noCourse: false
       });

@@ -125,7 +125,7 @@ export function RatingHistogram({
   const reading = percent
     ? fillStudentCopy('student_results.distribution_reading', {
         stream: title,
-        shares: buckets.map((bucket) => String(bucket.count)).join(', '),
+        shares: buckets.map((bucket) => `${String(bucket.count)}%`).join(', '),
       })
     : mean === null
       ? fillCopy('instructor_report_stats.distribution_reading_absent', { stream: title })

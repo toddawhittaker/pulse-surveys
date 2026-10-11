@@ -46,7 +46,7 @@ export const STUDENT_RESULTS_COPY = {
   'student_results.trend_mean_header': 'Mean rating',
   // The histogram's spoken form: shares of the week's ratings, never counts.
   'student_results.distribution_reading':
-    '{stream}, ratings this week as percentages for ratings 1 to 5: {shares}.',
+    '{stream}, ratings this week, percent of ratings 1 to 5: {shares}.',
   'student_results.workload_median': 'Class median: {hours} h on this course',
 
   // The comments. A stream held back says why in one voice to the student and
@@ -54,7 +54,11 @@ export const STUDENT_RESULTS_COPY = {
   'student_results.comments_none': 'No comments this week.',
   'student_results.small_n_title': 'Comments in this group stay private this week',
   'student_results.small_n_body':
-    'Comments appear here once enough classmates have commented. Until then they stay private, so that none can be traced back to the person who left it. They may appear later among comments from earlier weeks.',
+    'Comments appear here once enough classmates have commented. They may appear later among comments from earlier weeks.',
+  // A stream whose ratings are held. It names the stream and says nothing about comments.
+  'student_results.ratings_held_instructor': 'Ratings about the instructor are not shown this week',
+  'student_results.ratings_held_course': 'Ratings about the course are not shown this week',
+  'student_results.ratings_held_body': 'They appear once enough classmates have rated.',
   'student_results.released_heading': 'Comments from earlier weeks',
 
   // A refusal of any kind, one calm sentence that says nothing about why.

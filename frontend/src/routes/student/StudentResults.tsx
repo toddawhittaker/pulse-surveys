@@ -247,7 +247,7 @@ function Distribution({ stream }: { readonly stream: StudentStream }): JSX.Eleme
   if (stream.shares === null) {
     return (
       <div className="pulse-results-held-chart">
-        <SmallNNotice audience="student" />
+        <SmallNNotice audience="student" ratingsAbout={stream.stream} />
       </div>
     );
   }

@@ -434,7 +434,7 @@ describe('ratings as shares', () => {
     expect(histograms).toHaveLength(2);
     const first = histograms[0];
     expect(first?.textContent).toContain('40%');
-    expect(first?.getAttribute('aria-label')).toContain('0, 10, 20, 40, 30');
+    expect(first?.getAttribute('aria-label')).toContain('0%, 10%, 20%, 40%, 30%');
     expect(first?.getAttribute('aria-label')).not.toMatch(/responses|mean/);
     expect(first?.querySelector('.pulse-stat-histogram-summary')).toBeNull();
   });
@@ -449,7 +449,28 @@ describe('ratings as shares', () => {
     expect(page().querySelectorAll('.pulse-stat-histogram')).toHaveLength(1);
     const held = page().querySelector('.pulse-results-held-chart');
     expect(held?.querySelector('.pulse-small-n-notice')).not.toBeNull();
-    expect(held?.textContent).not.toMatch(/\d/);
+    expect(held?.textContent).not.toMatch(/\d|too few/);
+    expect(held?.textContent).toContain('Ratings about the instructor are not shown this week');
+    expect(held?.textContent).not.toMatch(/comment/i);
+  });
+
+  it('tells the held ratings slot from the held comments slot, and one never speaks for the other', async () => {
+    // Ratings held, comments shown: nothing says comments are hidden.
+    const ratingsOnly = {
+      ...stream('instructor', { comments: [INSTRUCTOR_COMMENT] }),
+      shares: null,
+    };
+    await mountWith(withFigures('published', { streams: [ratingsOnly, stream('course', { comments: [] })] }));
+    await screen.findByText(INSTRUCTOR_COMMENT);
+    expect(page().textContent).toContain('Ratings about the instructor are not shown this week');
+    expect(page().textContent).not.toContain('Comments in this group stay private');
+    cleanup();
+    // Comments held, ratings shown: nothing says ratings are hidden.
+    const commentsOnly = { ...stream('instructor', { small: true }), shares: { '1': 0, '2': 10, '3': 20, '4': 40, '5': 30 } };
+    await mountWith(withFigures('published', { streams: [commentsOnly, stream('course', { comments: [] })] }));
+    await screen.findByText(CONFIDENTIALITY);
+    expect(page().textContent).toContain('Comments in this group stay private');
+    expect(page().textContent).not.toContain('Ratings about');
   });
 
   it('says a week with no mean has no figure, with no number or reason', async () => {
