@@ -45,6 +45,7 @@ const AN_EXCLUSION_BY_A_LEAD: LogRowView = {
   flagged: true,
   reason: null,
   decided_on: '2026-10-20',
+  is_undo: false,
   excerpt: 'This professor is clueless and should not be allowed near a classroom.',
 };
 

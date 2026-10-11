@@ -29,6 +29,7 @@ const AN_EXCLUSION_BY_A_LEAD: LogRowView = {
   flagged: true,
   reason: null,
   decided_on: '2026-10-20',
+  is_undo: false,
   excerpt: 'This professor is clueless and should not be allowed near a classroom.',
 };
 
@@ -40,6 +41,7 @@ const AN_UNFLAGGED_EXCLUSION: LogRowView = {
   flagged: false,
   reason: 'Personal attack with no actionable content.',
   decided_on: '2026-10-13',
+  is_undo: false,
   excerpt: 'The pace is fine but the grader is a joke.',
 };
 
@@ -51,6 +53,7 @@ const A_KEEP_WITH_NO_EXCERPT: LogRowView = {
   flagged: true,
   reason: null,
   decided_on: '2026-09-28',
+  is_undo: false,
   excerpt: null,
 };
 
