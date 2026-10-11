@@ -89,7 +89,18 @@ export function InstructorResponse({
     readonly themes: readonly CheckThemeView[];
   } | null>(null);
   const [busy, setBusy] = useState<Busy>(null);
-  const [announcement, setAnnouncement] = useState('');
+  // Counted so that the same sentence twice is a new node, which a screen
+  // reader announces again.
+  const [announcement, setAnnouncement] = useState<{
+    readonly text: string;
+    readonly n: number;
+  }>({
+    text: '',
+    n: 0,
+  });
+  // A failed draft or check is advice that did not arrive; only a failed
+  // publish or edit is a fault in what the instructor wrote or sent.
+  const [advisory, setAdvisory] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
   const textRef = useRef(text);
@@ -99,6 +110,8 @@ export function InstructorResponse({
   const fieldId = useId();
   const counterId = useId();
   const problemId = useId();
+  const replaceId = useId();
+  const replaceYesRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -110,10 +123,19 @@ export function InstructorResponse({
   const published = view.response;
   const composing = published === null || editing;
 
+  useEffect(() => {
+    if (pendingDraft !== null) replaceYesRef.current?.focus();
+  }, [pendingDraft]);
+
+  function announce(text: string): void {
+    setAnnouncement((last) => ({ text, n: last.n + 1 }));
+  }
+
   function changeText(next: string): void {
     textRef.current = next;
     setText(next);
     setProblem(null);
+    setAdvisory(null);
     if (next === '') {
       setSeeded(false);
       setPendingDraft(null);
@@ -121,21 +143,27 @@ export function InstructorResponse({
   }
 
   function failure(
-    outcome: { readonly kind: 'refused' | 'session-ended' | 'unavailable'; readonly detail?: string | null },
+    outcome: {
+      readonly kind: 'refused' | 'session-ended' | 'unavailable';
+      readonly detail?: string | null;
+    },
     unavailable: Parameters<typeof copy>[0],
   ): string {
-    if (outcome.kind === 'session-ended') return copy('instructor_report_page.response_session_ended');
+    if (outcome.kind === 'session-ended')
+      return copy('instructor_report_page.response_session_ended');
     return outcome.detail ?? copy(unavailable);
   }
 
   async function fetchDraft(): Promise<void> {
+    if (busy !== null) return;
     setBusy('draft');
     setProblem(null);
+    setAdvisory(null);
     const outcome = await actions.draft();
     if (!mounted.current) return;
     setBusy(null);
     if (outcome.kind !== 'draft') {
-      setProblem(failure(outcome, 'instructor_report_page.response_draft_unavailable'));
+      setAdvisory(failure(outcome, 'instructor_report_page.response_draft_unavailable'));
       return;
     }
     // Decided when the draft arrives, not when the button was pressed: text
@@ -151,26 +179,30 @@ export function InstructorResponse({
     changeText(draft);
     setSeeded(true);
     setPendingDraft(null);
-    setAnnouncement(copy('instructor_report_page.response_draft_ready'));
+    announce(copy('instructor_report_page.response_draft_ready'));
     fieldRef.current?.focus();
   }
 
   async function runCheck(): Promise<void> {
+    if (busy !== null || textRef.current.trim() === '') return;
     const ranOn = textRef.current;
     setBusy('check');
     setProblem(null);
+    setAdvisory(null);
     const outcome = await actions.check(ranOn);
     if (!mounted.current) return;
     setBusy(null);
     if (outcome.kind !== 'checked') {
-      setProblem(failure(outcome, 'instructor_report_page.response_check_unavailable'));
+      setAdvisory(failure(outcome, 'instructor_report_page.response_check_unavailable'));
       return;
     }
     setCheck({ ranOn, themes: outcome.unaddressed });
   }
 
   async function send(): Promise<void> {
+    if (busy !== null || textRef.current.trim() === '') return;
     setBusy('write');
+    setAdvisory(null);
     setProblem(null);
     const write = { text, ai_seeded: seeded };
     const outcome = await (published === null ? actions.publish(write) : actions.edit(write));
@@ -185,7 +217,7 @@ export function InstructorResponse({
     setEditing(false);
     changeText('');
     setCheck(null);
-    setAnnouncement(
+    announce(
       copy(
         wasEdit
           ? 'instructor_report_page.response_edited_announce'
@@ -218,18 +250,15 @@ export function InstructorResponse({
 
   return (
     <section className="pulse-instructor-response" aria-labelledby={`${fieldId}-heading`}>
-      <h2
-        className="pulse-report-heading"
-        id={`${fieldId}-heading`}
-        ref={headingRef}
-        tabIndex={-1}
-      >
+      <h2 className="pulse-report-heading" id={`${fieldId}-heading`} ref={headingRef} tabIndex={-1}>
         {onBehalf
           ? leadershipCopy('leadership_response.composer.heading')
           : copy('instructor_report_page.response_heading')}
       </h2>
-      <p className="pulse-instructor-response__live" role="status">
-        {announcement}
+      {/* Always in the tree: a live region added together with its text is not
+          reliably announced. Hidden by position, never by display. */}
+      <p className="pulse-instructor-response__live sr-only" role="status">
+        <span key={announcement.n}>{announcement.text}</span>
       </p>
 
       {published === null && view.state === 'awaiting' ? (
@@ -254,7 +283,11 @@ export function InstructorResponse({
           />
           {view.state === 'published' || (onBehalf && view.state === 'on-behalf') ? (
             <div className="pulse-instructor-response__actions">
-              <button type="button" className="pulse-instructor-response__button" onClick={startEdit}>
+              <button
+                type="button"
+                className="pulse-instructor-response__button"
+                onClick={startEdit}
+              >
                 {copy('instructor_report_page.response_edit')}
               </button>
             </div>
@@ -296,11 +329,16 @@ export function InstructorResponse({
           </span>
 
           {pendingDraft === null ? null : (
-            <div className="pulse-instructor-response__confirm" role="group">
-              <p>{copy('instructor_report_page.response_replace_prompt')}</p>
+            <div
+              className="pulse-instructor-response__confirm"
+              role="group"
+              aria-labelledby={replaceId}
+            >
+              <p id={replaceId}>{copy('instructor_report_page.response_replace_prompt')}</p>
               <div className="pulse-instructor-response__actions">
                 <button
                   type="button"
+                  ref={replaceYesRef}
                   className="pulse-instructor-response__button"
                   onClick={() => {
                     applyDraft(pendingDraft);
@@ -326,7 +364,7 @@ export function InstructorResponse({
             <button
               type="button"
               className="pulse-instructor-response__button"
-              disabled={busy !== null}
+              aria-disabled={busy !== null}
               onClick={() => void fetchDraft()}
             >
               {copy('instructor_report_page.response_use_draft')}
@@ -334,7 +372,7 @@ export function InstructorResponse({
             <button
               type="button"
               className="pulse-instructor-response__button"
-              disabled={busy !== null || blank}
+              aria-disabled={busy !== null || blank}
               onClick={() => void runCheck()}
             >
               {copy('instructor_report_page.response_check')}
@@ -342,7 +380,7 @@ export function InstructorResponse({
             <button
               type="button"
               className="pulse-instructor-response__button pulse-instructor-response__button--primary"
-              disabled={busy !== null || blank}
+              aria-disabled={busy !== null || blank}
               onClick={() => void send()}
             >
               {copy(
@@ -352,7 +390,11 @@ export function InstructorResponse({
               )}
             </button>
             {published === null ? null : (
-              <button type="button" className="pulse-instructor-response__button" onClick={cancelEdit}>
+              <button
+                type="button"
+                className="pulse-instructor-response__button"
+                onClick={cancelEdit}
+              >
                 {copy('instructor_report_page.response_cancel_edit')}
               </button>
             )}
@@ -367,6 +409,11 @@ export function InstructorResponse({
                     ? 'instructor_report_page.response_checking'
                     : 'instructor_report_page.response_publishing',
               )}
+            </p>
+          )}
+          {advisory === null ? null : (
+            <p className="pulse-instructor-response__advisory" role="status">
+              {advisory}
             </p>
           )}
           {problem === null ? null : (

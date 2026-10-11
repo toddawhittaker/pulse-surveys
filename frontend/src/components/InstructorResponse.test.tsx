@@ -7,7 +7,11 @@ import type {
   ResponseWriteOutcome,
   WeekResponseRead,
 } from '../api/instructor';
-import { InstructorResponse, RESPONSE_MAX_LENGTH, type ResponseActions } from './InstructorResponse';
+import {
+  InstructorResponse,
+  RESPONSE_MAX_LENGTH,
+  type ResponseActions,
+} from './InstructorResponse';
 
 /**
  * The instructor's composer (SPEC §5.3), driven through the four calls it is
@@ -80,7 +84,7 @@ function editor(): HTMLTextAreaElement {
 
 /** Whether the named button is disabled. */
 function disabled(name: string): boolean {
-  return screen.getByRole('button', { name }).hasAttribute('disabled');
+  return screen.getByRole('button', { name }).getAttribute('aria-disabled') === 'true';
 }
 const press = (name: string) => {
   fireEvent.click(screen.getByRole('button', { name }));
@@ -93,7 +97,7 @@ describe('nothing posts without the publish button', () => {
   it('uses a draft, runs a check and edits without publishing or editing anything', async () => {
     const calls = open(UNANSWERED);
 
-    press('Use draft');
+    press('Draft with AI');
     await waitFor(() => {
       expect(editor().value).toBe('Here is the draft.');
     });
@@ -114,16 +118,17 @@ describe('nothing posts without the publish button', () => {
     await screen.findByText('Dr. Ada Marsh');
 
     expect(calls.publish).toHaveBeenCalledTimes(1);
-    expect(calls.publish).toHaveBeenCalledWith({ text: 'We heard you on pacing.', ai_seeded: false });
+    expect(calls.publish).toHaveBeenCalledWith({
+      text: 'We heard you on pacing.',
+      ai_seeded: false,
+    });
     expect(calls.edit).not.toHaveBeenCalled();
   });
 
   it('cannot publish or check an empty or blank editor', () => {
     open(UNANSWERED);
     expect(disabled('Publish')).toBe(true);
-    expect(
-      disabled('Check draft with AI'),
-    ).toBe(true);
+    expect(disabled('Check draft with AI')).toBe(true);
     type('   ');
     expect(disabled('Publish')).toBe(true);
   });
@@ -135,7 +140,9 @@ describe('the check', () => {
     type('A draft.');
     press('Check draft with AI');
 
-    const panel = await screen.findByRole('region', { name: 'Themes your draft has not addressed' });
+    const panel = await screen.findByRole('region', {
+      name: 'Themes your draft has not addressed',
+    });
     expect(within(panel).getByText('AI')).toBeTruthy();
     expect(within(panel).getByText('Pacing of the readings (3 comments)')).toBeTruthy();
     expect(within(panel).getByText('Lab equipment (1 comment)')).toBeTruthy();
@@ -147,10 +154,16 @@ describe('the check', () => {
     const calls = open(UNANSWERED);
     type('A draft.');
     press('Check draft with AI');
-    await screen.findByRole('region', { name: 'Themes your draft has not addressed' });
+    await screen.findByRole('region', {
+      name: 'Themes your draft has not addressed',
+    });
 
     type('A draft!');
-    expect(screen.queryByRole('region', { name: 'Themes your draft has not addressed' })).toBeNull();
+    expect(
+      screen.queryByRole('region', {
+        name: 'Themes your draft has not addressed',
+      }),
+    ).toBeNull();
 
     calls.check.mockResolvedValueOnce({ kind: 'checked', unaddressed: [] });
     press('Check draft with AI');
@@ -171,12 +184,13 @@ describe('the check', () => {
     type('First text.');
     press('Check draft with AI');
     type('Second text.');
-    release({ kind: 'checked', unaddressed: [{ label: 'Pacing', comment_count: 2 }] });
+    release({
+      kind: 'checked',
+      unaddressed: [{ label: 'Pacing', comment_count: 2 }],
+    });
 
     await waitFor(() => {
-      expect(disabled('Check draft with AI')).toBe(
-        false,
-      );
+      expect(disabled('Check draft with AI')).toBe(false);
     });
     expect(screen.queryByText('Pacing (2 comments)')).toBeNull();
   });
@@ -199,7 +213,8 @@ describe('the check', () => {
     type('A draft.');
     press('Check draft with AI');
 
-    expect((await screen.findByRole('alert')).textContent).toBe(sentence);
+    expect((await screen.findByText(sentence)).getAttribute('role')).toBe('status');
+    expect(screen.queryByRole('alert')).toBeNull();
     // The failure leaves the editor, the text and Publish as they were.
     expect(editor().value).toBe('A draft.');
     expect(disabled('Publish')).toBe(false);
@@ -209,7 +224,7 @@ describe('the check', () => {
 describe('using a draft', () => {
   it('fills an empty editor without asking', async () => {
     open(UNANSWERED);
-    press('Use draft');
+    press('Draft with AI');
     await waitFor(() => {
       expect(editor().value).toBe('Here is the draft.');
     });
@@ -219,7 +234,7 @@ describe('using a draft', () => {
   it('asks before replacing text the instructor wrote, and keeps it on “Keep mine”', async () => {
     open(UNANSWERED);
     type('My own words.');
-    press('Use draft');
+    press('Draft with AI');
 
     await screen.findByText('Replace what you have written with the draft?');
     expect(editor().value).toBe('My own words.');
@@ -231,7 +246,7 @@ describe('using a draft', () => {
   it('replaces on “Replace with draft”', async () => {
     open(UNANSWERED);
     type('My own words.');
-    press('Use draft');
+    press('Draft with AI');
     await screen.findByText('Replace what you have written with the draft?');
     press('Replace with draft');
     expect(editor().value).toBe('Here is the draft.');
@@ -239,19 +254,22 @@ describe('using a draft', () => {
 
   it('marks the publish as AI-seeded only while the text began as a draft', async () => {
     const calls = open(UNANSWERED);
-    press('Use draft');
+    press('Draft with AI');
     await waitFor(() => {
       expect(editor().value).toBe('Here is the draft.');
     });
     press('Publish');
     await waitFor(() => {
-      expect(calls.publish).toHaveBeenCalledWith({ text: 'Here is the draft.', ai_seeded: true });
+      expect(calls.publish).toHaveBeenCalledWith({
+        text: 'Here is the draft.',
+        ai_seeded: true,
+      });
     });
   });
 
   it('forgets that it was seeded once the editor is emptied', async () => {
     const calls = open(UNANSWERED);
-    press('Use draft');
+    press('Draft with AI');
     await waitFor(() => {
       expect(editor().value).toBe('Here is the draft.');
     });
@@ -259,24 +277,32 @@ describe('using a draft', () => {
     type('Written fresh.');
     press('Publish');
     await waitFor(() => {
-      expect(calls.publish).toHaveBeenCalledWith({ text: 'Written fresh.', ai_seeded: false });
+      expect(calls.publish).toHaveBeenCalledWith({
+        text: 'Written fresh.',
+        ai_seeded: false,
+      });
     });
   });
 
   it('shows a refused draft’s sentence and leaves the editor empty', async () => {
     const sentence = 'A draft could not be written for this week.';
     open(UNANSWERED, actions({ draft: { kind: 'refused', detail: sentence } }));
-    press('Use draft');
-    expect((await screen.findByRole('alert')).textContent).toBe(sentence);
+    press('Draft with AI');
+    expect((await screen.findByText(sentence)).getAttribute('role')).toBe('status');
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(editor().value).toBe('');
   });
 
   it('uses its own sentence when the failure carried none', async () => {
     open(UNANSWERED, actions({ draft: { kind: 'unavailable', detail: null } }));
-    press('Use draft');
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      'A draft could not be written just now. You can still write your own.',
-    );
+    press('Draft with AI');
+    expect(
+      (
+        await screen.findByText(
+          'A draft could not be written just now. You can still write your own.',
+        )
+      ).getAttribute('role'),
+    ).toBe('status');
   });
 });
 
@@ -373,5 +399,83 @@ describe('the published response', () => {
       .getAllByRole('status')
       .find((region) => region.textContent === 'Response published. Students can now read it.');
     expect(status).toBeTruthy();
+  });
+});
+
+describe('accessibility of the composer', () => {
+  it('keeps its announcement region in the tree while empty', () => {
+    open(UNANSWERED);
+    const region = screen.getAllByRole('status').find((node) => node.classList.contains('sr-only'));
+    expect(region).toBeDefined();
+    expect(region?.textContent).toBe('');
+  });
+
+  it('announces the same message again as a new node', async () => {
+    open(UNANSWERED);
+    press('Draft with AI');
+    await waitFor(() => {
+      expect(editor().value).toBe('Here is the draft.');
+    });
+    const region = screen.getAllByRole('status').find((node) => node.classList.contains('sr-only'));
+    const first = region?.firstElementChild;
+    type('');
+    press('Draft with AI');
+    await waitFor(() => {
+      expect(region?.firstElementChild).not.toBe(first);
+    });
+    expect(region?.textContent).toContain('The draft is in the editor.');
+  });
+
+  it('names the replace question and moves focus to its first button', async () => {
+    open(UNANSWERED);
+    type('My own words.');
+    press('Draft with AI');
+    const group = await screen.findByRole('group', {
+      name: 'Replace what you have written with the draft?',
+    });
+    expect(document.activeElement).toBe(
+      within(group).getByRole('button', { name: 'Replace with draft' }),
+    );
+  });
+
+  it('keeps focus on a pressed control while the request is in flight and ignores a second press', async () => {
+    const calls = actions();
+    let release: (outcome: ResponseDraftOutcome) => void = () => undefined;
+    calls.draft.mockReturnValue(
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+    );
+    open(UNANSWERED, calls);
+    const button = screen.getByRole('button', { name: 'Draft with AI' });
+    button.focus();
+    fireEvent.click(button);
+    await screen.findByText('Writing a draft…');
+    expect(button.getAttribute('aria-disabled')).toBe('true');
+    expect(button.hasAttribute('disabled')).toBe(false);
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    expect(calls.draft).toHaveBeenCalledTimes(1);
+    release({ kind: 'draft', text: 'x' });
+    await waitFor(() => {
+      expect(editor().value).toBe('x');
+    });
+  });
+
+  it('marks the editor invalid only when a publish fails, never when advice does', async () => {
+    const down = actions({ draft: { kind: 'unavailable', detail: null } });
+    open(UNANSWERED, down);
+    press('Draft with AI');
+    await screen.findByText('A draft could not be written just now. You can still write your own.');
+    expect(editor().getAttribute('aria-invalid')).toBe('false');
+    cleanup();
+
+    open(UNANSWERED, actions({ write: { kind: 'unavailable', detail: null } }));
+    type('Words.');
+    press('Publish');
+    await waitFor(() => {
+      expect(editor().getAttribute('aria-invalid')).toBe('true');
+    });
+    expect(screen.getByRole('alert')).toBeTruthy();
   });
 });

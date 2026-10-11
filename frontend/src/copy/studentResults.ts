@@ -7,7 +7,7 @@
  * prefix, and the results page is its own surface (E7-10). It shows only text
  * staff wrote, so it owes item 5 no confidentiality line today;
  * `docs/tickets/e8/carried-from-e7.md` reopens that when E8 adds anything
- * derived from students to the page. The two keys the survey page uses for its
+ * derived from students to the page. The keys the survey page uses for its
  * heading and its link to this page are filed here with the rest.
  *
  * **The words state facts and blame nobody** (`design/Usage Rules.md` §4). A
@@ -23,6 +23,9 @@ export const STUDENT_RESULTS_COPY = {
   // the reply. `{names}` is the instructors' own names, comma-joined.
   'student_results.with_instructors': 'with {names}',
   'student_results.see_reply_link': 'See your instructor’s reply',
+  // The link's accessible name: the visible text first, then the course, so
+  // several links on one page are told apart.
+  'student_results.see_reply_link_named': 'See your instructor’s reply for {course}',
 
   // The page.
   'student_results.heading': 'Your instructor’s reply',

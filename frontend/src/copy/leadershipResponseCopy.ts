@@ -14,7 +14,7 @@
  * ones they were sent.
  *
  * **Any ranking, count of instructors or name.** The owed list is a list of
- * section-weeks in the reader's own courses (SPEC §4.1 item 4); it names no
+ * sections and weeks in the reader's own courses (SPEC §4.1 item 4); it names no
  * instructor and says "response owed", never anything that blames.
  */
 
@@ -58,14 +58,14 @@ export const LEADERSHIP_RESPONSE_COPY = {
   // The owed list.
   'leadership_response.owed.heading': 'Responses owed',
   'leadership_response.owed.intro':
-    'Section-weeks in your courses whose required response has not been published 48 hours after the report opened. After 96 hours you can respond on behalf of the section.',
+    'Sections and weeks in your courses whose required response has not been published 48 hours after the report opened. After 96 hours you can respond on behalf of the section.',
   'leadership_response.owed.loading': 'Opening the list of responses owed…',
   'leadership_response.owed.unavailable':
     'The list could not be loaded just now. Reload the page to try again.',
   'leadership_response.owed.empty_title': 'No responses are owed',
   'leadership_response.owed.empty_body':
-    'Section-weeks in your courses that need a response appear here.',
-  'leadership_response.owed.list_label': 'Section-weeks with a response owed',
+    'Sections and weeks in your courses that need a response appear here.',
+  'leadership_response.owed.list_label': 'Sections and weeks with a response owed',
   'leadership_response.owed.week': 'Week {week}',
   'leadership_response.owed.respond': 'Respond on behalf',
   'leadership_response.owed.respond_aria': 'Respond on behalf for {section}, week {week}',

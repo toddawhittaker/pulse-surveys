@@ -184,7 +184,7 @@ export const INSTRUCTOR_REPORT_PAGE_COPY = {
     'This week’s results open for students when a response is published. Write a few lines below when you are ready.',
   'instructor_report_page.response_field_label': 'Your response',
   'instructor_report_page.response_remaining': '{remaining} characters left',
-  'instructor_report_page.response_use_draft': 'Use draft',
+  'instructor_report_page.response_use_draft': 'Draft with AI',
   'instructor_report_page.response_check': 'Check draft with AI',
   'instructor_report_page.response_publish': 'Publish',
   'instructor_report_page.response_publish_changes': 'Publish changes',
