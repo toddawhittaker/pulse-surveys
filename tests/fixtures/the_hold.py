@@ -252,7 +252,7 @@ def assert_the_cohorts_start_together() -> None:
             "the same term week in every section it reads. A broken world, not a red."
         )
     first_opening = REPORT_OPENS_BY_TERM_WEEK[TERM_WEEK_OF_COURSE_WEEK[1]]
-    assert ENDED_ON < first_opening.date(), (
+    assert first_opening.date() > ENDED_ON, (
         f"`ENDED_ON` ({ENDED_ON}) is not before the first report opening ({first_opening}), so "
         "the ended enrollment would be live on some day this file reads."
     )
