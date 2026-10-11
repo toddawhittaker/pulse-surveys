@@ -39,9 +39,15 @@ function results(
   role: 'INSTRUCTOR' | 'LEAD_FACULTY' | 'CHAIR' | null,
   weeks = [1, 2, 3],
 ): StudentWeekResults {
+  // The figures, comments and release group are E8-02's page to render; these
+  // tests read only the state and the response, so they serve none of them.
   return {
+    course_label: 'MATH 140',
     state,
     published_weeks: weeks,
+    streams: null,
+    workload_median: null,
+    released: null,
     response:
       role === null
         ? null
