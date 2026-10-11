@@ -19,6 +19,16 @@ connection every screen runs on. The fix round (work order, "Fix round") settles
     `section (id, term_id)` and `week (id, term_id)`, so the week is the section's
     term's.
 
+**E7-02's M2 narrows F3 to one course** (its work order's decision 1, ADR 0193):
+every policy row names its `course_id` (NOT NULL, a course of the row's prefix),
+and the setter must hold the stated role **for that course** — `LEAD_FACULTY` the
+assignment and the mapping for it, `CHAIR` the chair of its department where
+nobody leads it. So every policy row written here names a course, and the F3 twins
+name the course their setter answers for: the lead's own course, and for the
+chair the unmapped one. The M2 section at the foot adds the per-course refusals:
+a sibling lead's course, a led course for the chair, an unled course for a lead,
+a course outside the row's prefix, and no course at all.
+
 **Every write is made on `pulse_app`'s own connection** (`application_session`,
 and `application_engine` for the race), never on the superuser that seeds
 (`docs/MISTAKES.md` entry 46).
@@ -53,6 +63,7 @@ from fixtures.staff_names import (
     DEFINER_CALL,
     INSTRUCTOR_RESPONSE,
     MODE_COLUMN,
+    POLICY_COURSE_COLUMN,
     POLICY_PREFIX_COLUMN,
     POLICY_SETTER_COLUMN,
     POLICY_TIME_COLUMN,
@@ -128,17 +139,32 @@ def write_response(world: StaffNameWorld, **keywords: Any) -> Any:
     return write(world, INSTRUCTOR_RESPONSE, response_values(world, **keywords))
 
 
-def write_policy(world: StaffNameWorld, *, setter: Any, role: str) -> Any:
+def policy_values(
+    world: StaffNameWorld, *, setter: Any, role: str, course: Any, prefix: Any = None
+) -> dict[str, Any]:
+    """A whole policy row; `course` is M2's column (E7-02), `prefix` the world's unless named."""
+    if POLICY_COURSE_COLUMN not in world.tables[RESPONSE_POLICY].c:
+        pytest.fail(
+            f"`{RESPONSE_POLICY}` declares no `{POLICY_COURSE_COLUMN}`. E7-02's M2 adds it: a "
+            "policy row covers one course, fixed when written (ADR 0193)."
+        )
+    return {
+        POLICY_COURSE_COLUMN: course,
+        POLICY_PREFIX_COLUMN: the_prefix(world) if prefix is None else prefix,
+        POLICY_SETTER_COLUMN: setter,
+        ROLE_COLUMN: role,
+        MODE_COLUMN: "REQUIRED",
+        POLICY_TIME_COLUMN: datetime.now(UTC),
+    }
+
+
+def write_policy(
+    world: StaffNameWorld, *, setter: Any, role: str, course: Any, prefix: Any = None
+) -> Any:
     return write(
         world,
         RESPONSE_POLICY,
-        {
-            POLICY_PREFIX_COLUMN: the_prefix(world),
-            POLICY_SETTER_COLUMN: setter,
-            ROLE_COLUMN: role,
-            MODE_COLUMN: "REQUIRED",
-            POLICY_TIME_COLUMN: datetime.now(UTC),
-        },
+        policy_values(world, setter=setter, role=role, course=course, prefix=prefix),
     )
 
 
@@ -539,9 +565,10 @@ def test_a_policy_set_by_a_person_with_no_role_in_the_prefix_is_refused(
     assert world.lead is not None
     nobody = world.a_named_person("Nobody Holds-A-Prefix")
 
-    twin = write_policy(world, setter=world.lead.person_id, role="LEAD_FACULTY")
+    own = world.review.own_course
+    twin = write_policy(world, setter=world.lead.person_id, role="LEAD_FACULTY", course=own)
     assert twin is None, accepted_message("the course's lead setting the prefix's policy", twin)
-    failure = write_policy(world, setter=nobody, role="LEAD_FACULTY")
+    failure = write_policy(world, setter=nobody, role="LEAD_FACULTY", course=own)
     assert is_a_refusal(failure), (
         f"A person holding no role in the prefix set its policy as LEAD_FACULTY and was answered "
         f"{failure!r}. Fix round F3."
@@ -554,16 +581,20 @@ def test_a_policy_set_as_chair_by_another_departments_chair_is_refused(
 ) -> None:
     """Another department's chair, as `CHAIR`: refused; the prefix's department's chair: accepted.
 
+    Both rows name the unmapped course, the one course of the prefix the chair
+    answers for (E7-02's M2: the row's course is the one checked).
+
     **The mutation this kills:** the `CHAIR` branch checking "holds `CHAIR`
-    somewhere" rather than on the prefix's department.
+    somewhere" rather than on the course's department.
     """
     world = staff_names
     prepared(world)
     assert world.chair is not None and world.other_chair is not None
+    unled = world.review.unmapped_course
 
-    twin = write_policy(world, setter=world.chair.person_id, role="CHAIR")
+    twin = write_policy(world, setter=world.chair.person_id, role="CHAIR", course=unled)
     assert twin is None, accepted_message("the department's chair setting policy as CHAIR", twin)
-    failure = write_policy(world, setter=world.other_chair.person_id, role="CHAIR")
+    failure = write_policy(world, setter=world.other_chair.person_id, role="CHAIR", course=unled)
     assert is_a_refusal(failure), (
         f"Another department's chair set this prefix's policy as CHAIR and was answered "
         f"{failure!r}. Fix round F3."
@@ -584,9 +615,10 @@ def test_a_policy_under_a_role_the_setter_does_not_hold_is_refused(
     prepared(world)
     assert world.lead is not None
 
-    twin = write_policy(world, setter=world.lead.person_id, role="LEAD_FACULTY")
+    own = world.review.own_course
+    twin = write_policy(world, setter=world.lead.person_id, role="LEAD_FACULTY", course=own)
     assert twin is None, accepted_message("the lead setting policy as LEAD_FACULTY", twin)
-    failure = write_policy(world, setter=world.lead.person_id, role="CHAIR")
+    failure = write_policy(world, setter=world.lead.person_id, role="CHAIR", course=own)
     assert is_a_refusal(failure), (
         f"The lead, who holds no CHAIR assignment, set the prefix's policy as CHAIR and was "
         f"answered {failure!r}. Fix round F3."
@@ -644,3 +676,184 @@ def test_a_response_keyed_to_a_week_of_another_term_is_refused(staff_names: Staf
         f"under the section's term and {by_week_term!r} under the week's. Fix round F4: "
         "composite keys `(section_id, term_id)` and `(week_id, term_id)`."
     )
+
+
+# ---------------------------------------------------------------------------
+# E7-02's M2 — a policy row covers one course, and its setter answers for that course.
+# ---------------------------------------------------------------------------
+
+
+def test_a_policy_row_for_a_sibling_leads_course_is_refused(staff_names: StaffNameWorld) -> None:
+    """The lead, as `LEAD_FACULTY`, for the sibling course: refused; for their own course: accepted.
+
+    Both courses are in the prefix, so F3's prefix-wide check passes both rows;
+    only M2's per-course check can refuse the first.
+
+    **The mutation this kills:** the guard left at "holds the role over at least
+    one course in the prefix" (E7-01's F3), under which a lead writes a policy
+    row for a sibling lead's course and holds its weeks — ruling 1, and SPEC §4.1
+    item 2's sibling isolation at the write.
+    """
+    world = staff_names
+    prepared(world)
+    assert world.lead is not None
+
+    twin = write_policy(
+        world, setter=world.lead.person_id, role="LEAD_FACULTY", course=world.review.own_course
+    )
+    assert twin is None, accepted_message("the lead's row for their own course", twin)
+    failure = write_policy(
+        world, setter=world.lead.person_id, role="LEAD_FACULTY", course=world.review.sibling_course
+    )
+    assert is_a_refusal(failure), (
+        f"The lead wrote a policy row for the sibling lead's course and was answered {failure!r}. "
+        "E7-02's M2: the setter holds the stated role for the row's course."
+    )
+    assert not [
+        row
+        for row in rows_of_course(world, world.review.sibling_course)
+        if str(row[POLICY_SETTER_COLUMN]) == str(world.lead.person_id)
+    ], "The refused row for the sibling course is in the table."
+
+
+def test_a_chair_policy_row_for_a_course_that_has_a_lead_is_refused(
+    staff_names: StaffNameWorld,
+) -> None:
+    """The chair, as `CHAIR`, for the own course (which has a lead): refused; for the unled one: accepted.
+
+    **The mutation this kills:** the `CHAIR` branch without "and nobody leads the
+    course" — ruling 5: "For a course that has a lead, the chair reads the policy
+    and cannot change it."
+    """
+    world = staff_names
+    prepared(world)
+    assert world.chair is not None
+
+    twin = write_policy(
+        world, setter=world.chair.person_id, role="CHAIR", course=world.review.unmapped_course
+    )
+    assert twin is None, accepted_message("the chair's row for the unled course", twin)
+    failure = write_policy(
+        world, setter=world.chair.person_id, role="CHAIR", course=world.review.own_course
+    )
+    assert is_a_refusal(failure), (
+        f"The chair wrote a policy row for a course with a lead and was answered {failure!r}. "
+        "Ruling 5 and E7-02's M2."
+    )
+    assert not rows_of_course(world, world.review.own_course), "The refused row is in the table."
+
+
+def test_a_lead_policy_row_for_an_unled_course_of_the_prefix_is_refused(
+    staff_names: StaffNameWorld,
+) -> None:
+    """The lead, as `LEAD_FACULTY`, for the unled course: refused; for their own course: accepted.
+
+    One level out (`docs/MISTAKES.md` entry 53): the lead holds `LEAD_FACULTY` in
+    this prefix and the course has no lead at all, so a check that asked "does
+    anyone else lead it?" rather than "does this setter lead it?" passes. The
+    unled course is the chair's (SPEC §2.1).
+
+    **The mutation this kills:** the per-course check written as "the course is
+    not led by somebody else".
+    """
+    world = staff_names
+    prepared(world)
+    assert world.lead is not None
+
+    twin = write_policy(
+        world, setter=world.lead.person_id, role="LEAD_FACULTY", course=world.review.own_course
+    )
+    assert twin is None, accepted_message("the lead's row for their own course", twin)
+    failure = write_policy(
+        world,
+        setter=world.lead.person_id,
+        role="LEAD_FACULTY",
+        course=world.review.unmapped_course,
+    )
+    assert is_a_refusal(failure), (
+        f"The lead wrote a LEAD_FACULTY policy row for the unled course and was answered "
+        f"{failure!r}. That course falls to its chair; E7-02's M2."
+    )
+
+
+def test_a_policy_row_naming_a_course_outside_its_prefix_is_refused(
+    staff_names: StaffNameWorld,
+) -> None:
+    """The lead also leads a course of another prefix; a row pairing that course with this prefix is refused.
+
+    The lead holds `LEAD_FACULTY` and the mapping for the foreign course, and
+    leads a course in this prefix too, so both the per-course check and F3's
+    prefix check pass. Only the agreement of `course_id` with `prefix_id` (M2's
+    composite key, or the trigger's check) can refuse it. The twin names the
+    foreign course with its own prefix, and is accepted.
+
+    **The mutation this kills:** `course_id` and `prefix_id` held independently,
+    so a row can say "this prefix" while covering a course elsewhere — a switch
+    that reads as one prefix's and holds another's weeks.
+    """
+    world = staff_names
+    prepared(world)
+    assert world.lead is not None
+    prefix_table = require_table(world.tables, "prefix")
+    course_table = require_table(world.tables, "course")
+    chain: dict[str, Any] = {}
+    foreign_prefix = world.rows.seed("prefix", chain)
+    chain["prefix"] = foreign_prefix
+    foreign_course = world.rows.seed("course", chain)
+    world.rows.commit()
+    foreign_prefix_id = foreign_prefix[single_primary_key(prefix_table)]
+    foreign_course_id = foreign_course[single_primary_key(course_table)]
+    assert str(foreign_prefix_id) != str(the_prefix(world)), "The foreign prefix is this one."
+    world.review.graph.assign("LEAD_FACULTY", scope=foreign_course_id, person=world.lead.person_id)
+    world.review.graph.lead_mapping(person=world.lead.person_id, course=foreign_course_id)
+    world.rows.commit()
+
+    twin = write_policy(
+        world,
+        setter=world.lead.person_id,
+        role="LEAD_FACULTY",
+        course=foreign_course_id,
+        prefix=foreign_prefix_id,
+    )
+    assert twin is None, accepted_message("the foreign course's row under its own prefix", twin)
+    failure = write_policy(
+        world, setter=world.lead.person_id, role="LEAD_FACULTY", course=foreign_course_id
+    )
+    assert is_a_refusal(failure), (
+        f"A policy row naming this prefix and a course of another prefix was answered {failure!r}. "
+        "E7-02's work order, decision 1: the row's course is in its prefix."
+    )
+
+
+def test_a_policy_row_naming_no_course_is_refused(staff_names: StaffNameWorld) -> None:
+    """The lead's row with no `course_id`: refused; the same row naming their course: accepted.
+
+    **The mutation this kills:** `course_id` nullable, under which a row covering
+    no course is written and the gate — which reads policy by course — never
+    finds it, while the setter's switch silently does nothing.
+    """
+    world = staff_names
+    prepared(world)
+    assert world.lead is not None
+
+    twin = write_policy(
+        world, setter=world.lead.person_id, role="LEAD_FACULTY", course=world.review.own_course
+    )
+    assert twin is None, accepted_message("the lead's row naming their course", twin)
+    failure = write_policy(world, setter=world.lead.person_id, role="LEAD_FACULTY", course=None)
+    assert is_a_refusal(failure), (
+        f"A policy row naming no course was answered {failure!r}. E7-02's M2: `course_id` is "
+        "NOT NULL."
+    )
+
+
+def rows_of_course(world: StaffNameWorld, course: Any) -> list[Any]:
+    """Every `response_policy` row covering `course`, read on the superuser connection."""
+    table = world.tables[RESPONSE_POLICY]
+    session = world.rows.session
+    session.rollback()
+    found = list(
+        session.execute(table.select().where(table.c[POLICY_COURSE_COLUMN] == course)).mappings()
+    )
+    session.rollback()
+    return found

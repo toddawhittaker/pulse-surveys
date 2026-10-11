@@ -4380,8 +4380,8 @@ MEMBER_OF_ROLES = """
 #     that held a week. The server's half is
 #     `test_the_response_records_are_append_only_as_production_runs_them.py`.
 #     **What these tables carry, for §4.1.** A section, a course week, a prefix, a
-#     staff member as a `person` key, a role token, a mode, a flag, an instant and
-#     staff-written text; no student. Decided in E7-01, which grants with the
+#     course (E7-02's M2, on `response_policy`), a staff member as a `person` key,
+#     a role token, a mode, a flag, an instant and staff-written text; no student. Decided in E7-01, which grants with the
 #     tables because no later E7 ticket adds a migration (`docs/tickets/e7/README.md`,
 #     "Counters"); spent by E7-02 and E7-03.
 
@@ -4647,6 +4647,13 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
 # (ADR 0187), so a connection that could write it could put a row before another
 # — and there is no `UPDATE` or `DELETE` on either table at all. The server's half
 # is `test_the_response_records_are_append_only_as_production_runs_them.py`.
+#
+# **E7-02's M2 spends one more, `INSERT` on `response_policy(course_id)`** (ADR
+# 0193). A policy row covers one course, fixed when it is written, because lead
+# mappings keep no history and the gate cannot ask who was responsible for a
+# course at a past moment. The setter's switch for a prefix is written as one row
+# per course they are responsible for there, and this is the column each row names
+# its course in. Nothing else on either table changes: no `UPDATE`, no `DELETE`.
 RUNTIME_COLUMN_PRIVILEGES = frozenset(
     {
         (APPLICATION_ROLE, "course", "lms_title", "UPDATE"),
@@ -4684,6 +4691,7 @@ RUNTIME_COLUMN_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "response_policy", "role", "INSERT"),
         (APPLICATION_ROLE, "response_policy", "mode", "INSERT"),
         (APPLICATION_ROLE, "response_policy", "set_at", "INSERT"),
+        (APPLICATION_ROLE, "response_policy", "course_id", "INSERT"),
     }
 )
 

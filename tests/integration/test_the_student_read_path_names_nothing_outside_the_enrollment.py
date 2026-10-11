@@ -71,12 +71,19 @@ which SPEC §5.4 forbids a student view by name; and a session that is not this
 student's must be refused rather than answered, which is the access half of the
 same rule.
 
+**E7-02's results route takes path parameters**, so the sweep drives it by name
+(its done-when 7): both sections are given a window over term week 12, a named
+teacher and a reply, and the student's read of their own section must carry their
+own reply and nothing of the other section — its row, its window, its third
+student, its reply or its teacher's name. Every other parameterised GET still
+fails the sweep until something drives it.
+
 **The marker sits at module level**, in the list form beside `integration` and
 `lti`, and not on each test: the rule that sweep pins is *where* the mark sits, so
 that this module's next denial test inherits it.
 """
 
-from datetime import UTC, date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -84,16 +91,19 @@ from zoneinfo import ZoneInfo
 import pytest
 from fixtures.landing import ENDED_ON_COLUMN, ENROLLMENT_TABLE, STARTED_ON_COLUMN
 from fixtures.routing import every_route, paths_of, student_visible_routes
+from fixtures.staff_names import IDENTITY_NAME_COLUMN
 from fixtures.student_read import (
     AUTHENTICATE_HEADER,
     AUTHENTICATE_SCHEME,
     DEFAULT_INSTITUTION_TIMEZONE,
+    ENROLLED_COHORT,
     ENROLLED_SINCE,
     INSIDE_THE_WINDOW,
     OTHER_SECTION_COMMENT,
     OTHER_SECTION_WORKLOAD,
     REFUSED_STATUS,
     STUDENT_READ_PATH,
+    UNENROLLED_COHORT,
     StudentReadDoor,
     around,
     key_of,
@@ -101,6 +111,8 @@ from fixtures.student_read import (
     telling_values,
 )
 from fixtures.supervision import require_table
+from fixtures.survey_windows import SEEDED_COHORTS
+from fixtures.the_hold import a_reply_in, results_route, results_url
 
 pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
 
@@ -122,6 +134,70 @@ PLANTED_OPEN_PATH = "/e2-09-planted/open-to-anybody"
 # outright, and the body scan runs over whatever the route answers however it was
 # asked. This is the cheap check that the ordinary spellings do nothing.
 SECTION_PARAMETERS = ("section_id", "section", "section_code")
+
+
+# E7-02's results route, driven by name. Term week 12 is a week both sections run
+# and whose report has opened (2026-11-09 11:00 UTC) before the instant the door
+# stands at (`INSIDE_THE_WINDOW`, 2026-11-14): course week 9 of the enrolled `D`
+# section (which starts in term week 4) and course week 6 of the other `Q` section
+# (term week 7). Written out, and checked against the cohorts in
+# `read_the_results_of_both_sections`, rather than derived (`docs/MISTAKES.md`
+# entry 19).
+RESULTS_TERM_WEEK = 12
+RESULTS_COURSE_WEEK = 9
+OTHER_RESULTS_COURSE_WEEK = 6
+RESULTS_PUBLISHED_AT = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+OWN_TEACHER_NAME = "Ottilie Brennand-Teaches-D"
+OTHER_TEACHER_NAME = "Lucasta Fairweather-Teaches-Q"
+OWN_REPLY = "E7-02 the enrolled section's own reply for term week twelve"
+OTHER_REPLY = "E7-02 the other section's reply, which this student never reads"
+
+
+def read_the_results_of_both_sections(
+    door: StudentReadDoor, web_identity: Any, template: str
+) -> tuple[Any, str, set[str]]:
+    """Both sections answered for term week 12; the student reads their own section's results.
+
+    Each section gets a window over term week 12, a named teacher (a live
+    `INSTRUCTOR` grant, which E7-01's trigger requires of a reply's author) and a
+    reply. Answers the student's read, their own reply's text, and the other
+    section's reply and teacher's name — what a read widened past the enrollment
+    would carry.
+    """
+    world = door.world
+    for cohort, course_week in (
+        (ENROLLED_COHORT, RESULTS_COURSE_WEEK),
+        (UNENROLLED_COHORT, OTHER_RESULTS_COURSE_WEEK),
+    ):
+        first_term_week = SEEDED_COHORTS[cohort][1]
+        assert RESULTS_TERM_WEEK - first_term_week + 1 == course_week, (
+            f"Cohort {cohort!r} starts in term week {first_term_week}, so term week "
+            f"{RESULTS_TERM_WEEK} is not its course week {course_week}. A broken world."
+        )
+    term_id = key_of(world.tables, "term", world.term)
+    week_id = key_of(world.tables, "week", world.calendar.weeks[RESULTS_TERM_WEEK])
+    for section, name, reply in (
+        (world.enrolled_section, OWN_TEACHER_NAME, OWN_REPLY),
+        (world.other_section, OTHER_TEACHER_NAME, OTHER_REPLY),
+    ):
+        section_id = key_of(world.tables, "section", section)
+        world.seed_window_over(section, RESULTS_TERM_WEEK)
+        teacher = web_identity.person(**{IDENTITY_NAME_COLUMN: name})
+        world.rows.graph.assign("INSTRUCTOR", scope=section_id, person=teacher)
+        world.rows.commit()
+        a_reply_in(
+            world.rows,
+            section_id=section_id,
+            term_id=term_id,
+            week_id=week_id,
+            author=teacher,
+            body=reply,
+            published_at=RESULTS_PUBLISHED_AT,
+        )
+    url = results_url(
+        template, section_id=world.enrolled_section_id, course_week=RESULTS_COURSE_WEEK
+    )
+    return door.get(url), OWN_REPLY, {OTHER_REPLY, OTHER_TEACHER_NAME}
 
 
 # `dependencies_of` was defined here until E3-07, and `student_visible_routes`
@@ -242,7 +318,7 @@ def test_the_running_application_serves_at_least_one_student_visible_route(
 
 
 def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in(
-    student_read_door: StudentReadDoor, require_student_dependency: Any
+    student_read_door: StudentReadDoor, require_student_dependency: Any, web_identity: Any
 ) -> None:
     """SPEC §4.1 item 1: a student-visible path never names another section.
 
@@ -310,17 +386,22 @@ def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in
         "diagnosed."
     )
 
+    # E7-02's results route takes path parameters and is driven by name at the
+    # foot of this test; every other parameterised GET is a route nothing drives.
+    results_template = results_route(student_read_door.application)
     undriveable = sorted(
         getattr(route, "path", "")
         for route in routes
-        if "{" in getattr(route, "path", "") and "GET" in (getattr(route, "methods", None) or set())
+        if "{" in getattr(route, "path", "")
+        and "GET" in (getattr(route, "methods", None) or set())
+        and getattr(route, "path", "").rstrip("/") != results_template
     )
     assert not undriveable, (
         f"These student-visible routes answer GET and take a path parameter: {undriveable}. This "
-        "sweep drives a parameterless GET, so it cannot read them — and a route it cannot read is "
-        "a route SPEC §4.1 item 1 is unasserted over. Give it a driver here, in the same change "
-        "that adds it; a sweep that skipped it would report a clean pass over a path nobody had "
-        "looked at (`docs/MISTAKES.md` entry 2)."
+        "sweep drives a parameterless GET, and E7-02's results route by name, so it cannot read "
+        "them — and a route it cannot read is a route SPEC §4.1 item 1 is unasserted over. Give it "
+        "a driver here, in the same change that adds it; a sweep that skipped it would report a "
+        "clean pass over a path nobody had looked at (`docs/MISTAKES.md` entry 2)."
     )
 
     world = student_read_door.world
@@ -370,6 +451,8 @@ def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in
         path = getattr(route, "path", "")
         if "GET" not in (getattr(route, "methods", None) or set()):
             continue
+        if path.rstrip("/") == results_template:
+            continue
         answered = student_read_door.get(path)
         assert answered.status_code == 200, (
             f"`GET {path}` answered {answered.status_code} for a student with a live enrollment "
@@ -398,6 +481,27 @@ def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in
             "here belongs to the other side alone."
         )
         scanned.append(path)
+
+    # E7-02's results route, by name. Its payload carries no section identifier,
+    # so its readable-something control is the student's own section's reply;
+    # what it must not carry is everything above plus the other section's own
+    # reply and its teacher's name, planted for the same course week.
+    answered, own_reply, theirs = read_the_results_of_both_sections(
+        student_read_door, web_identity, results_template
+    )
+    assert answered.status_code == 200 and own_reply in answered.text, (
+        f"`GET {results_template}` for the student's own section answered "
+        f"{answered.status_code} {answered.text[:300]!r}; it must carry that section's reply, or "
+        "its silence about the other section means nothing."
+    )
+    surface = response_surface(answered)
+    leaked = sorted(value for value in forbidden | theirs if value in surface)
+    assert not leaked, (
+        f"`GET {results_template}` named {leaked[:5]}, belonging to a section this student is not "
+        f"enrolled in. The first sits in {around(surface, leaked[0])!r}.\n\nSPEC §4.1 item 1, over "
+        "E7-02's results route: the reply read is the student's own section's, never a sibling's."
+    )
+    scanned.append(results_template)
 
     assert scanned, (
         f"None of the student-visible routes {sorted(paths_of(routes))} answers GET, so this sweep "

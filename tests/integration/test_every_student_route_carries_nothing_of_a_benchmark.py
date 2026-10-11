@@ -68,6 +68,17 @@ read before submitting, the submit's own answer, the read after — and requires
 each to be clean *and* the second read to differ from the first, so the sweep is
 run over a sequence that actually moved rather than three copies of one answer.
 
+**E7-02 adds a student route with path parameters** (done-when 7: "The
+invariant-marked student-route sweep reaches the new route and finds no
+comparison-set or university figure"): `GET …/sections/{section_id}/weeks/
+{course_week}/results`. The loop above drives parameterless GETs only, so the
+results route is driven by name, for the hero section at the benchmark week with
+a reply published there, and its payload is swept for stemmed keys and searched
+for the four statistics alongside the survey read. Its payload carries no section
+identifier, so the readable-something control for it is a `published` state with
+the reply, not the section's id. The structural half is
+`tests/unit/test_the_student_results_payload_carries_nothing_of_a_benchmark.py`.
+
 **The marker sits at module level**, in the list form, as the E2-09 module's
 does: this file's name matches the `carries_nothing` denial shape, and
 `tests/unit/test_every_confidentiality_denial_module_sits_inside_the_invariant_pass.py`
@@ -75,10 +86,18 @@ refuses such a module marked per test.
 """
 
 from collections.abc import Callable
+from datetime import timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from fixtures.report_api import PAYLOAD_STREAM_KEY, ReportDoor, StudentInTheReportWorld
+from fixtures.report_api import (
+    PAYLOAD_STREAM_KEY,
+    REPORT_OPENS_BY_TERM_WEEK,
+    TERM_WEEK_OF_COURSE_WEEK,
+    ReportDoor,
+    StudentInTheReportWorld,
+)
 from fixtures.report_benchmarks import (
     BENCHMARK_MEMBER,
     COMPARISON_POPULATION,
@@ -101,6 +120,9 @@ from fixtures.student_read import (
     scalars_in,
 )
 from fixtures.submit import WORKLOAD_POSITION, a_valid_submission, submit_route
+from fixtures.the_hold import PUBLISHED as RESULTS_PUBLISHED
+from fixtures.the_hold import STATE as RESULTS_STATE
+from fixtures.the_hold import a_reply_in, payload_of, results_route, results_url
 from test_the_submit_path_answers_the_validity_matrix import a_student_in_an_open_window, accepted
 
 pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
@@ -139,6 +161,10 @@ PLANTED_FIGURE: dict[str, Any] = {"suppressed": False, "reason": None, "figure":
 # The week the comparison figures are read at: the one planted at both configured
 # minimums exactly, so nothing here is read off a suppressed member.
 REPORTED_WEEK = WEEK_CLEAR
+
+# The reply E7-02's results route is read over, so that its payload carries a
+# response rather than a closed door with nothing behind it.
+RESULTS_REPLY = "E7-02 the hero section's instructor's reply for the benchmark week"
 
 # The hours the sequence test's submission reports. Distinct from every value that
 # world plants, so "the second read differs from the first" is a difference this
@@ -313,6 +339,37 @@ def the_student_reads_her_own_sections(student: StudentInTheReportWorld) -> tupl
         "names no section withholds a benchmark because it withholds everything."
     )
     return decoded(answered, f"`GET {STUDENT_READ_PATH}`"), answered
+
+
+def the_student_reads_her_results(
+    door: ReportDoor, student: StudentInTheReportWorld
+) -> tuple[Any, Any]:
+    """E7-02's results route for the hero section at `REPORTED_WEEK`, after a reply is published.
+
+    The reply is the hero section's own instructor's — the door's launched
+    teacher, who holds the teaching grant E7-01's trigger requires — published
+    ten minutes after that week's report opened, before the door's clock. The
+    read is required to be a 200 with decision 4's two members; what it carries
+    is the caller's to judge.
+    """
+    rows = SimpleNamespace(seed=door.world.seed, commit=door.commit)
+    opened = REPORT_OPENS_BY_TERM_WEEK[TERM_WEEK_OF_COURSE_WEEK[REPORTED_WEEK]]
+    a_reply_in(
+        rows,
+        section_id=student.taught_section_id,
+        term_id=door.rows.term_id,
+        week_id=door.rows.week_id(REPORTED_WEEK),
+        author=door.person_id,
+        body=RESULTS_REPLY,
+        published_at=opened + timedelta(minutes=10),
+    )
+    url = results_url(
+        results_route(door.application),
+        section_id=student.taught_section_id,
+        course_week=REPORTED_WEEK,
+    )
+    answered = student.get(url)
+    return payload_of(answered, f"`GET {url}`"), answered
 
 
 # ---------------------------------------------------------------------------
@@ -527,11 +584,14 @@ def test_no_student_visible_route_carries_a_benchmark_shaped_key_at_any_depth(
             if getattr(route, "path", None) == path
         )
     }
+    # E7-02's results route takes the section and the course week as path
+    # parameters, so it is driven by name below rather than by the loop.
+    results_template = results_route(application)
     covered_elsewhere = {submit_route(report_door.tool)}
-    uncovered = sorted(paths_of(routes) - driven_here - covered_elsewhere)
+    uncovered = sorted(paths_of(routes) - driven_here - covered_elsewhere - {results_template})
     assert not uncovered, (
         f"These student-visible routes are covered by nothing: {uncovered}. This sweep drives a "
-        "parameterless GET; the submit path is driven by "
+        "parameterless GET and E7-02's results route by name; the submit path is driven by "
         "`test_the_payloads_a_student_meets_in_one_week_carry_no_benchmark_shaped_key` below. A "
         "route neither reaches is a student surface SPEC §4.1 item 1 is unasserted over, and the "
         "repair is a driver here in the change that adds the route — a skip would report a clean "
@@ -564,6 +624,22 @@ def test_no_student_visible_route_carries_a_benchmark_shaped_key_at_any_depth(
             "— under whatever new spelling — rather than a member on a list."
         )
         swept.append(path)
+
+    # E7-02's results route (done-when 7), driven for the hero section at the
+    # benchmark week, with a reply published there so the payload carries a
+    # response rather than a bare closed door.
+    results_body, results_answer = the_student_reads_her_results(report_door, student)
+    assert results_body[RESULTS_STATE] == RESULTS_PUBLISHED, (
+        f"The results route answered {results_answer.text[:300]!r} for a week with a published "
+        "reply. A payload carrying no response carries no benchmark either, so the sweep below "
+        "would judge an empty answer."
+    )
+    carried = benchmark_shaped(results_body)
+    assert not carried, (
+        f"`GET {results_template}` carries {len(carried)} benchmark-shaped key(s): {carried[:5]}. "
+        "SPEC §4.1 item 1 and §5.4, over E7-02's results route."
+    )
+    swept.append(results_template)
 
     assert swept, (
         f"None of the student-visible routes {sorted(paths_of(routes))} was driven, so this test "
@@ -633,8 +709,15 @@ def test_no_student_payload_carries_a_comparison_figure_the_instructor_is_served
 
     student = student_session_in(report_door)
     student_body, read = the_student_reads_her_own_sections(student)
-    surface = response_surface(read)
-    carried = numbers_carried_by(student_body)
+    # E7-02's results route (done-when 7) is searched as well: the two student
+    # payloads are one surface for this sweep, so a figure in either is a leak.
+    results_body, results_read = the_student_reads_her_results(report_door, student)
+    assert results_body[RESULTS_STATE] == RESULTS_PUBLISHED, (
+        f"The results route answered {results_read.text[:300]!r} for a week with a published "
+        "reply; a payload carrying nothing would hide a figure by carrying nothing."
+    )
+    surface = f"{response_surface(read)} {response_surface(results_read)}"
+    carried = numbers_carried_by(student_body) + numbers_carried_by(results_body)
 
     for where, figure in statistics:
         needle = one_statistic_of(figure, where)
