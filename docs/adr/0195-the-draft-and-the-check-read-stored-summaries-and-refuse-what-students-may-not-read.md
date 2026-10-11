@@ -40,10 +40,19 @@ sentence from `app.copy`, whatever triggered it and whatever the model did:
   a shown stream's with its stored count, a held stream's with none.
 - The draft may not reuse a run (`_reused_run`, twenty characters) of a comment
   students will not see: excluded, still flagged, or in a held stream, read
-  through `report_comment` v004 for this comparison only. In a week with a held
-  stream it may not state a number of comments or students either (digits or a
-  number word next to comment, student, response, classmate or "of you"),
-  because a summary's prose can carry the count the themes do not.
+  through `report_comment` v004 for this comparison only.
+- In a week with a held stream the draft states no number of anything except a
+  named course structure, because a summary's prose can carry the count the
+  themes do not. *Amended in E7-04's fix round.* `states_a_count_of_people`
+  refuses any count token: a digit run; a cardinal word from zero to
+  ninety-nine, hyphenated compounds included, or "hundred"; or both, half,
+  couple, several, few, dozen, pair, handful, majority or minority. A token is
+  allowed only when the word immediately before it is a course-structure word
+  (week, chapter, lab, unit, module, section, page, question, assignment, quiz,
+  exam, day, hour, minute, part, step, problem, version, and their plurals
+  where listed), so "week 3" passes and "weeks 3 and 4" is refused at "4".
+  Ordinals are not count tokens. The eval grader calls the same function, and
+  `response_draft.v2` asks the model for exactly this rule.
 
 **The instructor's gather keeps a summary written before an exclusion.** The
 instructor already reads that summary on the report, and is the author of
@@ -71,16 +80,21 @@ owner's endpoint (SPEC §9.3).
   comments; the summaries are what the report already condensed.
 - **A refusal per cause.** Naming the matched comment, its state or the broken
   rule describes comments the instructor is not shown.
-- **Refusing any digit in a held week.** "Three worked examples" counts nobody.
+- **A phrase list for counts of people** (the first version: a number beside
+  "students", "comments", "of you" and a few more). Review found phrasings it
+  missed at once: "two of your classmates", "2 learners said", "the 7 who
+  responded", "Both students", "Half the class". The ways of saying how many
+  never close, so the rule forbids the number itself. The cost is that "three
+  worked examples" is refused too in a held week.
 - **Rewriting a refused answer** (stripping a count, dropping a theme). The
   answer is refused whole, as `summarize_stream` refuses an overclaim.
 
 ## Consequences
 
-- A draft that quotes a hidden comment or counts people in a held week costs a
-  model call and a retry by the instructor. The count rule is a pattern, so a
-  count spelled another way ("a trio of you") passes it; the prompt asks for no
-  counts at all.
+- A draft that quotes a hidden comment, or carries a number in a held week,
+  costs a model call and a retry by the instructor. The token rule cannot catch
+  a count spelled with a word outside its list ("a trio of you"); it does not
+  try to read meaning, and the prompt asks for no numbers at all.
 - Every model failure, an outage included, reads as the same 502.
 - `RESPONSE_TEXT_MAX` (4000) bounds the check's draft in `app.schemas.report`
   until E7-01's bound merges and replaces it.

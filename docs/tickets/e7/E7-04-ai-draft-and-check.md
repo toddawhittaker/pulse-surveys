@@ -34,8 +34,9 @@ ticket adds a themes read that applies the same filter: an old-format
 below the threshold, no per-theme count field reaches either task's prompt or
 the check's payload. The check names such a theme without a count. A summary's
 prose is not a count field and can still carry a number, so in a week with a
-held stream a draft stating a number of comments or students is refused
-(residue A of the breakdown review). A count of comments in a small
+held stream a draft carrying any number except one naming a course structure
+("week 3") is refused (residue A of the breakdown review, tightened in the fix
+round; ADR 0195). A count of comments in a small
 week is the count §5.2 rules out as a participation trace. A shown stream's
 themes keep their stored counts. That is what keeps the
 no-quoting rule (§5.1) and the threshold (§4) intact for a draft students will
@@ -112,10 +113,12 @@ through `report_comment` v004).
    threshold, no per-theme count field reaches the prompt or the check
    payload. The check names the theme without a count. A summary's prose is
    not a count field and may still state a number, so in a week with a held
-   stream a draft stating a number of comments or students (digits or number
-   words next to comment, student, response, classmate or "of you") is
-   refused as an invalid answer; the same draft in a week where every stream
-   is shown is accepted (residue A of the breakdown review). Themes are read through the
+   stream a draft carrying any count token (digits, cardinal words, or a
+   quantity word such as "both", "half" or "a few"), except one straight after
+   a course-structure word such as "week" or "chapter", is refused as an
+   invalid answer; the same draft in a week where every stream is shown is
+   accepted (residue A of the breakdown review, tightened by the fix round's
+   G1). Themes are read through the
    same filter as `_stored_summaries`: an old-format (`summary.v1`) row of a
    held stream gives no themes. Each case is tested beside a shown stream that
    does carry its counts. Marked `invariant`.

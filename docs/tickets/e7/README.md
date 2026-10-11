@@ -98,8 +98,8 @@ day, on the privacy review of this breakdown. No ticket reopens them.
     the threshold, no per-theme count field reaches the prompt of the draft
     or the draft check, or the check's payload, and the check names such a
     theme without one. A summary's prose is not a count field and may state a
-    number, so in a week with a held stream a draft that states a number of
-    comments or students is refused. A count of comments in a small week is the
+    number, so in a week with a held stream a draft that carries any number
+    except one naming a course structure is refused. A count of comments in a small week is the
     participation trace SPEC §5.2 rules out. A shown stream's themes keep their
     counts. Old-format (`summary.v1`) rows of a held stream give no themes at
     all. E7-04 builds it; SPEC §5.3 says so.
