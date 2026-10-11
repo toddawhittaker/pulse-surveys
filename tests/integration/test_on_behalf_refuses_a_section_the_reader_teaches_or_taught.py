@@ -125,12 +125,11 @@ def test_a_lead_whose_teaching_grant_the_roster_ended_is_refused_that_section(
     world.own_course_required()
     world.sibling_course_required()
     former = world.hold.names.a_former_teacher_of_the_taught_section()
-    reader = world.review.a_leader(
-        "the-former-teacher-lead",
-        grants=((LEAD_FACULTY_ROLE, world.hold.own_course),),
-        leads=(world.hold.own_course,),
-        person_id=former.person_id,
-    )
+    # One lead per course (`uq_lead_faculty_mapping_course_id`): the course's lead
+    # moves to the former teacher, as the two-hat test below moves it to the chair.
+    # The policy row above is lead A's, written while A held the course.
+    world.hold.move_the_lead(world.hold.own_course, to=former.person_id)
+    reader = a_reader_for(world, former.person_id, "the-former-teacher-lead")
     world.stand(ON_BEHALF_AFTER + CLEAR_PAST)
 
     taught, sibling, written, called = refused_like_a_sibling(

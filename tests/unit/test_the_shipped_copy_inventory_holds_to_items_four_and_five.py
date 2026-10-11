@@ -71,7 +71,11 @@ refusals make it seven:
     staff, as the instructor report does, so they carry the line as the report
     does. Until then it sat in the no-line map on the ruling on dispute E6-05-02,
     which was about the four refusals alone, and E6-06's pages joined the prefix
-    without the question being asked again (`docs/MISTAKES.md` entry 22).
+    without the question being asked again (`docs/MISTAKES.md` entry 22);
+  - `leadership_response`, E7-03's: the two refusals the policy switch and the
+    on-behalf doors answer with, registered in `app/copy/response_loop.py` (the
+    ruling on dispute E7-03-03). Refusals alone, so it owes item 5 no line until
+    E7-07's pages ask the question again.
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
@@ -211,6 +215,7 @@ UNKNOWN_ADDRESS = "unknown_address"
 COMPARISON_SETS = "comparison_sets"
 ENTRY = "entry"
 LEADERSHIP_MODERATION = "leadership_moderation"
+LEADERSHIP_RESPONSE = "leadership_response"
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
@@ -277,6 +282,20 @@ GOVERNED_SURFACES = {
     # under `leadership_moderation.` is red in
     # `test_every_governed_surface_collects_at_least_one_string`.
     "leadership_moderation": LEADERSHIP_MODERATION,
+    # E7-03's leadership response routes: the policy switch's one 404 and every
+    # on-behalf door's one 404 (work order decisions 2 and 5), registered in
+    # `app/copy/response_loop.py` under this prefix (the ruling on dispute
+    # E7-03-03, placed as E6-05-02 placed the moderation refusals). They belong to the screens E7-07 builds — the policy
+    # page, the responses-owed list and the on-behalf composer — which are neither
+    # the moderation pages nor the named-set screen.
+    #
+    # **The mutation this row kills** is the alternative the builder rejected:
+    # the two sentences filed under `leadership_moderation.` to turn the totality
+    # rule green, which would count another screen's refusals toward the
+    # moderation surface and its confidentiality line. With this row, a module
+    # that registers nothing under `leadership_response.` is red in
+    # `test_every_governed_surface_collects_at_least_one_string`.
+    "leadership_response": LEADERSHIP_RESPONSE,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -342,6 +361,15 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
         "nobody's data — a heading and a message about what happened at the door — so, as on "
         "the unknown-address screen, there is nothing about anybody's identity to promise. "
         "Not contested, so recorded here rather than in an ADR (E5.1-03's ruling R2)."
+    ),
+    LEADERSHIP_RESPONSE: (
+        "E7-03's two refusals to a leader: the policy switch for a prefix where the reader "
+        "sets no course, and an on-behalf door that is not open to the reader. Each says "
+        "only that there is nothing here to act on; neither renders a response, comment or "
+        "rating of anybody's, so item 5's sentence would have no subject. This is the "
+        "E6-05-02 placement for backend refusals alone: whether E7-07's policy, owed and "
+        "on-behalf pages owe item 5 a line is that ticket's question, and the on-behalf "
+        "composer shows stored summaries, so it is asked again there (MISTAKES entry 22)."
     ),
 }
 

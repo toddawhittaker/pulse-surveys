@@ -913,10 +913,12 @@ def instructor_route_objects(application: Any) -> list[Any]:
     shapes), and what sits in each one's dependency graph (the objects). One walk
     answers both (`docs/MISTAKES.md` entry 13).
 
-    **Three since E4-18**, whose list route takes no parameters at all. This walk
-    answers with every GET route the module mounts, because the dependency sweep
-    is about all of them; `instructor_routes` shapes only the two that name a
-    section.
+    **Three since E4-18**, whose list route takes no parameters at all, and **four
+    since E7-03**, whose work order (decision 1) adds the instructor's read of a
+    week's response, `GET …/sections/{section_id}/weeks/{course_week}/response`
+    (`docs/disputes/E7-03-02.md`). This walk answers with every GET route the
+    module mounts, because the dependency sweep is about all of them;
+    `instructor_routes` shapes the ones that name a section.
     """
     instructor_api_module()
     found = [
@@ -925,7 +927,7 @@ def instructor_route_objects(application: Any) -> list[Any]:
         if "GET" in (getattr(route, "methods", None) or set())
         and getattr(getattr(route, "endpoint", None), "__module__", None) == INSTRUCTOR_API_MODULE
     ]
-    if len(found) != 3:
+    if len(found) != 4:
         registered = sorted(
             f"{sorted(getattr(route, 'methods', None) or [])} {getattr(route, 'path', '?')} "
             f"({getattr(getattr(route, 'endpoint', None), '__module__', '?')})"
@@ -933,9 +935,10 @@ def instructor_route_objects(application: Any) -> list[Any]:
         )
         pytest.fail(
             f"`{INSTRUCTOR_API_MODULE}` defines {len(found)} GET routes on the built application; "
-            "three are shipped — E4-07's report and published-week list, and E4-18's list of the "
-            "sections the session's person teaches, at `GET /instructor/sections`. The "
-            f"application registers: {registered}.\n\n{ROUTER_IS_OWED}"
+            "four are shipped — E4-07's report and published-week list, E4-18's list of the "
+            "sections the session's person teaches, at `GET /instructor/sections`, and E7-03's "
+            "read of a week's response, `GET …/sections/{section_id}/weeks/{course_week}/response`. "
+            f"The application registers: {registered}.\n\n{ROUTER_IS_OWED}"
         )
     return found
 
@@ -964,16 +967,28 @@ def instructor_routes(application: Any) -> list[RouteShape]:
     ]
 
 
+# The path segment the report is served under (`GET /instructor/sections/{id}/report/
+# {course_week}`, as every E2E module that reads the report writes it). Since E7-03
+# a second section-and-week GET route exists (the week's response read), so
+# "the one that takes a week" no longer picks the report out (`docs/disputes/
+# E7-03-02.md`, ruling: pick it by its `/report` segment).
+REPORT_SEGMENT = "report"
+
+
 def report_route(application: Any) -> RouteShape:
-    """The instructor route that names a course week: the report itself."""
-    named = [shape for shape in instructor_routes(application) if shape.week_parameter]
+    """The instructor route that names a course week under the `/report` segment: the report."""
+    named = [
+        shape
+        for shape in instructor_routes(application)
+        if shape.week_parameter and REPORT_SEGMENT in shape.template.strip("/").split("/")
+    ]
     if len(named) != 1:
         pytest.fail(
-            f"{len(named)} of the `{INSTRUCTOR_API_MODULE}` routes naming a section name a course "
-            f"week ({[shape.template for shape in named]}). E4-07's report is 'the report for "
-            "(section, course week)' and the other is the published-week list for a section, so "
-            "exactly one of the two takes a week and that is how they are told apart here. "
-            "E4-18's list route names no section and is not among them."
+            f"{len(named)} of the `{INSTRUCTOR_API_MODULE}` routes naming a section and a course "
+            f"week sit under a `/{REPORT_SEGMENT}` segment ({[shape.template for shape in named]}). "
+            "E4-07's report is 'the report for (section, course week)', served at "
+            f"`…/sections/{{id}}/{REPORT_SEGMENT}/{{course_week}}`; E7-03's response read also takes "
+            "a week and is told apart from it by that segment. E4-18's list route names no section."
         )
     return named[0]
 
