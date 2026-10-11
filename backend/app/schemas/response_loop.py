@@ -97,14 +97,16 @@ StudentStreamName = Literal["instructor", "course"]
 class StudentTrendPoint(BaseModel):
     """One week's rating mean in one stream, for a week a student may read (SPEC §5.4's trend).
 
-    A week nobody rated has a point with no mean. A held week has no point at all
-    (ADR 0197).
+    A week fewer than the threshold of students rated has a point with no mean
+    (ruling 8). A held week has no point at all (ADR 0197).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     course_week: int
-    mean: float | None = Field(description="The mean of the week's ratings; null if nobody rated.")
+    mean: float | None = Field(
+        description="The mean of the week's ratings; null if too few students rated."
+    )
 
 
 class StudentComment(BaseModel):
@@ -132,8 +134,9 @@ class StudentStream(BaseModel):
     """One of a released week's two streams, as a student of the section reads it (SPEC §5.4).
 
     `small_n` is true when the stream's comments are withheld (SPEC §4.1 item 3),
-    and then `comments` is empty. No count of anybody, here or anywhere on the
-    payload (SPEC §5.4).
+    and then `comments` is empty. The ratings are shares, never counts, and are
+    withheld when too few students rated (ruling 8). No count of anybody, here or
+    anywhere on the payload (SPEC §5.4).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -142,8 +145,11 @@ class StudentStream(BaseModel):
     trend: list[StudentTrendPoint] = Field(
         description="One point per readable week up to this one; a held week has none."
     )
-    distribution: dict[str, int] = Field(
-        description="How many responses gave each rating, keyed 1 to 5."
+    shares: dict[str, int] | None = Field(
+        description=(
+            "Each rating's whole-number percentage, keyed 1 to 5, summing to 100; null "
+            "when too few students rated."
+        )
     )
     small_n: bool = Field(description="Whether this stream's comments are withheld this week.")
     comments: list[StudentComment] = Field(
@@ -178,7 +184,7 @@ class StudentWeekResults(BaseModel):
         description="The instructor stream, then the course stream; null while awaiting."
     )
     workload_median: float | None = Field(
-        description="The median of the week's workload answers; null while awaiting or if none."
+        description="The median of the week's workload answers; null while awaiting or if too few."
     )
     released: list[StudentReleasedComment] | None = Field(
         description=(

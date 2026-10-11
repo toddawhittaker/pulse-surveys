@@ -39,13 +39,24 @@ and it imports nothing else from `report_comments` or `moderation` (the import
 sweep holds it).
 
 **The figures** are `reporting.student_streams`, after `on_behalf_streams`: the
-trend over the weeks the caller passes (a point with a null mean for a week
-nobody rated), this week's distribution keyed "1" to "5", and either the
-comments the caller read or the small-N state. The small-N state is
-`_held_streams`, the instructor report's own answer, so a stream below the
-threshold, or a week still waiting on a verdict, carries no comment whatever the
-caller passed. The workload median is `reporting._workload`'s; the mean is not
-served.
+trend over the weeks the caller passes, this week's ratings as shares keyed "1"
+to "5", and either the comments the caller read or the small-N state. The
+small-N state is `_held_streams`, the instructor report's own answer, so a
+stream below the threshold, or a week still waiting on a verdict, carries no
+comment whatever the caller passed. The workload median is
+`reporting.student_workload_median`; the mean is not served.
+
+**Ratings as shares, withheld when small** (the README's ruling 8, SPEC §5.4).
+The instructor's histogram counts sum to the number of classmates who rated, and
+in a week of two or three raters a student who knows her own rating can subtract
+it from a mean, a median or a histogram and read a classmate's. So a student
+reads whole percentages by largest-remainder rounding, summing to exactly 100,
+never counts. And a stream-week with fewer distinct raters than `n_threshold()`
+gives no shares and a trend point with a null mean, on its own page and on every
+later one (the point stays, so a small week never looks like a held one); a week
+with fewer distinct workload answerers gives no median. The unit is people,
+counted from `response.user_id` and grouped away (MISTAKES entry 50). The
+comment rule and the instructor's figures are unchanged.
 
 **The hold over the sequence of pages.** `response_loop` reads every week's
 state set-based, through `_week_clocks` (required and unanswered is

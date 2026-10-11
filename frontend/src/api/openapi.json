@@ -3025,13 +3025,20 @@
             "title": "Trend",
             "description": "One point per readable week up to this one; a held week has none."
           },
-          "distribution": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "type": "object",
-            "title": "Distribution",
-            "description": "How many responses gave each rating, keyed 1 to 5."
+          "shares": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares",
+            "description": "Each rating's whole-number percentage, keyed 1 to 5, summing to 100; null when too few students rated."
           },
           "small_n": {
             "type": "boolean",
@@ -3052,12 +3059,12 @@
         "required": [
           "stream",
           "trend",
-          "distribution",
+          "shares",
           "small_n",
           "comments"
         ],
         "title": "StudentStream",
-        "description": "One of a released week's two streams, as a student of the section reads it (SPEC \u00a75.4).\n\n`small_n` is true when the stream's comments are withheld (SPEC \u00a74.1 item 3),\nand then `comments` is empty. No count of anybody, here or anywhere on the\npayload (SPEC \u00a75.4)."
+        "description": "One of a released week's two streams, as a student of the section reads it (SPEC \u00a75.4).\n\n`small_n` is true when the stream's comments are withheld (SPEC \u00a74.1 item 3),\nand then `comments` is empty. The ratings are shares, never counts, and are\nwithheld when too few students rated (ruling 8). No count of anybody, here or\nanywhere on the payload (SPEC \u00a75.4)."
       },
       "StudentSurveyView": {
         "properties": {
@@ -3100,7 +3107,7 @@
               }
             ],
             "title": "Mean",
-            "description": "The mean of the week's ratings; null if nobody rated."
+            "description": "The mean of the week's ratings; null if too few students rated."
           }
         },
         "additionalProperties": false,
@@ -3110,7 +3117,7 @@
           "mean"
         ],
         "title": "StudentTrendPoint",
-        "description": "One week's rating mean in one stream, for a week a student may read (SPEC \u00a75.4's trend).\n\nA week nobody rated has a point with no mean. A held week has no point at all\n(ADR 0197)."
+        "description": "One week's rating mean in one stream, for a week a student may read (SPEC \u00a75.4's trend).\n\nA week fewer than the threshold of students rated has a point with no mean\n(ruling 8). A held week has no point at all (ADR 0197)."
       },
       "StudentWeekResults": {
         "properties": {
@@ -3174,7 +3181,7 @@
               }
             ],
             "title": "Workload Median",
-            "description": "The median of the week's workload answers; null while awaiting or if none."
+            "description": "The median of the week's workload answers; null while awaiting or if too few."
           },
           "released": {
             "anyOf": [

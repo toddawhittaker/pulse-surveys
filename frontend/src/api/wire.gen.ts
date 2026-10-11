@@ -2012,8 +2012,9 @@ export interface components {
          * @description One of a released week's two streams, as a student of the section reads it (SPEC §5.4).
          *
          *     `small_n` is true when the stream's comments are withheld (SPEC §4.1 item 3),
-         *     and then `comments` is empty. No count of anybody, here or anywhere on the
-         *     payload (SPEC §5.4).
+         *     and then `comments` is empty. The ratings are shares, never counts, and are
+         *     withheld when too few students rated (ruling 8). No count of anybody, here or
+         *     anywhere on the payload (SPEC §5.4).
          */
         readonly StudentStream: {
             /**
@@ -2027,12 +2028,12 @@ export interface components {
              */
             readonly trend: readonly components["schemas"]["StudentTrendPoint"][];
             /**
-             * Distribution
-             * @description How many responses gave each rating, keyed 1 to 5.
+             * Shares
+             * @description Each rating's whole-number percentage, keyed 1 to 5, summing to 100; null when too few students rated.
              */
-            readonly distribution: {
+            readonly shares: {
                 readonly [key: string]: number;
-            };
+            } | null;
             /**
              * Small N
              * @description Whether this stream's comments are withheld this week.
@@ -2078,15 +2079,15 @@ export interface components {
          * StudentTrendPoint
          * @description One week's rating mean in one stream, for a week a student may read (SPEC §5.4's trend).
          *
-         *     A week nobody rated has a point with no mean. A held week has no point at all
-         *     (ADR 0197).
+         *     A week fewer than the threshold of students rated has a point with no mean
+         *     (ruling 8). A held week has no point at all (ADR 0197).
          */
         readonly StudentTrendPoint: {
             /** Course Week */
             readonly course_week: number;
             /**
              * Mean
-             * @description The mean of the week's ratings; null if nobody rated.
+             * @description The mean of the week's ratings; null if too few students rated.
              */
             readonly mean: number | null;
         };
@@ -2126,7 +2127,7 @@ export interface components {
             readonly streams: readonly components["schemas"]["StudentStream"][] | null;
             /**
              * Workload Median
-             * @description The median of the week's workload answers; null while awaiting or if none.
+             * @description The median of the week's workload answers; null while awaiting or if too few.
              */
             readonly workload_median: number | null;
             /**
