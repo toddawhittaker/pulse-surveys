@@ -57,15 +57,15 @@ import { copy as resultsCopy, fillCopy as fillResultsCopy } from '../../copy/stu
  * student whose session has simply run out is this screen answering a question
  * it was refused. So the refusal says which page can answer instead.
  *
- * **This replaces the student landing view.** The landmark keeps E0-18's
+ * **This replaces the student landing view.** The landmark keeps the
  * `pulse-landing-student` testid, which five end-to-end specs address to say a
- * student landed; the heading and the between-terms sentence are E1-04's
- * governed wording, moved verbatim into `../../copy/studentSurvey` with the rest
+ * student landed; the heading and the between-terms sentence are governed
+ * wording, moved verbatim into `../../copy/studentSurvey` with the rest
  * of this surface's strings.
  */
 
 /**
- * The landmark's testid — E0-18's, and the five specs that address it are
+ * The landmark's testid. The five specs that address it are
  * `landing-views`, `lti-launch`, `web-login`, `two-hat` and `exit-dean-both-doors`
  * (through `tests/e2e/support/doors.ts`'s `ALL_LANDINGS`). It is an identifier
  * rather than something a person reads, so it is here and not in the copy
@@ -241,7 +241,7 @@ function SectionSurvey({
   const survey = section.survey_is_open ? section.open_survey : null;
   return (
     <section className="pulse-survey-section" data-testid={sectionTestid(section.section_code)}>
-      {/* One string, and the server composed all of it — FIX-01 item 2. The
+      {/* One string, and the server composed all of it. The
           heading used to be the §2.2 code in one span beside the course in
           another, and it never said which term; the ruling of 2026-09-03 folds
           the code in and adds the term name, which makes this the page's visual
@@ -331,7 +331,7 @@ export function sectionTestid(sectionCode: string): string {
 /**
  * What a closed section says: when its next survey opens, or the plain sentence.
  *
- * FIX-01 item 4. The dated sentence needs two things to be true — the answer
+ * The dated sentence needs two things to be true — the answer
  * carries an instant, and that instant can be formatted in the deployment's zone
  * — and the undated sentence is what stands when either is not. Both are
  * governed copy; nothing here writes a word a reader sees.
@@ -373,7 +373,7 @@ interface Bounce {
  * between two of the steps its question moves in.
  *
  * **An incomplete week is refused here rather than sent and refused there, and
- * the control that refuses it stays operable** (E2-17 item 1). The submit button
+ * the control that refuses it stays operable**. The submit button
  * used to carry `disabled` until every non-comment question was answered, which
  * took it out of the tab order: the screen offered a keyboard user nothing to
  * activate and nothing that explained why. Pressing it now names the first
@@ -383,8 +383,8 @@ interface Bounce {
  * **Three live regions, one fact each.** SPEC §3.3's coaching, §3.2's
  * conditional rule turning a comment required, and what stops this week being
  * sent. They were not always three: sharing one made "the region is not empty"
- * ambiguous about which fact had arrived, which is measured in this ticket's
- * attempts log. Each is in the document from the first render and each is empty
+ * ambiguous about which fact had arrived, which was measured when the three were
+ * split. Each is in the document from the first render and each is empty
  * until its own fact is true, so a change to one of them is that fact and
  * nothing else.
  */
@@ -407,12 +407,12 @@ function OpenSurveyForm({
   const [closed, setClosed] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Why this week cannot be sent yet, written beside the button when it is
-  // pressed with a question still unanswered (E2-17 item 1). Empty otherwise,
+  // pressed with a question still unanswered. Empty otherwise,
   // and empty again as soon as any answer changes: it is the result of one
   // activation, and an edit is what makes it possibly untrue.
   const [missing, setMissing] = useState('');
-  // That §3.2's conditional rule has just made a comment required (E2-17 item
-  // 4), announced and never drawn: the flag beside the label and the helper
+  // That §3.2's conditional rule has just made a comment required,
+  // announced and never drawn: the flag beside the label and the helper
   // under the box are the visible statement of the same fact, and a third one on
   // screen would say it twice.
   //
@@ -450,8 +450,7 @@ function OpenSurveyForm({
       bounce === null || stillCoached.length === 0 ? null : { ...bounce, positions: stillCoached };
     setBounce(nextBounce);
 
-    // SPEC §3.2's conditional rule crossing *into* required is announced (E2-17
-    // item 4) — the flag, the helper and `aria-required` all change at once and
+    // SPEC §3.2's conditional rule crossing *into* required is announced — the flag, the helper and `aria-required` all change at once and
     // a student who is not looking at the screen was told none of it. Crossing
     // back out of it is a relaxation and is not announced: the sentence is
     // cleared rather than left standing while it is untrue, and clearing a live
@@ -466,7 +465,7 @@ function OpenSurveyForm({
   }
 
   async function submit(): Promise<void> {
-    // The button is never disabled (E2-17 item 1), so a second press while the
+    // The button is never disabled, so a second press while the
     // first is in flight is reachable and is refused here rather than by taking
     // the control away.
     if (busy) return;
@@ -575,8 +574,8 @@ function OpenSurveyForm({
       {/* SPEC §3.3's coaching, announced once for the whole form rather than
           once per field carrying it. The region is in the document from the
           first render: a region added at the moment it has something to say is a
-          region assistive technology has not been watching — and, since E2-17
-          item 8, it is *rendered* from the first render too. It used to be
+          region assistive technology has not been watching — and it is
+          *rendered* from the first render too. It used to be
           `display: none` while empty, which is the same defect wearing a
           stylesheet: Chromium marked the node `notRendered` and kept it out of
           the accessibility tree until it already had something to say.
@@ -589,7 +588,7 @@ function OpenSurveyForm({
       >
         {bounce?.message ?? ''}
       </p>
-      {/* And §3.2's conditional rule turning a comment required (E2-17 item 4).
+      {/* And §3.2's conditional rule turning a comment required.
           Its own region, because the two facts are independent and a shared one
           made "the coaching has arrived" unreadable — a form where a low rating
           had already been chosen was announcing the conditional sentence when the
@@ -730,7 +729,7 @@ function firstUnanswered(
   return owed ?? null;
 }
 
-/** What the submit control says about the question it stopped at (E2-17 item 1). */
+/** What the submit control says about the question it stopped at. */
 function missingAnswerSentence(question: SurveyQuestion): string {
   const named = questionName(question);
   return named === null
