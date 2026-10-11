@@ -43,7 +43,7 @@ export function ResponseCard({
         <span className="pulse-response-author">{bylineOf(authorName, authorRole)}</span>
         {when === null ? null : (
           <span className="pulse-response-date">
-            {fillCopy('student_results.published_on', { day: when.day })}
+            {fillCopy('student_survey.results_published_on', { day: when.day })}
           </span>
         )}
       </p>
@@ -52,7 +52,7 @@ export function ResponseCard({
 }
 
 function bylineOf(name: string, role: ResponseAuthorRole): string {
-  if (role === 'LEAD_FACULTY') return fillCopy('student_results.author_lead_faculty', { name });
-  if (role === 'CHAIR') return fillCopy('student_results.author_chair', { name });
-  return fillCopy('student_results.author_instructor', { name });
+  if (role === 'LEAD_FACULTY') return fillCopy('student_survey.results_author_lead_faculty', { name });
+  if (role === 'CHAIR') return fillCopy('student_survey.results_author_chair', { name });
+  return fillCopy('student_survey.results_author_instructor', { name });
 }

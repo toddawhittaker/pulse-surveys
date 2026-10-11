@@ -11,10 +11,9 @@
 // superuser: the instructor's name (the mock platform sends none, ADR 0050) and
 // the course's policy (the doors that set one are another ticket's). The
 // response is inserted as the section's own instructor, so the table's guard
-// trigger judges it exactly as it judges the real writer's. The policy row is
-// written with that guard switched off and back on in the one statement: its
-// setter has to hold a lead or chair grant over the course, which this world
-// does not give anyone, and the guard is not what this spec is about.
+// trigger judges it exactly as it judges the real writer's. The policy row goes
+// in with its guard on: the instructor is first given the course's lead grant and
+// mapping, which is what the guard checks.
 //
 // **No date is pinned.** The reading day is the section's start day (the seeded
 // calendar, via `sectionStartClock`) plus seven days, which is the Monday the
@@ -111,12 +110,16 @@ test("the survey names the instructor in the section's heading and links to the 
 test("a required-mode week with no reply shows the closed door and nothing about the week", async ({
   page,
 }) => {
+  // The instructor is made the course's lead, the way the guard checks it: a
+  // LEAD_FACULTY assignment and the course's lead mapping.
   databaseStatement(
-    "alter table response_policy disable trigger response_policy_is_set_by_its_role;\n" +
+    "insert into role_assignment (person_id, role, course_id)\n" +
+      `select ${INSTRUCTOR}, 'LEAD_FACULTY', s.course_id from section s where s.id = ${SECTION};\n` +
+      "insert into lead_faculty_mapping (person_id, course_id)\n" +
+      `select ${INSTRUCTOR}, s.course_id from section s where s.id = ${SECTION};\n` +
       "insert into response_policy (course_id, prefix_id, set_by_person_id, role, mode, set_at)\n" +
       `select s.course_id, c.prefix_id, ${INSTRUCTOR}, 'LEAD_FACULTY', 'REQUIRED', '1970-01-01T00:00Z'\n` +
-      `from section s join course c on c.id = s.course_id where s.id = ${SECTION};\n` +
-      "alter table response_policy enable trigger response_policy_is_set_by_its_role;",
+      `from section s join course c on c.id = s.course_id where s.id = ${SECTION};`,
   );
 
   const block = await landOnTheSurvey(page, placement, MATHEMATICS.code);
