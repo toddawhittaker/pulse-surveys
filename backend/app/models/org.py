@@ -302,6 +302,9 @@ class Course(UuidPrimaryKey, Base):
         # names. E5-01 added it; `section` carries `(id, term_id)` for the same
         # reason and has since `3f6907349751`.
         UniqueConstraint("id", "level"),
+        # The same device for `response_policy`'s composite key (E7-02, ADR 0193):
+        # a policy row's course must be in the row's prefix.
+        UniqueConstraint("id", "prefix_id"),
     )
 
     prefix_id: Mapped[UUID] = mapped_column(

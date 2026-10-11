@@ -56,7 +56,7 @@ from starlette.responses import Response
 from app.config import Settings
 from app.copy import CopyEntry, entry
 from app.copy.instructor_report import NOT_AN_INSTRUCTOR
-from app.copy.leadership_sets import NOT_LEADERSHIP
+from app.copy.leadership_sets import NOT_LEADERSHIP, NOT_YOUR_ROLE
 from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
 from app.services.authz import Door, LandingRole, resolve_landing
@@ -91,6 +91,8 @@ __all__ = [
     "NOT_A_STUDENT_STATUS",
     "NOT_LEADERSHIP_CHALLENGE",
     "NOT_LEADERSHIP_STATUS",
+    "NOT_YOUR_ROLE_CHALLENGE",
+    "NOT_YOUR_ROLE_STATUS",
     "PAGE",
     "REFUSED",
     "cancelled",
@@ -244,25 +246,44 @@ def require_instructor(request: Request) -> SessionClaims:
     )
 
 
-# What a request that is not a leadership session is answered with — the same 401
-# and the same `Bearer` challenge the two gates above use, for the reasons the
-# comment over `NOT_A_STUDENT_STATUS` gives. Spelled as their own names rather
-# than aliased to either pair, for the reason the instructor pair gives: three
+# What a request carrying no session the leadership gate can verify is answered
+# with — absent, malformed, expired, or signed with another key: the same 401 and
+# the same `Bearer` challenge the two gates above use, for the reasons the comment
+# over `NOT_A_STUDENT_STATUS` gives. Spelled as their own names rather than
+# aliased to either pair, for the reason the instructor pair gives: three
 # surfaces' answers that agree today are still three answers, and a gate
 # borrowing another role's constant moves when somebody changes that other one.
 #
 # The sentence is `app.copy.leadership_sets.NOT_LEADERSHIP` — in the copy package
 # from the day it is written. The instructor refusal above joined the package
-# later, when E5.1-03 moved it into `app.copy.instructor_report`. Since E5-13 it is a registry entry's own text, published under
-# the `leadership_comparison_sets.` prefix with the comparison-set screen's other
-# words, so SPEC §4.1 items 4 and 5 are asserted over what this gate answers
-# (ADR 0176).
+# later, when E5.1-03 moved it into `app.copy.instructor_report`. Since E5-13 it
+# is a registry entry's own text, published under the `leadership_comparison_sets.`
+# prefix with the comparison-set screen's other words, so SPEC §4.1 items 4 and 5
+# are asserted over what this gate answers (ADR 0176).
 NOT_LEADERSHIP_STATUS = 401
 NOT_LEADERSHIP_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
 
+# What a real, verified, live session in another role is answered with by the
+# leadership gate (E7-08, ADR 0196): **403**, unlike the two gates above. This is
+# the one gate a person in another role reaches from a link in the product, and
+# a 401 told a signed-in student or instructor that their session had ended,
+# which was untrue. The 403 tells a caller only that the token they already hold
+# is a real session, which they could learn from the role it was issued for; the
+# four refusals above stay one 401, so a caller trying tokens still cannot tell
+# a real one from a forgery.
+#
+# The challenge is RFC 6750 §3.1's `insufficient_scope`: the standard answer to
+# a valid token that lacks the privilege, and the mark the leadership pages read
+# to tell this 403 from every other 403 a leadership route answers (a write
+# without its double-submit token, another leader's set, a leader with no review
+# grant), none of which carries a challenge. The sentence is
+# `app.copy.leadership_sets.NOT_YOUR_ROLE`, one for every role and every route.
+NOT_YOUR_ROLE_STATUS = 403
+NOT_YOUR_ROLE_CHALLENGE = {"WWW-Authenticate": f'{BEARER_SCHEME} error="insufficient_scope"'}
+
 
 def require_leadership(request: Request) -> SessionClaims:
-    """The verified session of a leader, or one refusal for everybody else.
+    """The verified session of a leader, a 403 for a real session in another role, or one 401.
 
     Every route in `app.api.leadership` depends on this or on
     `csrf_verified_leadership` below, and the object is what makes them
@@ -285,19 +306,37 @@ def require_leadership(request: Request) -> SessionClaims:
     the person's assignments instead would admit both, which is a session
     acquiring a role it does not name.
 
-    **One refusal for absent, malformed, expired, wrongly signed, and a real
-    session in another role**, for the reason the two gates above give twice
-    over: `session_from_request` collapses the first four into `None` so that a
-    caller trying tokens cannot tell a real one from a forgery by the answer, and
-    the fifth joins them here.
+    **Two refusals, in a fixed order (E7-08, ruling 11, ADR 0196).** First, any
+    request whose token is absent, malformed, expired or signed with another key
+    gets `NOT_LEADERSHIP_STATUS` (401), the `Bearer` challenge and
+    `NOT_LEADERSHIP`'s words: `session_from_request` collapses all four into
+    `None` before any claim is read, so a caller trying tokens cannot tell a real
+    one from a forgery by the answer. Only then is the role read, and a real,
+    verified, live session in any role but leadership gets
+    `NOT_YOUR_ROLE_STATUS` (403), the `insufficient_scope` challenge and
+    `NOT_YOUR_ROLE`'s words. The role is never read off a token that has not
+    verified: a forged or expired student token answered 403 would tell its
+    holder the forgery passed.
+
+    **Why only this gate.** `require_student` and `require_instructor` keep one
+    401 for every refusal. ADR 0196 gives the reason: a person in another role
+    reaches a leadership page from a link in the product, and was told their
+    session had ended.
     """
-    return _session_in_role(
-        request,
-        LandingRole.LEADERSHIP,
-        status=NOT_LEADERSHIP_STATUS,
-        detail=NOT_LEADERSHIP,
-        challenge=NOT_LEADERSHIP_CHALLENGE,
-    )
+    session = session_from_request(request, request.app.state.session_secret)
+    if session is None:
+        raise HTTPException(
+            status_code=NOT_LEADERSHIP_STATUS,
+            detail=NOT_LEADERSHIP,
+            headers=NOT_LEADERSHIP_CHALLENGE,
+        )
+    if session.role is not LandingRole.LEADERSHIP:
+        raise HTTPException(
+            status_code=NOT_YOUR_ROLE_STATUS,
+            detail=NOT_YOUR_ROLE,
+            headers=NOT_YOUR_ROLE_CHALLENGE,
+        )
+    return session
 
 
 def _session_in_role(
@@ -310,12 +349,17 @@ def _session_in_role(
 ) -> SessionClaims:
     """The verified session on `request` if it is in `role`, or the gate's one refusal.
 
-    The body all three role gates share. **The gates themselves stay three public
-    functions**, and that is the point of keeping this private: SPEC §4.1 item 1's
-    sweep and every route inventory find a surface by asking which routes carry
-    `require_student`, `require_instructor` or `require_leadership` as an object in
-    their dependency graph. One function, or three closures out of a factory, would
-    give those walks nothing to tell the surfaces apart by.
+    The body the student and instructor gates share. **The gates themselves stay
+    public functions**, and that is the point of keeping this private: SPEC §4.1
+    item 1's sweep and every route inventory find a surface by asking which routes
+    carry `require_student`, `require_instructor` or `require_leadership` as an
+    object in their dependency graph. One function, or closures out of a factory,
+    would give those walks nothing to tell the surfaces apart by.
+
+    `require_leadership` no longer calls this (E7-08, ADR 0196): it answers a real
+    session in another role 403 rather than this one refusal, and a parameter here
+    to switch that on would put the leadership gate's rule inside the body the
+    other two gates rely on staying the same.
 
     `session_from_request` collapses an absent, malformed, expired or wrongly
     signed token into `None`, and a real session in another role joins it here,
@@ -927,8 +971,9 @@ def csrf_verified_leadership(
     the reason the student pair gives: a plain call resolves the session
     identically at run time and leaves the route invisible to every sweep that
     walks a route's `Dependant` graph for it (`docs/MISTAKES.md` entry 2). FastAPI
-    resolves the sub-dependency first, so a 401 from the role gate is raised
-    before this body runs and what arrives in `claims` is exactly what a direct
+    resolves the sub-dependency first, so the role gate's 401 or 403 is raised
+    before this body runs, and a write from a session in another role is refused
+    before anything is written; what arrives in `claims` is exactly what a direct
     call would have returned.
 
     **The check itself is `_double_submit_verified`, shared with the student

@@ -164,20 +164,23 @@ Each of these is an automated assertion in the test suite (§9), not a conventio
 ### 5.3 Instructor response
 
 - After reviewing the report, the instructor writes a short response to the class ("You said / we heard / here's what changes"). Responses post **non-anonymously under the instructor's name** to all enrolled students; after posting, the instructor sees the as-students-see-it state with an Edit path.
-- **AI assistance, two modes, both optional and both advisory:** (a) the model can **draft** a response from the week's actual themes and ratings, editable before posting ("Use draft"), addressing criticism concretely rather than deflecting — never auto-posts; (b) an instructor-initiated **draft check** ("Check draft with AI"), never forced and never blocking, compares the draft against the week's main comment themes and quietly names any theme not yet addressed (with its comment count). Re-runnable; the result clears when the draft changes. Nothing is ever published without a human pressing publish.
+- **AI assistance, two modes, both optional and both advisory:** (a) the model can **draft** a response from the week's actual themes and ratings, editable before posting ("Use draft"), addressing criticism concretely rather than deflecting — never auto-posts; (b) an instructor-initiated **draft check** ("Check draft with AI"), never forced and never blocking, compares the draft against the week's main comment themes and quietly names any theme not yet addressed (with its comment count). For a stream held below the n-threshold, the check names the theme without a count, because a per-week count of a small stream's comments is the participation trace §5.2 rules out. Re-runnable; the result clears when the draft changes. Nothing is ever published without a human pressing publish.
 - Publishing is **encouraged by default; a Lead Faculty can set "required" per prefix** (read-only with attribution for chair and above). Required holds the student-facing aggregate until a response is published; delinquency surfaces at +48h on the Lead Faculty dashboard.
-- **Delinquency handling:** at +96h, respond-on-behalf enables — the Lead Faculty can publish a response themselves (attributed honestly to the Lead Faculty, never impersonation), releasing the held aggregate via the same draft-plus-check flow one level up. Aggregates are never auto-published without a named human author.
+- **A policy covers only its setter's own courses in that prefix.** A Lead Faculty member's setting for a prefix covers the courses in that prefix they lead, and no other lead's courses there. A department chair acts as lead for a course in their department that has no lead: they set its policy and may respond on behalf. For a course that has a lead, the chair reads the setting and cannot change it. A course's setting carries over when its lead changes: the setting in force for a course is the latest one made for it, whoever made it, until whoever now sets it for that course changes it. The policy that governs a week is the one in force when that week's report opens, so a later change never releases a week already held or holds back a week already shown.
+- **The 48-hour and 96-hour clocks start when the week's report opens** (Monday 06:00 in the institution's time zone), not when the survey window closes or when anyone first reads the report.
+- **One response per section-week.** An edit is stored as a new version and never overwrites the old one; students see the latest version. Only the person who first published a week's response may edit it. Once a response is published the week is released, and an edit never holds it again.
+- **Delinquency handling:** at +96h, respond-on-behalf enables — the Lead Faculty can publish a response themselves (attributed honestly to the Lead Faculty, never impersonation), releasing the held aggregate via the same draft-plus-check flow one level up. For a course with no lead, the department chair is the one who responds on behalf. Aggregates are never auto-published without a named human author.
 
 ### 5.4 Student closing-the-loop view
 
-On next LTI launch (and via the Monday-after notification), students see their own section only: the instructor's response **leading the page** (the page is a reply, not a dashboard), then the two-stream trend chart, distributions, workload median, and the published comments grouped under the same two headings as everywhere else. Page states: `awaiting` (response-required and unpublished — a closed door: no countdown, no teased data, no blame), `published`, `on-behalf` (identical weight, honest attribution, no implication of discipline), and `small-N` (trend and distributions shown; comments replaced by a notice framing suppression as protecting the student, appearing once enough classmates comment). Students page back through published weeks only. Students **never** see comparison-set or university lines, and never other individuals' raw identifiable data — only what §4 and §5.2 permit.
+On next LTI launch (and via the Monday-after notification), students see their own section only: the instructor's response **leading the page** (the page is a reply, not a dashboard), then the two-stream trend chart, distributions, workload median, and the published comments grouped under the same two headings as everywhere else. Page states: `awaiting` (response-required and unpublished — a closed door: no countdown, no teased data, no blame), `published`, `on-behalf` (identical weight, honest attribution, no implication of discipline), `unanswered` (a response was encouraged rather than required and none was published, so nothing is held), and `small-N` (trend and distributions shown; comments replaced by a notice framing suppression as protecting the student, appearing once enough classmates comment). Students page back through published weeks only. Students **never** see comparison-set or university lines, and never other individuals' raw identifiable data — only what §4 and §5.2 permit.
 
 ### 5.5 Leadership roll-ups
 
 - One template for all leadership roles; role changes only the tree root and aggregation breadth. Two-pane (hierarchy nav + content), stacking at tablet width. Aggregate pages plot the term axis with per-cohort lines and a cohort selector (§2.2).
 - **Tree modes:** hierarchy view for everyone; a by-lead-faculty pivot additionally for chair and above over their purview — never for Lead Faculty (sibling isolation, invariant §4.1.2). Trees default fully collapsed with expand/collapse-all; breadcrumbs are clickable; roots and row labels per §2.1.
 - Drill-down terminates at a section, rendering the Instructor Monday Report wholesale, read-only, with a context bar ("Viewing as Dean · read-only").
-- Attention surfacing uses the exact predicates of §5.6; raw comments appear up-chain only de-identified and only where the n-threshold is met at the aggregation being viewed. The one exception is §5.2's review queue: the Lead Faculty member (or, for a course with no lead, the chair) sees a harmful, undecided comment's text and its section at any threshold, with no week, time or count beside it, and may exclude or keep it. Because it carries no week, it does not wait for the comment's week to be moderated (§5.2). The queue leaves out every section the reader teaches or has taught, where the instructor's own view governs. All leadership views are read-only with respect to student data; the only mutating powers are policy settings at the appropriate scope.
+- Attention surfacing uses the exact predicates of §5.6; raw comments appear up-chain only de-identified and only where the n-threshold is met at the aggregation being viewed. The one exception is §5.2's review queue: the Lead Faculty member (or, for a course with no lead, the chair) sees a harmful, undecided comment's text and its section at any threshold, with no week, time or count beside it, and may exclude or keep it. Because it carries no week, it does not wait for the comment's week to be moderated (§5.2). The queue leaves out every section the reader teaches or has taught, where the instructor's own view governs. All leadership views are read-only with respect to student data; the only mutating powers are policy settings at the appropriate scope, publishing a response on behalf (§5.3), and the review queue's exclude and keep (§5.2).
 
 ### 5.6 Attention rules (exact predicates)
 
@@ -305,7 +308,7 @@ The Claude Design prototype is the visual and interaction contract; the frontend
 
 ## 8. Data model (core tables)
 
-`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, nrps_call, ags_call, user, user_identity, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, moderation_attempt, weekly_summary, moderation_state, release_batch, release_batch_member, instructor_response, comparison_set, grade_sync, threat_case, audit_log, notification`
+`institution, college, department, prefix, course, section, term, week, start_letter_map, lti_platform, lti_deployment, nrps_call, ags_call, user, user_identity, person, role_assignment, lead_faculty_mapping, enrollment, question_set, question, survey_window, response, answer, classification, moderation_attempt, weekly_summary, moderation_state, release_batch, release_batch_member, instructor_response, response_policy, comparison_set, grade_sync, threat_case, audit_log, notification`
 
 Selected constraints:
 
@@ -333,8 +336,10 @@ Selected constraints:
 - `weekly_summary` holds one AI summary per section, course week and stream (§5.1), with the prompt version and model ID §7.4 requires of every model output; a summary states the response count it drew from, and zero is a count it may state.
 - The cumulative release §4 describes is stored, not recomputed: `release_batch` records the section, the term the threshold is counted over, and the time the batch was cut, and `release_batch_member` records which comments went out in it. The batch's cut time is the only release time in the schema — a comment carries none of its own, so that timing cannot identify an author.
 - `comparison_set` holds named leadership-defined sets; the default per section (same lead's courses, matched length+level, past-referencing) is computed, not stored.
-- `instructor_response` records the author and whether it was Lead-Faculty-on-behalf (§5.3), and whether it was AI-seeded.
-- `audit_log` is append-only and includes all re-identifications, policy changes, response-on-behalf actions, imports (with their dry-run diffs), and admin config edits. It holds no exclusion or keep: those are `moderation_state` rows, which name their decider.
+- `instructor_response` is append-only: one row per published response and per edit, naming the section and course week, the author (a `person` key that cannot be deleted from under it), the role the author wrote under (instructor, Lead Faculty, or the chair acting as lead for a course with no lead; a response on behalf is that role, not a separate flag), whether it was AI-seeded, the text (non-blank, at most 4000 characters) and the time. The week belongs to the section's term. A row is refused when it is written unless its author holds the role it states for the section at that moment, and a section-week takes rows from one author only. The latest row for a section-week is the response students see, and "latest" is a database-assigned sequence column, as on `moderation_state`.
+- `response_policy` is append-only too: one row per course a policy change covers, naming the course (fixed when the row is written), the prefix the setter switched, the person who set it, the role they set it under (Lead Faculty, or the chair for the courses with no lead), the mode (encouraged or required), the time, and the same sequence column. A row is refused unless its setter holds the role it states for that course. The policy in force for a course is its latest row, whoever wrote it.
+- A member of staff's name reaches a reader only through one database function, which answers one section's live teaching instructors and the authors of its published responses, and answers only a reader of that section: a student with a live enrollment in it, its teaching instructor, or the lead or chair responsible for its course.
+- `audit_log` is append-only and includes all re-identifications, imports (with their dry-run diffs), and admin config edits. It holds no exclusion or keep: those are `moderation_state` rows, which name their decider. It holds no policy change and no response, on behalf or not: those are `response_policy` and `instructor_response` rows, which name the person and the role.
 - Identity separation: instructor/leadership read paths go through views that structurally cannot join to `user` identity columns — enforced in the database, not just the application. Only the Care role's queue path can reach identity, and only via the audited reveal action. The §4.1 invariants are asserted against these views in CI.
 
 ## 9. Testing
@@ -423,7 +428,7 @@ pulse-surveys/
 │       │   ├── survey.py           # question_set, question, response, answer
 │       │   ├── ai.py               # classification, moderation_attempt
 │       │   ├── report.py           # weekly_summary, moderation_state, release_batch, release_batch_member
-│       │   ├── loop.py             # instructor_response — not built yet: E7
+│       │   ├── loop.py             # instructor_response, response_policy
 │       │   ├── benchmark.py        # comparison_set, comparison_set_member
 │       │   ├── grades.py           # grade_sync
 │       │   ├── safety.py           # threat_case (its opening row; E10 adds the case lifecycle)
@@ -431,6 +436,11 @@ pulse-surveys/
 │       │   └── clock.py            # the development clock override
 │       │
 │       ├── views_sql/              # identity-separated read views (§8) as migrations + query helpers
+│       │   ├── response_loop_grants_v001.sql # what the application may write to the response records
+│       │   ├── response_loop_grants_v002.sql # the course a policy row covers, which the application names
+│       │   ├── response_loop_guard_v001.sql  # who may write a response or a policy, checked at insert
+│       │   ├── response_loop_guard_v002.sql  # who may set a policy, checked for the one course a row covers
+│       │   ├── section_staff_names_v001.sql  # the one channel a staff name reaches a reader through
 │       │   └── queries.py          # typed ways into the read views
 │       │
 │       ├── schemas/                # Pydantic request/response contracts (also feeds OpenAPI)
@@ -440,15 +450,17 @@ pulse-surveys/
 │       │   ├── report.py           # the instructor's Monday report
 │       │   ├── report_benchmark.py # the report's comparison and university figures
 │       │   ├── comparison_sets.py  # the named-set management API
+│       │   ├── response_loop.py    # a student's week state and the response published to it
 │       │   └── moderation.py       # the Lead Faculty review queue, a leader's decision, the exclusion log
 │       │
 │       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
 │       │   ├── entry.py            # the four pages a door answers with when there is no landing
 │       │   ├── submit.py           # the weekly survey's submit path
 │       │   ├── student_read.py     # the student read path
-│       │   ├── instructor_report.py # the instructor report's refusals
+│       │   ├── instructor_report.py # the instructor report's refusals, and the writing assistant's
 │       │   ├── leadership_sets.py  # the named-set API's refusals
 │       │   ├── leadership_moderation.py # the review queue's and the exclusion log's refusals
+│       │   ├── response_loop.py    # the response loop's refusals: the results route, publish and edit, the policy switch, on behalf
 │       │   └── gradebook.py        # the strings written into a platform's gradebook
 │       │
 │       ├── api/                    # HTTP routers, thin — delegate to services
@@ -458,8 +470,8 @@ pulse-surveys/
 │       │   ├── auth.py             # the web door: OIDC login and callback
 │       │   ├── dev.py              # the development-only test console
 │       │   ├── student.py          # survey fetch/submit
-│       │   ├── instructor.py       # the Monday report reads
-│       │   ├── leadership.py       # named comparison sets; the review queue and exclusion log
+│       │   ├── instructor.py       # the Monday report reads, comment decisions, the response draft and check, the week's response
+│       │   ├── leadership.py       # named comparison sets; the review queue and exclusion log; the response policy, the responses owed, on behalf
 │       │   ├── care.py             # threat queue, audited re-identify — not built yet: E10
 │       │   └── admin.py            # observability, config, hierarchy, roles — not built yet: E11
 │       │
@@ -478,13 +490,13 @@ pulse-surveys/
 │       │   ├── submissions.py      # storing one student's weekly answers, and every reason not to
 │       │   ├── validity.py         # synchronous comment gating (§3.3)
 │       │   ├── grading.py          # participation formula + AGS passback (§3.4)
-│       │   ├── reporting.py        # distributions, trend lines, benchmark assembly (§5.1)
+│       │   ├── reporting.py        # distributions, trend lines, benchmark assembly (§5.1); the response draft and check (§5.3)
 │       │   ├── report_comments.py  # §4's small-N comment rules
 │       │   ├── benchmarks.py       # comparison-set resolution, length/level matching, min-N
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
-│       │   ├── response_loop.py    # draft/coach/publish, required-response holds (§5.3) — not built yet: E7
+│       │   ├── response_loop.py    # a section's staff names for a reader of it; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration
@@ -644,7 +656,7 @@ Moderation classification at window close with harm-type routing (§5.2): instru
 *Exit:* the anti-cherry-picking trail is visible up-chain, and a welfare-flagged comment in a 3-response week provably reaches Care with no trace in the instructor view.
 
 **E7 — Response loop** · medium
-Instructor response editor with non-anonymous posting and the as-students-see-it Edit path, AI draft-from-themes, the instructor-initiated draft check (re-runnable, clears on edit), publish flow, required-response policy per prefix, aggregate hold with 48h delinquency surfacing, respond-on-behalf enabling at 96h with honest attribution, and release of held aggregates.
+Instructor response editor with non-anonymous posting and the as-students-see-it Edit path; one response per section-week, where an edit appends a new version, only the first publisher may edit, and an edit never holds the week again. AI draft-from-themes and the instructor-initiated draft check (re-runnable, clears on edit), both read from stored summaries, themes and ratings and never from comment text, with a held stream's themes carrying no count. Publish flow. Required-response policy per prefix, set by a Lead Faculty member for the courses they lead there (a chair for a course with no lead), recorded per course, and governing a week from the moment its report opens. The hold: a required week shows its students a closed door, with no response, name or figure, until a named person publishes; the student results page in this epic shows the week's state and response only, and the aggregates and comments it will hold are E8's. The lead's list of responses owed at 48h, and respond-on-behalf enabling at 96h with honest attribution (the lead's name and role), over stored summaries and ratings and never comment text. A staff name reaches a reader through one narrow channel (ADR 0191). A signed-in reader in another role who opens a leadership page is told it is not part of their role.
 *Exit:* a required-mode section shows nothing to students until a named human publishes.
 
 **E8 — Student loop closure** · small

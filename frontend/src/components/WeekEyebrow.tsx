@@ -7,16 +7,19 @@ import { copy, fillCopy } from '../copy/studentSurvey';
  * The mono week eyebrow — SPEC §7.6's `WeekEyebrow`, one component with variants.
  *
  * `docs/DESIGN_BRIEF.md` makes this the first thing on every student and
- * instructor screen: "the term's rhythm is the product's spine, so the layout
- * states it before anything else". `design/Usage Rules.md` §1 settles which week
+ * instructor screen about a survey week: "the term's rhythm is the product's
+ * spine, so the layout states it before anything else". The student's survey and
+ * the instructor's Monday report render it. The student's results page (E7-06)
+ * does not: its payload carries the course week alone, so it shows a plain
+ * "Week N" label in the eyebrow's type. `design/Usage Rules.md` §1 settles which week
  * a course-level page counts in — "course week … with a quiet term-week
  * sub-label" — and SPEC §2.2 is why both travel: a 15-week section that began in
  * the term's fourth week is in its tenth week when the term is in its
  * thirteenth, and showing one in the other's place tells a student they are
  * three weeks further through their course than they are.
  *
- * **All three numbers and the closing instant are the API's** (`OpenSurvey`),
- * never derived here. The close is rendered in the reader's own timezone,
+ * **All three numbers and the closing instant are the API's** — the student's
+ * `OpenSurvey`, the instructor's report payload — never derived here. The close is rendered in the reader's own timezone,
  * because the instant is absolute and the person reading it is the one who has
  * to be there before it.
  *

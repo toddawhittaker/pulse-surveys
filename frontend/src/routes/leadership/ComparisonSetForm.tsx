@@ -243,7 +243,9 @@ export function ComparisonSetForm({
       setRefusal(
         outcome.kind === 'refused'
           ? (outcome.detail ?? copy('leadership_comparison_sets.save_unavailable'))
-          : copy('leadership_comparison_sets.save_unavailable'),
+          : outcome.kind === 'not-your-role'
+            ? copy('leadership_comparison_sets.not_your_role_body')
+            : copy('leadership_comparison_sets.save_unavailable'),
       );
     });
   }
@@ -437,6 +439,7 @@ function removalSentence(removal: Removal): string {
 type EditLoad =
   | { readonly kind: 'loading' }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'error'; readonly detail: string | null }
   | {
       readonly kind: 'ready';
@@ -464,6 +467,10 @@ export function ComparisonSetEditRoute(): JSX.Element {
         if (!live) return;
         if (optionsRead.kind === 'session-ended' || setRead.kind === 'session-ended') {
           setLoad({ kind: 'session-ended' });
+          return;
+        }
+        if (optionsRead.kind === 'not-your-role' || setRead.kind === 'not-your-role') {
+          setLoad({ kind: 'not-your-role' });
           return;
         }
         if (optionsRead.kind !== 'options') {
@@ -513,6 +520,12 @@ export function ComparisonSetEditRoute(): JSX.Element {
           variant="flat"
           title={copy('leadership_comparison_sets.session_ended_title')}
           body={copy('leadership_comparison_sets.session_ended_body')}
+        />
+      ) : load.kind === 'not-your-role' ? (
+        <StateNotice
+          variant="flat"
+          title={copy('leadership_comparison_sets.not_your_role_title')}
+          body={copy('leadership_comparison_sets.not_your_role_body')}
         />
       ) : load.kind === 'error' ? (
         <StateNotice

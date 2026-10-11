@@ -329,6 +329,65 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/student/sections/{section_id}/weeks/{course_week}/results": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One week's results for one of my sections
+         * @description The week's state and the response published to it, for one of this student's sections.
+         *
+         *     **This route takes a section and a week, which the survey read refuses to,
+         *     and the check is what makes that safe.** The student's results page is one
+         *     week of one course, so it has to be named. The section is then looked for
+         *     among the session's own live enrollments, never read by its key, so a
+         *     section the student is not in is not found, exactly as one that does not
+         *     exist is not (`app.services.response_loop.student_week_results`).
+         *
+         *     **Every refusal is one 404 with one sentence**, byte-identical: not enrolled,
+         *     an ended enrollment, a week whose report has not opened, and a week or a
+         *     section that does not exist. A session with no `user`, or a `user_id` claim
+         *     that is not a uuid, is answered the same way, as the submission route does,
+         *     so this route says nothing about which door a session came through.
+         *
+         *     `Cache-Control: no-store`, as the survey read: the answer is about this
+         *     reader, and an edit changes it.
+         */
+        readonly get: operations["student_week_results_read_student_sections__section_id__weeks__course_week__results_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/student/sections/{section_id}/results": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The latest published week's results for one of my sections
+         * @description The week route's answer for the section's latest published week, where the page opens.
+         *
+         *     The same read and the same single 404, which a section with no published week
+         *     gets too.
+         */
+        readonly get: operations["student_latest_results_read_student_sections__section_id__results_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/instructor/sections/{section_id}/report/{course_week}": {
         readonly parameters: {
             readonly query?: never;
@@ -452,6 +511,93 @@ export interface paths {
          *     FastAPI's parsing of the path, which says nothing about any comment.
          */
         readonly post: operations["decide_on_comment_instructor_comments__answer_id__decisions_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/instructor/sections/{section_id}/weeks/{course_week}/response-draft": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * An AI draft of my response to one week of my report
+         * @description SPEC §5.3's draft: advisory, never stored, never posted.
+         *
+         *     **The report's own refusals, byte for byte, and no model call behind
+         *     them.** A section the reader does not teach, one that does not exist, and a
+         *     week not yet published get exactly the 404 the report answers, because the
+         *     service raises the report's exceptions from the report's own gate before it
+         *     gathers anything. Every refusal of the model's answer is one 502 and one
+         *     sentence (`assistant_unusable`), and a second draft or check from a person
+         *     with one in flight is one 429 before anything is read (`assistant_busy`).
+         */
+        readonly post: operations["draft_a_response_instructor_sections__section_id__weeks__course_week__response_draft_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/instructor/sections/{section_id}/weeks/{course_week}/draft-check": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * The themes of one week of my report a draft does not address
+         * @description SPEC §5.3's draft check: instructor-initiated, never blocking, re-runnable.
+         *
+         *     The draft arrives bounded (`DraftCheckRequest`), and the refusals are the
+         *     draft route's: the report's 404s before any model call, and one 502 for an
+         *     answer that names anything but the week's stored themes as the stream may
+         *     show them.
+         */
+        readonly post: operations["check_a_draft_instructor_sections__section_id__weeks__course_week__draft_check_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/instructor/sections/{section_id}/weeks/{course_week}/response": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The response to one week of my report, as students read it
+         * @description The week's state and response, behind the report's own gate and its own 404s.
+         */
+        readonly get: operations["read_week_response_instructor_sections__section_id__weeks__course_week__response_get"];
+        /**
+         * Edit the response I published to one week of my report
+         * @description SPEC §5.3's edit: a new row, by the person who first published, and never a re-hold.
+         *
+         *     The report's 404s first; no response yet, or one somebody else published,
+         *     is one 409 with one sentence, so it never says who published.
+         */
+        readonly put: operations["edit_week_response_instructor_sections__section_id__weeks__course_week__response_put"];
+        /**
+         * Publish my response to one week of my report
+         * @description SPEC §5.3's publish: one response per section-week, under the reader's name.
+         *
+         *     The report's 404s first; a week that already has a response is a 409 with
+         *     one sentence, and nothing is written.
+         */
+        readonly post: operations["publish_week_response_instructor_sections__section_id__weeks__course_week__response_post"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -646,6 +792,150 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/response-policy": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The response policy of every course I set or read it for
+         * @description The courses the reader sets the policy for, and a chair's led courses, which they read.
+         */
+        readonly get: operations["read_response_policy_leadership_response_policy_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/response-policy/{prefix_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /**
+         * Switch the response policy for my courses in one prefix
+         * @description One row per course of the prefix the reader sets the policy for; answered with the new read.
+         */
+        readonly put: operations["switch_response_policy_leadership_response_policy__prefix_id__put"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/responses-owed": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The weeks of my courses that are owed a response now
+         * @description Section and course week, and whether on behalf is open: no name, no time.
+         */
+        readonly get: operations["read_responses_owed_leadership_responses_owed_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/sections/{section_id}/weeks/{course_week}/on-behalf": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One owed week's summaries and ratings, before I respond
+         * @description Stored summaries, response count and rating distributions; never a comment.
+         */
+        readonly get: operations["read_on_behalf_leadership_sections__section_id__weeks__course_week__on_behalf_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/sections/{section_id}/weeks/{course_week}/on-behalf/response-draft": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * An AI draft of a response on the instructor's behalf
+         * @description The instructor's draft task over the on-behalf gather; the gate before any model call.
+         */
+        readonly post: operations["draft_on_behalf_leadership_sections__section_id__weeks__course_week__on_behalf_response_draft_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/sections/{section_id}/weeks/{course_week}/on-behalf/draft-check": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * The week's themes an on-behalf draft does not address
+         * @description The instructor's check task over the on-behalf gather; the gate before any model call.
+         */
+        readonly post: operations["check_on_behalf_leadership_sections__section_id__weeks__course_week__on_behalf_draft_check_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/sections/{section_id}/weeks/{course_week}/on-behalf/response": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /**
+         * Edit a response I published on the instructor's behalf
+         * @description By the person who first published it, while they still answer for the course.
+         */
+        readonly put: operations["edit_on_behalf_response_leadership_sections__section_id__weeks__course_week__on_behalf_response_put"];
+        /**
+         * Publish a response on the instructor's behalf
+         * @description Under the reader's own name and the role they answer for the course under.
+         */
+        readonly post: operations["publish_on_behalf_response_leadership_sections__section_id__weeks__course_week__on_behalf_response_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/dev": {
         readonly parameters: {
             readonly query?: never;
@@ -712,6 +1002,35 @@ export interface components {
             /** Course Week */
             readonly course_week: number;
             readonly mean: components["schemas"]["ComparisonFigure"];
+        };
+        /**
+         * CheckTheme
+         * @description A theme the draft check names, with its comment count where one may be shown.
+         *
+         *     SPEC §5.3: the check "quietly names any theme not yet addressed (with its
+         *     comment count). For a stream held below the n-threshold, the check names the
+         *     theme without a count, because a per-week count of a small stream's comments
+         *     is the participation trace §5.2 rules out." So the count is optional here, and
+         *     only here: `CommentTheme` keeps its required count for the weekly summary
+         *     (ADR 0195).
+         *
+         *     **The optional type is not the rule** (`docs/MISTAKES.md` entry 23). Which
+         *     themes may carry a count is decided after the model answers, in
+         *     `app.services.reporting`: a shown stream's theme must carry its stored count
+         *     and a held stream's theme must carry none. This type only makes the held case
+         *     expressible.
+         */
+        readonly CheckTheme: {
+            /**
+             * Label
+             * @description The theme's label, exactly as the stored summary holds it.
+             */
+            readonly label: string;
+            /**
+             * Comment Count
+             * @description How many comments carry the theme, exactly as the stored summary holds it; null for a theme of a stream held below the reporting threshold.
+             */
+            readonly comment_count: number | null;
         };
         /**
          * CommentDecision
@@ -835,6 +1154,35 @@ export interface components {
             readonly level: string;
         };
         /**
+         * DraftCheckRequest
+         * @description What the draft check is sent: the instructor's draft, and nothing else.
+         *
+         *     Bounded at the edge by the published response's own bound
+         *     (`RESPONSE_TEXT_MAX` in `app.models.loop`), because the draft checked is the
+         *     text that will become one; a body over it is refused with a 422 before any
+         *     model is asked (E7-04 done-when 6).
+         */
+        readonly DraftCheckRequest: {
+            /**
+             * Draft
+             * @description The response draft to check, as the instructor has it now.
+             */
+            readonly draft: string;
+        };
+        /**
+         * DraftCheckView
+         * @description What the draft check answers: the week's themes the draft does not yet address.
+         *
+         *     Each is a `CheckTheme`, the contract's own part, rather than a copy of it
+         *     (E0-12: compose, never fork): a shown stream's theme with its stored comment
+         *     count, a held stream's theme with `null`. Empty when the draft addresses them
+         *     all.
+         */
+        readonly DraftCheckView: {
+            /** Unaddressed */
+            readonly unaddressed: readonly components["schemas"]["CheckTheme"][];
+        };
+        /**
          * EnrolledSection
          * @description One section this reader is enrolled in today, and its survey state.
          *
@@ -854,6 +1202,12 @@ export interface components {
          *     both while a survey is open and when nothing is ahead. The same scoping
          *     argument covers it: a "when does the next one open" lookup that stopped
          *     naming the section would put another section's calendar on this page.
+         *
+         *     **`instructors` names this section's own live teaching instructors and
+         *     nobody else** (E7-01, ADR 0191). The names come through the one staff-name
+         *     channel, which answers only a reader of the section, and the read keeps only
+         *     the teaching instructors of what it answers: a response author who does not
+         *     teach the section is not listed as its instructor.
          */
         readonly EnrolledSection: {
             /**
@@ -884,6 +1238,11 @@ export interface components {
             readonly next_window_opens_at: string | null;
             /** @description The open survey, or null when none is open. */
             readonly open_survey: components["schemas"]["OpenSurvey"] | null;
+            /**
+             * Instructors
+             * @description The names of the people who teach the reader's own enrollment, sorted; empty when nobody is assigned to teach it.
+             */
+            readonly instructors: readonly string[];
         };
         /**
          * ExclusionLog
@@ -1009,6 +1368,53 @@ export interface components {
             readonly is_undo: boolean;
         };
         /**
+         * OnBehalfStream
+         * @description One stream of one section-week as the on-behalf reader reads it: never a comment.
+         *
+         *     The stored summary, or `null` where none is served to this reader (including
+         *     one written before the week's latest exclusion, ruling 9); the week's
+         *     response count; and the rating distribution, rating to count, as the report
+         *     shows it.
+         */
+        readonly OnBehalfStream: {
+            /**
+             * Stream
+             * @enum {string}
+             */
+            readonly stream: "instructor" | "course";
+            /** Summary Text */
+            readonly summary_text: string | null;
+            /**
+             * Response Count
+             * @description How many responses the week received.
+             */
+            readonly response_count: number;
+            /**
+             * Rating Distribution
+             * @description How many responses gave each rating, 1 to 5.
+             */
+            readonly rating_distribution: {
+                readonly [key: string]: number;
+            };
+        };
+        /**
+         * OnBehalfWeek
+         * @description What a lead (or a chair acting as lead) reads before responding on behalf (decision 5).
+         */
+        readonly OnBehalfWeek: {
+            /**
+             * Section Label
+             * @description The section's course label and section code.
+             */
+            readonly section_label: string;
+            /** Course Week */
+            readonly course_week: number;
+            /** Streams */
+            readonly streams: readonly components["schemas"]["OnBehalfStream"][];
+            /** @description Null while unanswered; the response, for the reader who first published it. */
+            readonly response: components["schemas"]["WeekResponseView"] | null;
+        };
+        /**
          * OpenSurvey
          * @description The one survey open for a section right now (SPEC §3.1's one-open rule).
          *
@@ -1078,6 +1484,32 @@ export interface components {
             readonly submission: components["schemas"]["OwnSubmission"] | null;
         };
         /**
+         * OwedWeek
+         * @description One section-week owed a response now, in a course the reader answers for (decision 4).
+         *
+         *     No instructor name (E9's) and no time: whether the on-behalf door is open is
+         *     the one fact about the clock the list carries.
+         */
+        readonly OwedWeek: {
+            /**
+             * Section Id
+             * Format: uuid
+             */
+            readonly section_id: string;
+            /**
+             * Section Label
+             * @description The section's course label and section code.
+             */
+            readonly section_label: string;
+            /** Course Week */
+            readonly course_week: number;
+            /**
+             * On Behalf Open
+             * @description Whether a response may now be written on behalf.
+             */
+            readonly on_behalf_open: boolean;
+        };
+        /**
          * OwnSubmission
          * @description What this reader has already submitted for this week, if anything.
          *
@@ -1104,6 +1536,79 @@ export interface components {
              * @description The answers, in question order.
              */
             readonly answers: readonly components["schemas"]["SubmittedAnswer-Output"][];
+        };
+        /**
+         * PolicyCourse
+         * @description One course's response policy as one reader reads it (E7-03, decision 2).
+         *
+         *     `mode` is the course's latest policy row now, or `ENCOURAGED` with none.
+         *     `set_by_role` says which role set it, and only on a course the reader cannot
+         *     set (a chair reading a course with a lead): on a course the reader sets, it is
+         *     absent, so nothing on it moves with anybody else's change (done-when 4).
+         *     Never a name: the setter's name is E9's.
+         */
+        readonly PolicyCourse: {
+            /**
+             * Course Id
+             * Format: uuid
+             */
+            readonly course_id: string;
+            /**
+             * Course Label
+             * @description The course's prefix, number and title.
+             */
+            readonly course_label: string;
+            readonly mode: components["schemas"]["PolicyMode"];
+            /**
+             * Can Set
+             * @description Whether this reader's switch for the prefix reaches it.
+             */
+            readonly can_set: boolean;
+            /** @description The role that set it; only for a course this reader cannot set. */
+            readonly set_by_role: components["schemas"]["PolicyRole"] | null;
+        };
+        /**
+         * PolicyMode
+         * @description Whether a response is encouraged or required for the courses a policy covers.
+         * @enum {string}
+         */
+        readonly PolicyMode: "ENCOURAGED" | "REQUIRED";
+        /**
+         * PolicyOverview
+         * @description Every course whose response policy this reader sets or reads, by prefix.
+         */
+        readonly PolicyOverview: {
+            /** Prefixes */
+            readonly prefixes: readonly components["schemas"]["PolicyPrefix"][];
+        };
+        /**
+         * PolicyPrefix
+         * @description One prefix and the courses of it this reader reads the policy of.
+         */
+        readonly PolicyPrefix: {
+            /**
+             * Prefix Id
+             * Format: uuid
+             */
+            readonly prefix_id: string;
+            /** Prefix Code */
+            readonly prefix_code: string;
+            /** Courses */
+            readonly courses: readonly components["schemas"]["PolicyCourse"][];
+        };
+        /**
+         * PolicyRole
+         * @description The role a response policy was set under. An instructor sets no policy (SPEC §5.3).
+         * @enum {string}
+         */
+        readonly PolicyRole: "LEAD_FACULTY" | "CHAIR";
+        /**
+         * PolicyWrite
+         * @description A switch of the response policy for every course of one prefix the reader sets it for.
+         */
+        readonly PolicyWrite: {
+            /** @description REQUIRED or ENCOURAGED. */
+            readonly mode: components["schemas"]["PolicyMode"];
         };
         /**
          * PublishedWeeks
@@ -1177,6 +1682,49 @@ export interface components {
             readonly enrolled: number;
             /** Valid Responses */
             readonly valid_responses: number;
+        };
+        /**
+         * ResponseDraftView
+         * @description What the response draft answers: the draft text the model wrote, once it has passed.
+         *
+         *     The text and nothing else. The prompt version and model id the contract
+         *     carries stay on the server: nothing on the page acts on them, and the draft is
+         *     never stored (SPEC §5.3: advisory, never auto-posted).
+         */
+        readonly ResponseDraftView: {
+            /** Text */
+            readonly text: string;
+        };
+        /**
+         * ResponseRole
+         * @description The role a response was written under; the value is the stored token.
+         *
+         *     `LEAD_FACULTY` and `CHAIR` are the on-behalf roles: SPEC §5.3 has the lead
+         *     respond for the instructor, and ruling 5 has the chair act as lead for a
+         *     course with no lead.
+         * @enum {string}
+         */
+        readonly ResponseRole: "INSTRUCTOR" | "LEAD_FACULTY" | "CHAIR";
+        /**
+         * ResponseWrite
+         * @description A response's text as its author publishes or edits it, and whether the AI draft seeded it.
+         *
+         *     **Bounded and refused, never repaired** (`docs/MISTAKES.md` entry 29): a text
+         *     over `RESPONSE_TEXT_MAX` characters, an empty one, or one of only whitespace
+         *     is a 422 before anything is read, and nothing here strips or shortens it. The
+         *     table's `CHECK` holds the same rule underneath.
+         */
+        readonly ResponseWrite: {
+            /**
+             * Text
+             * @description The response students will read, exactly as written.
+             */
+            readonly text: string;
+            /**
+             * Ai Seeded
+             * @description Whether the text began as the AI draft.
+             */
+            readonly ai_seeded: boolean;
         };
         /**
          * ReviewQueue
@@ -1387,6 +1935,35 @@ export interface components {
             readonly course: components["schemas"]["StreamReport"];
         };
         /**
+         * StudentResponse
+         * @description The response a student reads for one week, and who wrote it (SPEC §5.3).
+         *
+         *     The text and the time are the latest row's: an edit is a new row, and the
+         *     latest row is what students read (ruling 3). The author and the role are the
+         *     first row's, which is the same person, since only the person who first
+         *     published a week's response may edit it.
+         */
+        readonly StudentResponse: {
+            /**
+             * Text
+             * @description The response as it now reads.
+             */
+            readonly text: string;
+            /**
+             * Author Name
+             * @description The name of the person who wrote it.
+             */
+            readonly author_name: string;
+            /** @description The role it was written under. LEAD_FACULTY or CHAIR means it was written on the instructor's behalf. */
+            readonly author_role: components["schemas"]["ResponseRole"];
+            /**
+             * Published At
+             * Format: date-time
+             * @description When the text now shown was published.
+             */
+            readonly published_at: string;
+        };
+        /**
          * StudentSurveyView
          * @description Everything a student's weekly survey form needs, in one answer.
          *
@@ -1415,6 +1992,26 @@ export interface components {
              * @description The IANA zone this deployment's survey windows are written in (SPEC §8).
              */
             readonly institution_timezone: string;
+        };
+        /**
+         * StudentWeekResults
+         * @description One week's state for one of the student's own sections, its response if any, and the
+         *     course weeks a student may page through (SPEC §5.4: published weeks only).
+         */
+        readonly StudentWeekResults: {
+            /**
+             * State
+             * @description Whether the week is held, answered, or neither.
+             * @enum {string}
+             */
+            readonly state: "awaiting" | "published" | "on-behalf" | "unanswered";
+            /** @description The published response; absent while awaiting and when unanswered. */
+            readonly response: components["schemas"]["StudentResponse"] | null;
+            /**
+             * Published Weeks
+             * @description The section's course weeks whose report has opened, ascending: the weeks the page may page through.
+             */
+            readonly published_weeks: readonly number[];
         };
         /**
          * SubmissionAccepted
@@ -1680,6 +2277,32 @@ export interface components {
             readonly ctx?: Record<string, never>;
         };
         /**
+         * WeekResponseView
+         * @description One week's state and its response, as students read them, for the response's author.
+         *
+         *     What the instructor's response routes, and the on-behalf publish and edit,
+         *     answer: the state a student of the section reads now, and the response with
+         *     its author's name (through the staff-name definer, asked as the reader),
+         *     role and time, and `can_edit`, true exactly when the reader first published
+         *     the week's response (SPEC §5.3: only that person may edit). Nothing else a
+         *     student does not read.
+         */
+        readonly WeekResponseView: {
+            /**
+             * State
+             * @description Whether the week is held, answered, or neither.
+             * @enum {string}
+             */
+            readonly state: "awaiting" | "published" | "on-behalf" | "unanswered";
+            /** @description The published response; absent while awaiting and when unanswered. */
+            readonly response: components["schemas"]["StudentResponse"] | null;
+            /**
+             * Can Edit
+             * @description Whether this reader first published the week's response, so may edit it.
+             */
+            readonly can_edit: boolean;
+        };
+        /**
          * WeekView
          * @description Where on §2.2's two axes this report sits, and where week navigation may go.
          *
@@ -1920,6 +2543,69 @@ export interface operations {
             };
         };
     };
+    readonly student_week_results_read_student_sections__section_id__weeks__course_week__results_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StudentWeekResults"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly student_latest_results_read_student_sections__section_id__results_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["StudentWeekResults"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly read_report_instructor_sections__section_id__report__course_week__get: {
         readonly parameters: {
             readonly query?: never;
@@ -2025,6 +2711,178 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["CommentView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly draft_a_response_instructor_sections__section_id__weeks__course_week__response_draft_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ResponseDraftView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly check_a_draft_instructor_sections__section_id__weeks__course_week__draft_check_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["DraftCheckRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["DraftCheckView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_week_response_instructor_sections__section_id__weeks__course_week__response_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["WeekResponseView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly edit_week_response_instructor_sections__section_id__weeks__course_week__response_put: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ResponseWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["WeekResponseView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly publish_week_response_instructor_sections__section_id__weeks__course_week__response_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ResponseWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["WeekResponseView"];
                 };
             };
             /** @description Validation Error */
@@ -2306,6 +3164,253 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["ExclusionLog"];
+                };
+            };
+        };
+    };
+    readonly read_response_policy_leadership_response_policy_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PolicyOverview"];
+                };
+            };
+        };
+    };
+    readonly switch_response_policy_leadership_response_policy__prefix_id__put: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly prefix_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["PolicyWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PolicyOverview"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_responses_owed_leadership_responses_owed_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": readonly components["schemas"]["OwedWeek"][];
+                };
+            };
+        };
+    };
+    readonly read_on_behalf_leadership_sections__section_id__weeks__course_week__on_behalf_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OnBehalfWeek"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly draft_on_behalf_leadership_sections__section_id__weeks__course_week__on_behalf_response_draft_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ResponseDraftView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly check_on_behalf_leadership_sections__section_id__weeks__course_week__on_behalf_draft_check_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["DraftCheckRequest"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["DraftCheckView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly edit_on_behalf_response_leadership_sections__section_id__weeks__course_week__on_behalf_response_put: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ResponseWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["WeekResponseView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly publish_on_behalf_response_leadership_sections__section_id__weeks__course_week__on_behalf_response_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ResponseWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["WeekResponseView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

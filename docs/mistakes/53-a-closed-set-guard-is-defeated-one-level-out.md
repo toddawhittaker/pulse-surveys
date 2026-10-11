@@ -1,6 +1,6 @@
 # Entry 53. A closed-set guard is defeated one level out
 
-**Caught: 4**
+**Caught: 5**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -77,3 +77,14 @@ level out, `getattr(models, "ClockOverride")` and `importlib.import_module` on
 `app.models.clock`, and the docstring states what is still outside: a name
 assembled at run time, a walk over every table on the metadata, and files that
 are not Python.)*
+
+*(**A catch across two tickets**, writing E7-02's and E7-08's red tests,
+2026-10-11. E7-02's results payload could live in either of two schema modules,
+and the existing structural sweep read only `app.schemas.student`; the test
+author made it look in both, and pinned the route behind `require_student`
+because the student-route inventory is derived from that dependency. E7-08's
+leadership-route sweep finds routes through their dependency graph at every
+depth and through included routers, with a control asserting it finds the ten
+routes two other suites name. What would have shipped: a results payload in
+`app.schemas.response_loop` outside the sweep, and a leadership route gated one
+dependency down outside the 403 tests.)*

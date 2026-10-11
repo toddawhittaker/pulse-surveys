@@ -13,6 +13,9 @@ import { InstructorReportRoute } from './routes/instructor/InstructorMondayRepor
 import { LeadershipLanding } from './routes/leadership';
 import { ComparisonSetsRoute } from './routes/leadership/ComparisonSets';
 import { EXCLUSION_LOG_ROUTE, ExclusionLogRoute } from './routes/leadership/ExclusionLog';
+import { OnBehalfRoute } from './routes/leadership/OnBehalf';
+import { RESPONSE_POLICY_ROUTE, ResponsePolicyRoute } from './routes/leadership/ResponsePolicy';
+import { ON_BEHALF_ROUTE, RESPONSES_OWED_ROUTE, ResponsesOwedRoute } from './routes/leadership/ResponsesOwed';
 import { REVIEW_QUEUE_ROUTE, ReviewQueueRoute } from './routes/leadership/ReviewQueue';
 import {
   COMPARISON_SETS_ROUTE,
@@ -20,6 +23,11 @@ import {
   ComparisonSetEditRoute,
 } from './routes/leadership/ComparisonSetForm';
 import { StudentLanding } from './routes/student';
+import {
+  LATEST_RESULTS_ROUTE,
+  StudentResultsRoute,
+  WEEK_RESULTS_ROUTE,
+} from './routes/student/StudentResults';
 
 /**
  * The client route table — SPEC §13's `router.tsx`.
@@ -67,6 +75,22 @@ const studentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/student',
   component: StudentLanding,
+});
+
+// SPEC §5.4's results page, for one of the student's sections: the latest
+// published week, and any one published week. The section and the week are in the
+// path because that is what the API's routes are keyed by; whether the student
+// may see them is the API's answer, not this table's.
+const studentLatestResultsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: LATEST_RESULTS_ROUTE,
+  component: StudentResultsRoute,
+});
+
+const studentWeekResultsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: WEEK_RESULTS_ROUTE,
+  component: StudentResultsRoute,
 });
 
 const instructorRoute = createRoute({
@@ -167,6 +191,26 @@ const leadershipExclusionLogRoute = createRoute({
   component: ExclusionLogRoute,
 });
 
+// SPEC §5.3's response policy, the responses owed and responding on behalf,
+// flat off the root for the reason the comparison sets are.
+const leadershipResponsePolicyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: RESPONSE_POLICY_ROUTE,
+  component: ResponsePolicyRoute,
+});
+
+const leadershipResponsesOwedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: RESPONSES_OWED_ROUTE,
+  component: ResponsesOwedRoute,
+});
+
+const leadershipOnBehalfRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: ON_BEHALF_ROUTE,
+  component: OnBehalfRoute,
+});
+
 const careRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/care',
@@ -191,6 +235,8 @@ const adminRoute = createRoute({
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   studentRoute,
+  studentLatestResultsRoute,
+  studentWeekResultsRoute,
   instructorRoute,
   instructorReportRoute,
   leadershipRoute,
@@ -198,6 +244,9 @@ export const routeTree = rootRoute.addChildren([
   leadershipComparisonSetRoute,
   leadershipReviewQueueRoute,
   leadershipExclusionLogRoute,
+  leadershipResponsePolicyRoute,
+  leadershipResponsesOwedRoute,
+  leadershipOnBehalfRoute,
   careRoute,
   adminRoute,
 ]);

@@ -28,8 +28,10 @@ and `comparison_set_member` (E5-01, ADR 0164); the *default* comparison set is
 computed rather than stored (§13), so nothing about it is here. `safety`
 holds `threat_case`, the row a Care case opens with when the routing definer
 writes a threat or self-harm verdict (E6-01, ADR 0187); `ai` gained
-`moderation_attempt` beside `classification` in the same ticket. The other
-aggregates §13 lists arrive with the tickets that need them.
+`moderation_attempt` beside `classification` in the same ticket. `loop` holds
+the response loop's two append-only records, `instructor_response` and
+`response_policy` (E7-01, ADR 0192). The other aggregates §13 lists arrive with
+the tickets that need them.
 
 **Importing this package must import every model module.** `backend/migrations/
 env.py` autogenerates against `Base.metadata`, and a table whose module nobody
@@ -49,6 +51,7 @@ from app.models import (
     clock,
     grades,
     identity,
+    loop,
     lti,
     org,
     report,
@@ -69,6 +72,7 @@ __all__ = [
     "clock",
     "grades",
     "identity",
+    "loop",
     "lti",
     "org",
     "report",

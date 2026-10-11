@@ -442,6 +442,21 @@ export function seedTheModerationExitStory(): string {
   return pipeTheSeeder(MODERATION_EXIT_STORY_SEEDER);
 }
 
+/** Where the response-loop exit story for `MATH-140-E1FF` lives (SPEC §14.3). */
+export const RESPONSE_LOOP_EXIT_STORY_SEEDER = 'scripts/seed_response_loop_exit_story.py';
+
+/**
+ * Write the response-loop exit story — answers to course weeks 3 and 4 of
+ * `MATH-140-E1FF` — and answer what the seeder printed.
+ *
+ * It writes answers only: the policy and every staff response go through the
+ * pages. It needs the section launched, its roster synced and its windows
+ * derived, and refuses loudly when any is missing.
+ */
+export function seedTheResponseLoopExitStory(): string {
+  return pipeTheSeeder(RESPONSE_LOOP_EXIT_STORY_SEEDER);
+}
+
 /**
  * Run one statement against the stack's database and answer its rows, unaligned.
  *

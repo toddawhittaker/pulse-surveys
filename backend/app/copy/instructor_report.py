@@ -1,4 +1,4 @@
-"""The refusals the instructor report answers with — E4-12, E5.1-03 and E6-03.
+"""The refusals the instructor report answers with — E4-12, E5.1-03, E6-03 and E7-04.
 
 `app.api.instructor` serves SPEC §5.1's report, and it refuses two ways: a
 section outside the session's teaching set or absent altogether gets one
@@ -45,6 +45,18 @@ decision does not allow; and three 422s for the stated reason. None names the
 comment, the section or what was asked: each says what did not happen and, where
 the reader can act on it, what to do instead.
 
+**E7-04 adds the AI draft's one refusal.** The response draft and the draft
+check answer one 502 with one sentence whatever went wrong with the model's
+answer: it reused words of a comment students will not see, it stated a count of
+people beside a held stream, it named a theme the week does not hold, or the
+model did not answer usably at all. One sentence for all of them, because a
+refusal that said which would tell the instructor something about comments they
+are not shown, one edit of the draft at a time.
+
+**E7-10 adds the assistant's 429**: a person asking for a second draft or check
+while one of theirs is still waiting on the model is refused before anything is
+read, with one sentence that says to ask again.
+
 **`COPY` beside the entries, because that is the shape the package settles.**
 Each copy module publishes `COPY: Mapping[str, CopyEntry]` keyed by dotted keys,
 which is what `app.copy.copy_modules()`'s readers walk.
@@ -55,6 +67,8 @@ from collections.abc import Mapping
 from app.copy import CopyEntry
 
 __all__ = [
+    "ASSISTANT_BUSY",
+    "ASSISTANT_UNUSABLE",
     "COMMENT_UNAVAILABLE",
     "COPY",
     "DECISION_NOT_ALLOWED",
@@ -127,6 +141,21 @@ REASON_TOO_LONG = CopyEntry(
     text="A stated reason can be at most 500 characters long. Nothing was changed.",
 )
 
+# The 502 the response draft and the draft check answer when the model's answer
+# cannot be used, whatever the reason (E7-04's work order, decision 2). It names
+# nothing of the answer, the draft or any comment.
+ASSISTANT_UNUSABLE = CopyEntry(
+    key="instructor_report.assistant_unusable",
+    text="The writing assistant could not produce a usable answer this time. You can ask again.",
+)
+
+# The 429 a draft or a check answers when the same person already has one
+# waiting on the model (E7-10 done-when 3). It names nothing of either request.
+ASSISTANT_BUSY = CopyEntry(
+    key="instructor_report.assistant_busy",
+    text="The writing assistant is still working on your last request. You can ask again once it has answered.",
+)
+
 COPY: Mapping[str, CopyEntry] = {
     entry.key: entry
     for entry in (
@@ -138,5 +167,7 @@ COPY: Mapping[str, CopyEntry] = {
         REASON_REQUIRED,
         REASON_BLANK,
         REASON_TOO_LONG,
+        ASSISTANT_UNUSABLE,
+        ASSISTANT_BUSY,
     )
 }

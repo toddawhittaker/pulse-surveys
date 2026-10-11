@@ -422,3 +422,151 @@ export async function decideOnComment(
   }
   return { kind: 'decided', card: body as CommentView };
 }
+
+/** `app.api.instructor.RESPONSE_PATH`, with the section and the course week filled in. */
+export function weekResponsePath(sectionId: string, courseWeek: number): string {
+  return `${SECTIONS_PATH}/${encodeURIComponent(sectionId)}/weeks/${String(courseWeek)}/response`;
+}
+
+/** `app.api.instructor.RESPONSE_DRAFT_PATH`, filled in the same way. */
+export function responseDraftPath(sectionId: string, courseWeek: number): string {
+  return `${weekResponsePath(sectionId, courseWeek)}-draft`;
+}
+
+/** `app.api.instructor.DRAFT_CHECK_PATH`, filled in the same way. */
+export function draftCheckPath(sectionId: string, courseWeek: number): string {
+  return `${SECTIONS_PATH}/${encodeURIComponent(sectionId)}/weeks/${String(courseWeek)}/draft-check`;
+}
+
+/** The week's state and the response students read, as the instructor sees them (SPEC §5.3). */
+export type WeekResponseRead = Schemas['WeekResponseView'];
+
+/** What the instructor sends to publish or edit: the text, and whether a draft seeded it. */
+export type ResponseWriteView = Schemas['ResponseWrite'];
+
+/** One theme of the week a draft does not yet address; the count is null for a held stream. */
+export type CheckThemeView = Schemas['CheckTheme'];
+
+/** The generic outcomes every call below shares, beyond its own success. */
+type Failed =
+  | { readonly kind: 'refused'; readonly detail: string | null }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** What a read of the week's response answered. */
+export type WeekResponseOutcome =
+  | { readonly kind: 'read'; readonly view: WeekResponseRead }
+  | Failed;
+
+/** What publishing or editing answered: the week as it now stands, or why not. */
+export type ResponseWriteOutcome =
+  | { readonly kind: 'saved'; readonly view: WeekResponseRead }
+  | Failed;
+
+/** What the draft route answered: text for the editor, never stored by the server. */
+export type ResponseDraftOutcome = { readonly kind: 'draft'; readonly text: string } | Failed;
+
+/** What the draft check answered. */
+export type DraftCheckOutcome =
+  | { readonly kind: 'checked'; readonly unaddressed: readonly CheckThemeView[] }
+  | Failed;
+
+/**
+ * One call of the response loop, answered in the outcomes above.
+ *
+ * Every 4xx and the 502 the AI routes answer carry one sentence the server
+ * wrote, shown as sent; a 5xx without one, or no answer at all, is
+ * `unavailable` and the caller uses its own words.
+ */
+export async function responseCall(
+  path: string,
+  init: RequestInit,
+): Promise<
+  | { readonly kind: 'body'; readonly body: unknown }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'refused'; readonly detail: string | null }
+  | { readonly kind: 'unavailable'; readonly detail: string | null }
+> {
+  let response: Response;
+  try {
+    response = await fetch(path, init);
+  } catch {
+    return { kind: 'unavailable', detail: null };
+  }
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  const body = await jsonBody(response);
+  if (response.status >= 400 && response.status < 500) {
+    return { kind: 'refused', detail: refusalSentence(body) };
+  }
+  if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
+  return { kind: 'body', body };
+}
+
+/** The bound on the cast: the week's state is the member every render reads. */
+export function weekResponseOf(body: unknown): WeekResponseRead | null {
+  if (typeof body !== 'object' || body === null) return null;
+  if (typeof (body as Record<string, unknown>).state !== 'string') return null;
+  return body as WeekResponseRead;
+}
+
+/** The week's state and its response, behind the report's own gate. */
+export async function readWeekResponse(
+  sectionId: string,
+  courseWeek: number,
+): Promise<WeekResponseOutcome> {
+  const answer = await responseCall(weekResponsePath(sectionId, courseWeek), {
+    headers: readHeaders(),
+  });
+  if (answer.kind !== 'body') return answer;
+  const view = weekResponseOf(answer.body);
+  return view === null ? { kind: 'unavailable', detail: null } : { kind: 'read', view };
+}
+
+/** Publish (`POST`) or edit (`PUT`) the week's response. Only a person pressing publish calls this. */
+export async function writeWeekResponse(
+  method: 'POST' | 'PUT',
+  sectionId: string,
+  courseWeek: number,
+  write: ResponseWriteView,
+): Promise<ResponseWriteOutcome> {
+  const answer = await responseCall(weekResponsePath(sectionId, courseWeek), {
+    method,
+    headers: writeHeaders(),
+    body: JSON.stringify(write),
+  });
+  if (answer.kind !== 'body') return answer;
+  const view = weekResponseOf(answer.body);
+  return view === null ? { kind: 'unavailable', detail: null } : { kind: 'saved', view };
+}
+
+/** An AI draft of the response. Advisory: the server stores nothing and posts nothing. */
+export async function requestResponseDraft(
+  sectionId: string,
+  courseWeek: number,
+): Promise<ResponseDraftOutcome> {
+  const answer = await responseCall(responseDraftPath(sectionId, courseWeek), {
+    method: 'POST',
+    headers: writeHeaders(),
+  });
+  if (answer.kind !== 'body') return answer;
+  const text = (answer.body as Record<string, unknown> | null)?.text;
+  return typeof text === 'string' ? { kind: 'draft', text } : { kind: 'unavailable', detail: null };
+}
+
+/** The themes of the week a draft does not yet address. Advisory, and never blocks publish. */
+export async function requestDraftCheck(
+  sectionId: string,
+  courseWeek: number,
+  draft: string,
+): Promise<DraftCheckOutcome> {
+  const answer = await responseCall(draftCheckPath(sectionId, courseWeek), {
+    method: 'POST',
+    headers: writeHeaders(),
+    body: JSON.stringify({ draft }),
+  });
+  if (answer.kind !== 'body') return answer;
+  const themes = (answer.body as Record<string, unknown> | null)?.unaddressed;
+  return Array.isArray(themes)
+    ? { kind: 'checked', unaddressed: themes as readonly CheckThemeView[] }
+    : { kind: 'unavailable', detail: null };
+}

@@ -130,6 +130,14 @@ RECORDED_SHA256: dict[str, str] = {
     "moderation.v1.md": "a66c03bf5393173aecc9df4b3d688919d00ddf86060212fa626b68b2e53ee9af",
     "validity.v1.md": "206efdc537c84da2896776c8806a419e83f42e24afe2a13c2a9ede8a6c695989",
     "validity.v2.md": "f642eb02afb09803e1230e9fcf907acc18780cbc949a33320701ce27d22f451e",
+    # E7-04's draft check.
+    "draft_check.v1.md": "6289f2d21996f4f0db888362ad41d566c778d055df6510292c2b901125a03eda",
+    # E7-10 (done-when 4) retires `response_draft.v1.md` and `response_draft.v2.md`
+    # and removes their rows here, in the same change that deletes the files. ADR
+    # 0032's retention question is answered by the ticket: no draft is ever stored,
+    # so no row cites either version. `response_draft.v3.md` replaces both; its row
+    # is added with the file, from the digest of the committed bytes.
+    "response_draft.v3.md": "d2883cd05e423ed1f9e45045337f2926f6bb4776c2eebc5959e9d9e423a03aac",
 }
 
 

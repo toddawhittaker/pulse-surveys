@@ -80,6 +80,12 @@ report rather than in a module of their own because they name a section in exact
 the governed form `SectionView` below does, and two files naming one thing is two
 places for that form to drift.
 
+**The response draft and the draft check's three models are here too** (E7-04:
+`DraftCheckRequest`, `ResponseDraftView` and `DraftCheckView`, at the foot). They
+are not part of the report payload either; they are what the instructor's two AI
+routes beside the report take and answer, and the week they are about is the one
+the report is read for.
+
 **Rates that have no value are `None` and never zero.** A validity rate over
 zero responses is not "all invalid", and a response rate over an empty enrolment
 is not "nobody answered" — both are the absence of a ratio, and E4-09 renders the
@@ -93,15 +99,20 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from app.ai.contracts import HeldNoteType
+from app.ai.contracts import CheckTheme, HeldNoteType
+from app.models.loop import RESPONSE_TEXT_MAX
 from app.schemas import report_benchmark
 from app.services.reporting import ComparisonFigure, refuse_an_unsealed_comparison
 
 __all__ = [
+    "RESPONSE_TEXT_MAX",
     "CommentView",
+    "DraftCheckRequest",
+    "DraftCheckView",
     "InstructorReport",
     "PublishedWeeks",
     "RatesView",
+    "ResponseDraftView",
     "SectionView",
     "SmallNView",
     "StreamReport",
@@ -507,3 +518,48 @@ class TaughtSections(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     sections: list[TaughtSection]
+
+
+class DraftCheckRequest(BaseModel):
+    """What the draft check is sent: the instructor's draft, and nothing else.
+
+    Bounded at the edge by the published response's own bound
+    (`RESPONSE_TEXT_MAX` in `app.models.loop`), because the draft checked is the
+    text that will become one; a body over it is refused with a 422 before any
+    model is asked (E7-04 done-when 6).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    draft: str = Field(
+        min_length=1,
+        max_length=RESPONSE_TEXT_MAX,
+        description="The response draft to check, as the instructor has it now.",
+    )
+
+
+class ResponseDraftView(BaseModel):
+    """What the response draft answers: the draft text the model wrote, once it has passed.
+
+    The text and nothing else. The prompt version and model id the contract
+    carries stay on the server: nothing on the page acts on them, and the draft is
+    never stored (SPEC §5.3: advisory, never auto-posted).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+
+
+class DraftCheckView(BaseModel):
+    """What the draft check answers: the week's themes the draft does not yet address.
+
+    Each is a `CheckTheme`, the contract's own part, rather than a copy of it
+    (E0-12: compose, never fork): a shown stream's theme with its stored comment
+    count, a held stream's theme with `null`. Empty when the draft addresses them
+    all.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    unaddressed: tuple[CheckTheme, ...]

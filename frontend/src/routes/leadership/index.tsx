@@ -8,6 +8,9 @@ import { copy as moderationCopy } from '../../copy/leadershipModerationCopy';
 import { LANDINGS } from '../../lib/landings';
 import { COMPARISON_SETS_ROUTE } from './ComparisonSetForm';
 import { EXCLUSION_LOG_ROUTE } from './ExclusionLog';
+import { copy as responseCopy } from '../../copy/leadershipResponseCopy';
+import { RESPONSE_POLICY_ROUTE } from './ResponsePolicy';
+import { RESPONSES_OWED_ROUTE } from './ResponsesOwed';
 import { REVIEW_QUEUE_ROUTE } from './ReviewQueue';
 import './leadershipComparisonSets.css';
 
@@ -52,6 +55,16 @@ export function LeadershipLanding(): JSX.Element {
       <p>
         <Link className="pulse-set-link" to={EXCLUSION_LOG_ROUTE}>
           {moderationCopy('leadership_moderation.log.heading')}
+        </Link>
+      </p>
+      <p>
+        <Link className="pulse-set-link" to={RESPONSE_POLICY_ROUTE}>
+          {responseCopy('leadership_response.policy.heading')}
+        </Link>
+      </p>
+      <p>
+        <Link className="pulse-set-link" to={RESPONSES_OWED_ROUTE}>
+          {responseCopy('leadership_response.owed.heading')}
         </Link>
       </p>
     </LandingView>

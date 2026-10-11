@@ -7,12 +7,16 @@ this session may read, which weeks are published, how a rate divides, what a
 comment may say — is in `app.services.reporting`, and the payload's shape is
 `app.schemas.report`.
 
-**Three reads and one write.** The report for one section and one course week,
+**Three reads and three posts.** The report for one section and one course week,
 the list of course weeks a reader may page to, and the list of sections they
 teach; E4-11 consumes all three and E4-15 drives them against the running stack.
 Since E6-03, a decision on one comment of that report: exclude, keep, or undo
-(SPEC §5.2). The write carries `csrf_verified_instructor`, the reads
-`require_instructor`; the decision itself is `app.services.moderation`'s.
+(SPEC §5.2). Since E7-04, the AI draft of a response to one week, and the AI
+check of a draft (SPEC §5.3). Since E7-03, the week's response itself: read,
+publish and edit (SPEC §5.3), which are `app.services.response_loop`'s. The
+writes carry `csrf_verified_instructor`, the reads `require_instructor`; the
+decision is `app.services.moderation`'s and the draft and check are
+`app.services.reporting`'s.
 
 **The third one is what makes the other two askable** (E4-18, ADR 0156). Both of
 them take a section key in the path, and until it shipped nothing a client holds
@@ -22,8 +26,9 @@ the other two are what a reader opens from it, which is the shape
 `app.api.student` already holds — a parameterless read of the reader's own scope,
 and then the pages behind it.
 
-**All three carry `app.api.deps.require_instructor` rather than a check of their
-own.** That is what makes them findable: a sweep asking the running application
+**Every route carries `app.api.deps.require_instructor` rather than a check of
+its own** — the posts through `csrf_verified_instructor`, which declares it.
+That is what makes them findable: a sweep asking the running application
 which routes carry that dependency gets this module's whole surface, and a route
 that resolved a session for itself would be an instructor route outside it — the
 shape `app.api.student` already holds for the student side.
@@ -77,9 +82,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
+from app.ai.gateway import AIGatewayError
 from app.api.deps import csrf_verified_instructor, person_of, require_instructor
 from app.config import Settings
 from app.copy.instructor_report import (
+    ASSISTANT_BUSY,
+    ASSISTANT_UNUSABLE,
     COMMENT_UNAVAILABLE,
     DECISION_NOT_ALLOWED,
     REASON_BLANK,
@@ -88,14 +96,19 @@ from app.copy.instructor_report import (
 )
 from app.copy.instructor_report import SECTION_UNAVAILABLE as SECTION_UNAVAILABLE_COPY
 from app.copy.instructor_report import WEEK_UNAVAILABLE as WEEK_UNAVAILABLE_COPY
+from app.copy.response_loop import NOT_YOURS_TO_EDIT, RESPONSE_ALREADY_PUBLISHED
 from app.db import get_session
 from app.schemas.report import (
     CommentDecision,
     CommentView,
+    DraftCheckRequest,
+    DraftCheckView,
     InstructorReport,
     PublishedWeeks,
+    ResponseDraftView,
     TaughtSections,
 )
+from app.schemas.response_loop import ResponseWrite, WeekResponseView
 from app.services.moderation import (
     CommentNotOnReportError,
     DecisionAction,
@@ -106,11 +119,23 @@ from app.services.moderation import (
     decide_as_instructor,
 )
 from app.services.reporting import (
+    AssistantBusyError,
     CourseWeekUnavailableError,
     SectionUnavailableError,
+    UnusableAnswerError,
+    instructor_draft_check,
     instructor_report,
+    instructor_response_draft,
+    one_assistant_call_at_a_time,
     published_course_weeks,
     taught_sections,
+)
+from app.services.response_loop import (
+    NotYoursToEditError,
+    ResponseAlreadyPublishedError,
+    edit_as_instructor,
+    instructor_week_response,
+    publish_as_instructor,
 )
 from app.services.session import SessionClaims
 
@@ -132,6 +157,32 @@ SECTIONS_PATH = "/instructor/sections"
 # id, the handle every `CommentView` carries, and under the same `/instructor`
 # prefix as the reads.
 DECISIONS_PATH = "/instructor/comments/{answer_id}/decisions"
+
+# Where the AI draft of a response and the AI check of a draft are asked for
+# (E7-04). Keyed by the section and the course week the report is read for, so
+# the week parameter is filled exactly as the report's is, and both are writes in
+# the sense that matters here: each spends a model call, so each carries
+# `csrf_verified_instructor` rather than the reads' `require_instructor`.
+RESPONSE_DRAFT_PATH = "/instructor/sections/{section_id}/weeks/{course_week}/response-draft"
+DRAFT_CHECK_PATH = "/instructor/sections/{section_id}/weeks/{course_week}/draft-check"
+
+# Where the week's response is read, published and edited (E7-03). Keyed as the
+# draft and the check are, so the three a page needs for one week share a stem.
+RESPONSE_PATH = "/instructor/sections/{section_id}/weeks/{course_week}/response"
+CREATED = 201
+# A publish when the week already has a response, and an edit with nothing of
+# the reader's to edit: 409, because the request conflicts with the week's
+# state, which the reader's own report already shows (E7-03, decision 1).
+RESPONSE_CONFLICT_STATUS = 409
+
+# The one refusal of a model answer every draft and check route answers, the
+# instructor's here and the on-behalf ones in `app.api.leadership` (E7-04's work
+# order, decision 2): 502, because the server's upstream gave it nothing it
+# could use. And the one refusal of a second draft or check from a person with
+# one already waiting on the model (E7-10 done-when 3): 429. Both are defined
+# here once and imported there.
+ASSISTANT_UNUSABLE_STATUS = 502
+ASSISTANT_BUSY_STATUS = 429
 
 # The decision route's refusals (E6-03's work order, decision 1). 404 for an answer
 # the reader's report does not return, whatever it is, with one sentence; 409 for an
@@ -318,6 +369,208 @@ def decide_on_comment(
         raise HTTPException(
             status_code=REASON_REFUSED_STATUS, detail=REASON_TOO_LONG.text
         ) from None
+
+
+@router.post(RESPONSE_DRAFT_PATH, summary="An AI draft of my response to one week of my report")
+def draft_a_response(
+    section_id: UUID,
+    course_week: int,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_instructor),
+    session: Session = Depends(get_session),
+) -> ResponseDraftView:
+    """SPEC §5.3's draft: advisory, never stored, never posted.
+
+    **The report's own refusals, byte for byte, and no model call behind
+    them.** A section the reader does not teach, one that does not exist, and a
+    week not yet published get exactly the 404 the report answers, because the
+    service raises the report's exceptions from the report's own gate before it
+    gathers anything. Every refusal of the model's answer is one 502 and one
+    sentence (`assistant_unusable`), and a second draft or check from a person
+    with one in flight is one 429 before anything is read (`assistant_busy`).
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    person_id = person_of(claims)
+    try:
+        with one_assistant_call_at_a_time(person_id):
+            text = instructor_response_draft(
+                session,
+                person_id=person_id,
+                section_id=section_id,
+                course_week=course_week,
+                settings=settings,
+            )
+    except AssistantBusyError:
+        raise assistant_busy() from None
+    except SectionUnavailableError:
+        raise _unavailable(SECTION_UNAVAILABLE) from None
+    except CourseWeekUnavailableError:
+        raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
+    except (UnusableAnswerError, AIGatewayError):
+        raise assistant_unusable() from None
+    return ResponseDraftView(text=text)
+
+
+@router.post(
+    DRAFT_CHECK_PATH, summary="The themes of one week of my report a draft does not address"
+)
+def check_a_draft(
+    section_id: UUID,
+    course_week: int,
+    check: DraftCheckRequest,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_instructor),
+    session: Session = Depends(get_session),
+) -> DraftCheckView:
+    """SPEC §5.3's draft check: instructor-initiated, never blocking, re-runnable.
+
+    The draft arrives bounded (`DraftCheckRequest`), and the refusals are the
+    draft route's: the report's 404s before any model call, and one 502 for an
+    answer that names anything but the week's stored themes as the stream may
+    show them.
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    person_id = person_of(claims)
+    try:
+        with one_assistant_call_at_a_time(person_id):
+            themes = instructor_draft_check(
+                session,
+                person_id=person_id,
+                section_id=section_id,
+                course_week=course_week,
+                draft=check.draft,
+                settings=settings,
+            )
+    except AssistantBusyError:
+        raise assistant_busy() from None
+    except SectionUnavailableError:
+        raise _unavailable(SECTION_UNAVAILABLE) from None
+    except CourseWeekUnavailableError:
+        raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
+    except (UnusableAnswerError, AIGatewayError):
+        raise assistant_unusable() from None
+    return DraftCheckView(unaddressed=themes)
+
+
+@router.get(RESPONSE_PATH, summary="The response to one week of my report, as students read it")
+def read_week_response(
+    section_id: UUID,
+    course_week: int,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(require_instructor),
+    session: Session = Depends(get_session),
+) -> WeekResponseView:
+    """The week's state and response, behind the report's own gate and its own 404s."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return instructor_week_response(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            settings=settings,
+        )
+    except SectionUnavailableError:
+        raise _unavailable(SECTION_UNAVAILABLE) from None
+    except CourseWeekUnavailableError:
+        raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
+
+
+@router.post(
+    RESPONSE_PATH, status_code=CREATED, summary="Publish my response to one week of my report"
+)
+def publish_week_response(
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_instructor),
+    session: Session = Depends(get_session),
+) -> WeekResponseView:
+    """SPEC §5.3's publish: one response per section-week, under the reader's name.
+
+    The report's 404s first; a week that already has a response is a 409 with
+    one sentence, and nothing is written.
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return publish_as_instructor(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            write=write,
+            settings=settings,
+        )
+    except SectionUnavailableError:
+        raise _unavailable(SECTION_UNAVAILABLE) from None
+    except CourseWeekUnavailableError:
+        raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
+    except ResponseAlreadyPublishedError:
+        raise HTTPException(
+            status_code=RESPONSE_CONFLICT_STATUS, detail=RESPONSE_ALREADY_PUBLISHED.text
+        ) from None
+
+
+@router.put(RESPONSE_PATH, summary="Edit the response I published to one week of my report")
+def edit_week_response(
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_instructor),
+    session: Session = Depends(get_session),
+) -> WeekResponseView:
+    """SPEC §5.3's edit: a new row, by the person who first published, and never a re-hold.
+
+    The report's 404s first; no response yet, or one somebody else published,
+    is one 409 with one sentence, so it never says who published.
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return edit_as_instructor(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            write=write,
+            settings=settings,
+        )
+    except SectionUnavailableError:
+        raise _unavailable(SECTION_UNAVAILABLE) from None
+    except CourseWeekUnavailableError:
+        raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
+    except NotYoursToEditError:
+        raise HTTPException(
+            status_code=RESPONSE_CONFLICT_STATUS, detail=NOT_YOURS_TO_EDIT.text
+        ) from None
+
+
+def assistant_unusable() -> HTTPException:
+    """The one 502 every draft and check route answers, whatever made the model's answer unusable.
+
+    The same sentence for a refused answer and for a model that did not answer
+    usably at all: a refusal that said which rule an answer broke, or which
+    comment a draft matched, would describe comments the reader is not shown.
+    The gateway's own error messages never reach the body. `app.api.leadership`'s
+    on-behalf draft and check answer this same one.
+    """
+    return HTTPException(status_code=ASSISTANT_UNUSABLE_STATUS, detail=ASSISTANT_UNUSABLE.text)
+
+
+def assistant_busy() -> HTTPException:
+    """The one 429 every draft and check route answers to a person with one already in flight."""
+    return HTTPException(status_code=ASSISTANT_BUSY_STATUS, detail=ASSISTANT_BUSY.text)
 
 
 def _unavailable(detail: str) -> HTTPException:

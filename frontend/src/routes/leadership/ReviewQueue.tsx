@@ -37,6 +37,7 @@ const QUEUED_FLAG = 'harmful';
 type Load =
   | { readonly kind: 'loading' }
   | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
   | { readonly kind: 'error'; readonly detail: string | null }
   | { readonly kind: 'queue'; readonly items: readonly QueueItemView[] };
 
@@ -107,6 +108,9 @@ export function ReviewQueueRoute(): JSX.Element {
     if (outcome.kind === 'session-ended') {
       return { kind: 'refused', detail: copy('leadership_moderation.session_ended_body') };
     }
+    if (outcome.kind === 'not-your-role') {
+      return { kind: 'refused', detail: copy('leadership_moderation.not_your_role_body') };
+    }
     return {
       kind: 'refused',
       detail:
@@ -136,6 +140,12 @@ export function ReviewQueueRoute(): JSX.Element {
           variant="flat"
           title={copy('leadership_moderation.session_ended_title')}
           body={copy('leadership_moderation.session_ended_body')}
+        />
+      ) : load.kind === 'not-your-role' ? (
+        <StateNotice
+          variant="flat"
+          title={copy('leadership_moderation.not_your_role_title')}
+          body={copy('leadership_moderation.not_your_role_body')}
         />
       ) : load.kind === 'error' ? (
         <StateNotice
@@ -174,6 +184,7 @@ export function ReviewQueueRoute(): JSX.Element {
 /** What a read of the queue means for the page. A refusal is never the empty state. */
 function loadFrom(read: ReviewQueueRead): Load {
   if (read.kind === 'session-ended') return { kind: 'session-ended' };
+  if (read.kind === 'not-your-role') return { kind: 'not-your-role' };
   if (read.kind === 'unavailable') return { kind: 'error', detail: read.detail };
   return { kind: 'queue', items: read.items };
 }

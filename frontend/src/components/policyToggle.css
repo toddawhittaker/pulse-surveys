@@ -1,0 +1,69 @@
+/* The response-required switch (`design/PolicyToggle.dc.html`). Tokens only. */
+
+.pulse-policy-toggle {
+  padding: var(--space-4) var(--space-5);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.pulse-policy-toggle__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.pulse-policy-toggle__title {
+  margin: 0;
+  font-size: var(--text-2);
+  font-weight: 500;
+  color: var(--spruce);
+}
+
+.pulse-policy-toggle__detail,
+.pulse-policy-toggle__help {
+  margin: 2px 0 0;
+  font-size: var(--text-1);
+  line-height: 1.5;
+  color: var(--spruce-60);
+}
+
+.pulse-policy-toggle__help {
+  margin-top: var(--space-3);
+}
+
+.pulse-policy-toggle__track {
+  flex: none;
+  display: flex;
+  justify-content: flex-start;
+  width: 44px;
+  height: 24px;
+  padding: 2px;
+  background: var(--chalk);
+  /* Deviation from the prototype's hairline: an off switch's edge is the control's
+     only boundary, so it takes the input edge (3:1 on paper, WCAG 1.4.11). */
+  border: 1px solid var(--input-edge);
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.pulse-policy-toggle__track[aria-checked='true'] {
+  justify-content: flex-end;
+  background: var(--spruce);
+  border-color: var(--spruce);
+}
+
+.pulse-policy-toggle__track[aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.pulse-policy-toggle__knob {
+  width: 18px;
+  height: 18px;
+  background: var(--paper);
+  border-radius: 50%;
+  box-shadow: var(--shadow-card);
+}

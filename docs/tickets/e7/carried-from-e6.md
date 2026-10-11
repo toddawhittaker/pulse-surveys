@@ -18,6 +18,10 @@ The boundary reviews run after this file is written (`../e6/boundary-review.md`)
 Whatever they find and do not fix is added here, under its own heading, by the
 change that records the finding.
 
+**At the E7 exit,** each entry an E7 ticket closed says so below, naming the
+pull request and the merge commit, and every entry still open is carried on in
+`../e8/carried-from-e7.md`, whose ledger names this file's entries in order.
+
 ## How the sources were dispositioned
 
 **Closed inside E6,** each closure recorded in its source file with the pull
@@ -128,7 +132,11 @@ adds the scan to the instructor-report and leadership-moderation drives.
 **Done when:** both drives run an axe scan on each moderation page they reach and
 fail on a violation.
 
-## Two LOWs on the leadership moderation drive
+**Not closed in E7.** No `process/` pull request added `@axe-core/playwright`;
+neither `package.json` names it at the E7 exit, so no E7 drive runs a scan.
+Carried on in `../e8/carried-from-e7.md`, with the E7 pages added to it.
+
+## Two LOWs on the leadership moderation drive — closed by E7-08
 
 From E6-06's security review (#297). `tests/e2e/leadership-moderation.spec.ts`
 writes a test-only `lead_faculty_mapping` row. A killed run leaves it behind on a
@@ -138,12 +146,20 @@ could remove a seeded row if the seed ever mapped that person to `BIOL 215`.
 deletes any stale row first, and `afterAll` deletes only a row this run
 inserted.
 
-## Released comments are read-only on the instructor page
+**Closed by E7-08** (#307, merged as 09c48a19): `beforeAll` deletes a stale
+`(BIOL 215, the lead)` row first, and `afterAll` deletes the mapping only when
+this run's insert returned a row.
+
+## Released comments are read-only on the instructor page — closed by E7-05
 
 E6-04's scope choice (#295): the "Comments from earlier weeks" list offers no
 decision. **Owner:** the next epic that touches the instructor report page.
 **Done when:** a record decides whether an instructor may exclude a released
 comment, and the page follows it.
+
+**Closed by E7-05** (#313, merged as b0a6794b). SPEC §5.2 already lets an
+instructor decide on a comment in a release batch, and the "Comments from
+earlier weeks" list now offers Keep, Exclude and Undo, with a page test.
 
 ## Deans, vice presidents and the assistant dean have no review queue
 
@@ -206,12 +222,16 @@ queue's harmful-verdict `EXISTS` repeats what `report_comments._flag_of` decides
 each check is made once, the unreachable branch is gone or argued, and the queue
 reads the flag through one definition.
 
-### The reason bound is written twice
+### The reason bound is written twice — closed by E7-05
 
 `frontend/src/components/CommentCard.tsx`'s `REASON_MAX_LENGTH` and
 `backend/app/models/report.py`'s `REASON_BOUND` must agree, and nothing checks
 that they do. **Owner:** the next UI ticket that touches the comment card.
 **Done when:** a unit test reads both and fails when they differ.
+
+**Closed by E7-05** (#313, merged as b0a6794b):
+`tests/unit/test_the_frontend_bounds_agree_with_the_backend.py` reads both, and
+the response length bound beside them.
 
 ### Comments that tell ticket history
 
@@ -219,6 +239,10 @@ Several E6 docstrings and comments say which ticket, ruling or review round
 changed a rule rather than citing the record that owns it. **Owner:** the next
 ticket that touches each file. **Done when:** those comments cite ADRs 0187 to
 0190 for the why, and say what the code does now.
+
+**Not closed in E7, and grown.** The E7 tickets' own files name tickets in
+their comments too (`services/response_loop.py` among thirty files). Carried
+on in `../e8/carried-from-e7.md` with the list.
 
 ### The review queue has no index of its own
 
@@ -243,6 +267,51 @@ moderation slot, in `tests/unit/test_the_moderation_eval_cases_cover_every_verdi
 `survey_windows.closed_by` (`closes_at < now`). **Owner:** the next grading
 ticket. **Done when:** it uses `<` and a comment says it matches `closed_by`.
 
+## Two findings from driving E6 by hand
+
+Found on 2026-10-10 by driving the E6 story on the local stack after the epic
+merged, with screenshots; neither is a defect in what E6 shipped to its readers.
+
+### A stored summary can carry a comment excluded after it was written
+
+The weekly summary is written once, before the instructor decides on the
+week's comments. A clean comment the instructor later excludes stays in that
+stored summary's text. Today only the instructor reads a summary, and the
+instructor already sees the excluded comment's text, muted (SPEC §5.2), so
+nothing new reaches anyone. It becomes a leak the moment a second reader is
+given a summary: SPEC §5.3's student page lists no summary today, but any
+change that adds one, or a leadership roll-up that shows one, would hand an
+excluded comment to a reader it was excluded from. **Owner:** the first ticket
+that shows a stored summary to anyone but the section's instructor (E8 or E9).
+**Done when:** no reader other than the instructor receives a summary written
+from a comment that now holds an exclusion, with a test that excludes a
+summarized comment and reads the summary as that reader. **Closed for the
+on-behalf reader by E7-03** (ADR 0194): the on-behalf read and draft gather
+leave out a summary not strictly later than the week's latest exclusion or undo
+of a keep (#312, merged as e7a928c7). E8 and E9 inherit the rule for their own
+readers; carried on in `../e8/carried-from-e7.md`.
+
+### A signed-in reader without the role is told their session ended — closed by E7-08
+
+A student or plain instructor who opens `/app/leadership/review-queue` sees
+"This page is not signed in. The session this page was opened with has
+ended." The server refuses a session that is not a leadership session with a
+401 on purpose (`backend/app/api/leadership.py`, the module docstring), and the
+page reads every 401 as an ended session, so the sentence is untrue for a
+reader who is signed in but holds no leadership role. The comparison-set pages
+share the pattern. Changing the status is sign-in code and rides the heavy
+lane; changing only the words cannot tell the two cases apart. **Owner:** E7's
+breakdown, as one ticket. **Done when:** a signed-in reader without a
+leadership role, opening either leadership page, reads a sentence that says
+the page is not part of their role, a reader whose session really ended still
+reads the ended-session sentence, and an e2e case drives both.
+
+**Closed by E7-08** (#307, merged as 09c48a19; ADR 0196): `require_leadership`
+answers a live session in another role with a 403 the pages render as "This
+page is not part of your role", a token that does not verify still gets the
+401 and the ended-session sentence, and `tests/e2e/leadership-moderation.spec.ts`
+drives both. E7-07's three pages render the same outcome.
+
 ## Two mockups still pass a count to the small-N notice
 
 E6-04 (#295) made `design/SmallNNotice.dc.html` state no count.
@@ -262,6 +331,11 @@ the next ticket that touches the e2e world. **Done when:** the drives derive
 their dates from the seeded calendar relative to the real date, or the seeded
 calendar moves with it, and a drive run after 2026-11-23 is green.
 
+**Not closed in E7.** E7's own drives move the clock only to instants read off
+the seeded calendar or the section's own window rows, and the E7 exit drive
+pins none. The older drives are unchanged, so the entry is carried on with its
+date.
+
 ## The `PERSON_TABLES` standing question, re-asked and re-carried
 
 E6's answer is in `../e6/boundary-review.md`: `threat_case` and
@@ -270,11 +344,17 @@ with a pinned column tuple, and `decided_by_person_id` is a `person` key whose
 identity sits on `user_identity`. `PERSON_TABLES` is unchanged. **Owner:** E13 at
 the latest; every epic boundary re-asks it of the tables it adds.
 
+**Re-asked at the E7 exit** of `instructor_response` and `response_policy`;
+the answer is in `boundary-review.md`, and the entry is carried on.
+
 ## The TypeScript 7 pair waits on typescript-eslint
 
 Checked 2026-10-10: latest typescript-eslint 8.71.1, peer range still
 `>=4.8.4 <6.1.0`. Pinned: TypeScript 6.0.3, typescript-eslint 8.71.1.
 **Owner / done when:** unchanged from the source entry.
+
+**Re-checked 2026-10-11** at the E7 exit: unchanged (`boundary-review.md`).
+Carried on.
 
 ## The session-read sweep's two disclosed limits
 
@@ -282,11 +362,17 @@ Re-affirmed at the E6 boundary by planting in `api/leadership.py` and
 `api/instructor.py`. E6 added no route-serving package outside `backend/app/`.
 **Owner:** each boundary re-affirms; the structural close is E13's.
 
+**Re-affirmed at the E7 exit** by planting in `api/student.py`,
+`api/instructor.py` and `api/leadership.py` (`boundary-review.md`). Carried on.
+
 ## The denial-module inventory and the collection floor
 
 Unchanged in class. E6 added fourteen invariant-marked modules, and the
 isolated pass collects every one (`../e6/boundary-review.md` lists them).
 **Owner:** a candidate process ticket, unchanged. **Done when:** unchanged.
+
+**At the E7 exit** twenty new invariant-marked modules, every one collected
+(`boundary-review.md`). Carried on.
 
 ## The ledger
 
