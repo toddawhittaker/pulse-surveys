@@ -112,7 +112,7 @@ from fixtures.student_read import (
 )
 from fixtures.supervision import require_table
 from fixtures.survey_windows import SEEDED_COHORTS
-from fixtures.the_hold import a_reply_in, results_route, results_url
+from fixtures.the_hold import a_reply_in, latest_results_route, results_route, results_url
 
 pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
 
@@ -389,12 +389,14 @@ def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in
     # E7-02's results route takes path parameters and is driven by name at the
     # foot of this test; every other parameterised GET is a route nothing drives.
     results_template = results_route(student_read_door.application)
+    latest_template = latest_results_route(student_read_door.application)
+    driven_by_name = {results_template, latest_template}
     undriveable = sorted(
         getattr(route, "path", "")
         for route in routes
         if "{" in getattr(route, "path", "")
         and "GET" in (getattr(route, "methods", None) or set())
-        and getattr(route, "path", "").rstrip("/") != results_template
+        and getattr(route, "path", "").rstrip("/") not in driven_by_name
     )
     assert not undriveable, (
         f"These student-visible routes answer GET and take a path parameter: {undriveable}. This "
@@ -451,7 +453,7 @@ def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in
         path = getattr(route, "path", "")
         if "GET" not in (getattr(route, "methods", None) or set()):
             continue
-        if path.rstrip("/") == results_template:
+        if path.rstrip("/") in driven_by_name:
             continue
         answered = student_read_door.get(path)
         assert answered.status_code == 200, (
@@ -502,6 +504,22 @@ def test_no_student_visible_route_names_a_section_the_student_is_not_enrolled_in
         "E7-02's results route: the reply read is the student's own section's, never a sibling's."
     )
     scanned.append(results_template)
+
+    # The amendment's no-week route (A2), over the same planted world: the latest
+    # published week of the enrolled section is term week 12, whose reply is theirs.
+    latest_url = results_url(latest_template, section_id=world.enrolled_section_id)
+    latest = student_read_door.get(latest_url)
+    assert latest.status_code == 200 and own_reply in latest.text, (
+        f"`GET {latest_template}` for the student's own section answered {latest.status_code} "
+        f"{latest.text[:300]!r}; its latest published week carries that section's reply."
+    )
+    latest_surface = response_surface(latest)
+    leaked = sorted(value for value in forbidden | theirs if value in latest_surface)
+    assert not leaked, (
+        f"`GET {latest_template}` named {leaked[:5]}, belonging to a section this student is not "
+        f"enrolled in. The first sits in {around(latest_surface, leaked[0])!r}."
+    )
+    scanned.append(latest_template)
 
     assert scanned, (
         f"None of the student-visible routes {sorted(paths_of(routes))} answers GET, so this sweep "

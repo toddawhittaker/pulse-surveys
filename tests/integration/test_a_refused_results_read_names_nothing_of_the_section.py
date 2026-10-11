@@ -38,6 +38,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from fixtures.lead_review import UNMAPPED_COHORT
 from fixtures.report_api import TAUGHT_COHORT, UNTAUGHT_COHORT
 from fixtures.routing import paths_of, student_visible_routes
 from fixtures.staff_names import SIBLING_SECTION_TEACHER_NAME, TEACHER_NAME
@@ -51,6 +52,7 @@ from fixtures.the_hold import (
     STATE,
     WEEK_BEFORE,
     HoldWorld,
+    latest_results_route,
     report_opens,
     response_loop_copy,
     results_route,
@@ -107,11 +109,16 @@ def test_the_results_route_is_a_student_route(
     read instead of the shared dependency.
     """
     template = results_route(hold.door.application)
+    latest = latest_results_route(hold.door.application)
     found = paths_of(student_visible_routes(hold.door.application, require_student_dependency))
 
     assert template in found, (
         f"The results route {template!r} is not among the routes whose dependency graph holds "
         f"`require_student` ({sorted(found)}). The ticket: the route sits behind `require_student`."
+    )
+    assert latest in found, (
+        f"The no-week results route {latest!r} (the amendment's A2) is not among the routes whose "
+        f"dependency graph holds `require_student` ({sorted(found)})."
     )
 
 
@@ -242,28 +249,44 @@ def test_a_week_whose_report_has_not_opened_is_refused_beside_the_week_before_an
 
 
 def test_every_refusal_is_the_same_404_with_the_same_sentence(hold: HoldWorld) -> None:
-    """Five refused reads, one world, one clock: byte-identical, and one sentence of the module.
+    """Nine refused reads over both routes, one world, one clock: byte-identical, one sentence.
 
-    Not enrolled, ended, unopened, a course week the section does not have, and a
-    section that does not exist. Decision 5: one 404, one fixed sentence, for
-    every one — so no refusal tells a student which of the five it was, and none
-    confirms that a section they are not in exists (ADR 0074/0079's rule, at this
-    door).
+    The week route: not enrolled, ended, unopened, a course week the section does
+    not have, and a section that does not exist. The no-week route (the
+    amendment's A2): not enrolled, ended, a section that does not exist, and a
+    section with no published week (the unled course's section, whose only window
+    is course week 2's, not yet opened). Decision 5 and A2: one 404, one fixed
+    sentence, for every one — so no refusal tells a student which of the nine it
+    was, and none confirms that a section they are not in exists (ADR 0074/0079's
+    rule, at this door).
 
     **The mutations this kill:** a 403 for another student's section beside a 404
     for a missing one; a refusal sentence per reason; a framework 404 for a week
-    the section lacks (FastAPI's own "Not Found") beside the module's sentence.
-    **The near miss:** the student's own week, answered 200 in the same world.
+    the section lacks (FastAPI's own "Not Found") beside the module's sentence; a
+    no-week route with refusals of its own (an empty 200, or "no weeks yet" for a
+    section with none published). **The near misses:** the student's own week and
+    own latest week, both answered 200 in the same world.
     """
     world = hold
     world.windows_for(UNTAUGHT_COHORT, WEEK_BEFORE, HELD_WEEK)
+    world.windows_for(UNMAPPED_COHORT, HELD_WEEK)
     plant_the_replies(world)
     student = world.a_student("five-refusals", world.taught)
     ended = world.a_student("five-refusals-ended", world.taught, ended=True)
+    unpublished = world.a_student("nothing-published", world.unmapped_section)
     world.stand_after_the_opening(WEEK_BEFORE)
 
     own = world.results(student, course_week=WEEK_BEFORE)
+    own_latest = world.latest(student)
+    assert own_latest.status_code == 200 and STATE in own_latest.text, (
+        f"The student's own latest week was answered {own_latest.status_code} "
+        f"{own_latest.text[:300]!r}; the no-week refusals beside it need a passing twin."
+    )
     refusals = {
+        "latest: another section": world.latest(student, section_id=world.sibling_section),
+        "latest: an ended enrollment": world.latest(ended),
+        "latest: a section that does not exist": world.latest(student, section_id=uuid4()),
+        "latest: a section with no published week": world.latest(unpublished),
         "another section": world.results(
             student, course_week=WEEK_BEFORE, section_id=world.sibling_section
         ),
@@ -282,15 +305,96 @@ def test_every_refusal_is_the_same_404_with_the_same_sentence(hold: HoldWorld) -
     ), f"The student's own week was answered {own.status_code} {own.text[:300]!r}."
     shapes = {what: (answered.status_code, answered.text) for what, answered in refusals.items()}
     assert {status for status, _ in shapes.values()} == {REFUSED_STATUS}, (
-        f"The five refusals were answered {[(what, s[0]) for what, s in shapes.items()]}. "
-        "Decision 5: one 404 for every refused case."
+        f"The refusals were answered {[(what, s[0]) for what, s in shapes.items()]}. "
+        "Decision 5 and A2: one 404 for every refused case, on either route."
     )
     bodies = {what: text[:200] for what, (_, text) in shapes.items()}
-    assert len(set(shapes.values())) == 1, f"The five refusals are not byte-identical: {bodies}."
+    assert len(set(shapes.values())) == 1, f"The refusals are not byte-identical: {bodies}."
     served = sentences_served(refusals["another section"])
     assert (
         len(served) == 1 and served[0] in response_loop_copy()
     ), f"The refusal carries {served} of `app.copy.response_loop`'s sentences; decision 5: one."
+
+
+def test_the_latest_route_refuses_another_section_beside_its_own_students_read(
+    hold: HoldWorld,
+) -> None:
+    """The no-week route: a student of `F1WW` asks for `Q1WW`: 404 naming nothing. `Q1WW`'s student reads it.
+
+    The amendment's A2: "the same single 404 … for every case the week route
+    refuses". **The mutation this kills:** the no-week route resolving the latest
+    week from the section alone and only then checking the enrollment through the
+    week route's path — or not at all — which serves `Q1WW`'s latest reply to a
+    student of `F1WW`. **The near miss:** `Q1WW`'s own student, answered with it.
+    """
+    world = hold
+    world.windows_for(UNTAUGHT_COHORT, WEEK_BEFORE, HELD_WEEK)
+    plant_the_replies(world)
+    ours = world.a_student("latest-not-enrolled", world.taught)
+    theirs = world.a_student("latest-sibling-own", world.sibling_section)
+    world.stand_after_the_opening(HELD_WEEK)
+
+    twin = world.latest(theirs)
+    refused = world.latest(ours, section_id=world.sibling_section)
+
+    assert twin.status_code == 200 and SIBLING_TEXT in twin.text, (
+        f"`Q1WW`'s own student's no-week read was answered {twin.status_code} "
+        f"{twin.text[:300]!r}; it must carry `Q1WW`'s latest reply."
+    )
+    assert refused.status_code == REFUSED_STATUS, (
+        f"A student of `F1WW` asking the no-week route for `Q1WW` was answered "
+        f"{refused.status_code} {refused.text[:300]!r}. A2: the same 404."
+    )
+    assert len(sentences_served(refused)) == 1, f"The refusal carries {sentences_served(refused)}."
+    leaked = named_in(
+        refused,
+        spellings_of(world.sibling_section)
+        | {world.code_of(UNTAUGHT_COHORT), SIBLING_SECTION_TEACHER_NAME, SIBLING_TEXT},
+    )
+    assert not leaked, f"The no-week refusal names {leaked}."
+
+
+def test_the_latest_route_refuses_a_section_with_no_published_week_until_one_opens(
+    hold: HoldWorld,
+) -> None:
+    """An hour before `F1WW`'s first report opens: the no-week read is 404; an hour after, week 1.
+
+    Every one of `F1WW`'s six weeks has a window, so a "latest" computed from the
+    windows has six candidates; none has opened. The reply planted in week 1 is
+    already stored, so a refusal that read it first would have it to leak.
+
+    **The mutations this kill:** the latest week taken as the last window
+    (course week 6, before any report opened); an empty or `null` 200 for a
+    section with nothing published, which A2 makes the one 404. **The near miss:**
+    the same student an hour after the first opening, answered with week 1.
+    """
+    world = hold
+    world.a_response(
+        section_id=world.taught,
+        course_week=WEEK_BEFORE,
+        author=world.person(world.names.teacher).person_id,
+        role=INSTRUCTOR,
+        body=EARLY_TEXT,
+        published_at=report_opens(WEEK_BEFORE) - FIRST_ROW_AFTER_OPENING,
+    )
+    student = world.a_student("latest-nothing-yet", world.taught)
+
+    world.stand_before_the_opening(WEEK_BEFORE)
+    refused = world.latest(student)
+    world.stand_after_the_opening(WEEK_BEFORE)
+    opened = world.latest(student)
+
+    assert opened.status_code == 200 and EARLY_TEXT in opened.text, (
+        f"An hour after course week 1 opened the no-week read answered {opened.status_code} "
+        f"{opened.text[:300]!r}."
+    )
+    assert refused.status_code == REFUSED_STATUS, (
+        f"With no week published the no-week read answered {refused.status_code} "
+        f"{refused.text[:300]!r}. A2: the same single 404."
+    )
+    assert len(sentences_served(refused)) == 1, f"The refusal carries {sentences_served(refused)}."
+    leaked = named_in(refused, {EARLY_TEXT, TEACHER_NAME, world.code_of(TAUGHT_COHORT)})
+    assert not leaked, f"The no-week refusal names {leaked}."
 
 
 def test_a_session_that_is_not_a_students_is_refused(hold: HoldWorld) -> None:
@@ -319,3 +423,10 @@ def test_a_session_that_is_not_a_students_is_refused(hold: HoldWorld) -> None:
         f"other role with {NOT_A_STUDENT_STATUS} (E2-09)."
     )
     assert OWN_TEXT not in refused.text, "The instructor's refusal carries the reply."
+    latest_url = results_url(latest_results_route(world.door.application), section_id=world.taught)
+    latest_refused = world.review.ask("GET", latest_url, token=world.review.instructor_token)
+    assert latest_refused.status_code == NOT_A_STUDENT_STATUS, (
+        f"The section's teacher was answered {latest_refused.status_code} "
+        f"{latest_refused.text[:300]!r} by the no-week results route (A2)."
+    )
+    assert OWN_TEXT not in latest_refused.text, "The no-week refusal carries the reply."

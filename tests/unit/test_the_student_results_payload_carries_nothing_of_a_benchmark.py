@@ -48,6 +48,10 @@ NOT_STATES = ("small-N", "Awaiting", "held")
 AUTHOR_ROLES = ("INSTRUCTOR", "LEAD_FACULTY", "CHAIR")
 NOT_AUTHOR_ROLES = ("DEAN", "instructor")
 
+# The amendment before review, A1: the published course weeks, on every payload.
+PUBLISHED_WEEKS = "published_weeks"
+WEEKS = [1, 2]
+
 PLANTED_MEMBERS = ("benchmark", "comparison", "university_mean")
 PLANTED_VALUE: dict[str, Any] = {"points": [{"course_week": 1, "mean": {"figure": 4.2}}]}
 
@@ -73,7 +77,8 @@ def the_payload_class(name: str) -> type[BaseModel]:
     if len(found) != 1:
         pytest.fail(
             f"{len(found)} of {list(SCHEMA_HOMES)} declare a pydantic `{name}` ({sorted(found)}). "
-            "E7-02's work order (decision 4) settles `StudentWeekResults {state, response}` and "
+            "E7-02's work order (decision 4, and A1) settles `StudentWeekResults {state, response, "
+            "published_weeks}` and "
             "`StudentResponse {text, author_name, author_role, published_at}`, in one of the two."
         )
     return next(iter(found.values()))
@@ -96,11 +101,27 @@ def test_both_classes_construct_from_their_own_members() -> None:
     results = the_payload_class(RESULTS_SCHEMA)
     response = the_payload_class(RESPONSE_SCHEMA)
 
-    held = results(state="awaiting", response=None)
-    released = results(state="published", response=response(**A_RESPONSE))
+    held = results(state="awaiting", response=None, published_weeks=WEEKS)
+    released = results(state="published", response=response(**A_RESPONSE), published_weeks=WEEKS)
 
     assert held.state == "awaiting" and held.response is None
     assert released.response is not None and released.response.text == A_RESPONSE["text"]
+
+
+def test_the_results_payload_declares_the_published_weeks() -> None:
+    """The amendment's A1: `StudentWeekResults` carries `published_weeks`, on every state.
+
+    **The mutation this kills:** the list put somewhere the page cannot read with
+    the week (a separate route, an optional member left out of the closed states),
+    so the page has nothing to page through on a held week.
+    """
+    results = the_payload_class(RESULTS_SCHEMA)
+
+    assert PUBLISHED_WEEKS in results.model_fields, (
+        f"`{RESULTS_SCHEMA}` declares {sorted(results.model_fields)}; the amendment's A1 adds "
+        f"`{PUBLISHED_WEEKS}: list[int]`."
+    )
+    assert results(state="awaiting", response=None, published_weeks=WEEKS).published_weeks == WEEKS
 
 
 @pytest.mark.parametrize("planted", PLANTED_MEMBERS)
@@ -120,7 +141,9 @@ def test_a_planted_benchmark_member_is_refused_by_the_results_payload(
     """
     model = the_payload_class(which)
     whole: dict[str, Any] = (
-        {"state": "awaiting", "response": None} if which == RESULTS_SCHEMA else dict(A_RESPONSE)
+        {"state": "awaiting", "response": None, PUBLISHED_WEEKS: WEEKS}
+        if which == RESULTS_SCHEMA
+        else dict(A_RESPONSE)
     )
 
     complaints = complaints_about(model, {**whole, planted: PLANTED_VALUE}, planted)
@@ -143,7 +166,7 @@ def test_each_of_the_four_states_is_admitted(state: str) -> None:
     response = the_payload_class(RESPONSE_SCHEMA)
     carried = None if state in ("awaiting", "unanswered") else response(**A_RESPONSE)
 
-    assert results(state=state, response=carried).state == state
+    assert results(state=state, response=carried, published_weeks=WEEKS).state == state
 
 
 @pytest.mark.parametrize("state", NOT_STATES)
@@ -156,7 +179,9 @@ def test_a_state_outside_the_four_is_refused(state: str) -> None:
     """
     results = the_payload_class(RESULTS_SCHEMA)
 
-    complaints = complaints_about(results, {"state": state, "response": None}, "state")
+    complaints = complaints_about(
+        results, {"state": state, "response": None, PUBLISHED_WEEKS: WEEKS}, "state"
+    )
 
     assert complaints, f"`{RESULTS_SCHEMA}` admitted the state {state!r}; decision 4: four states."
 

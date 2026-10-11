@@ -121,8 +121,15 @@ from fixtures.student_read import (
 )
 from fixtures.submit import WORKLOAD_POSITION, a_valid_submission, submit_route
 from fixtures.the_hold import PUBLISHED as RESULTS_PUBLISHED
+from fixtures.the_hold import PUBLISHED_WEEKS as RESULTS_WEEKS
 from fixtures.the_hold import STATE as RESULTS_STATE
-from fixtures.the_hold import a_reply_in, payload_of, results_route, results_url
+from fixtures.the_hold import (
+    a_reply_in,
+    latest_results_route,
+    payload_of,
+    results_route,
+    results_url,
+)
 from test_the_submit_path_answers_the_validity_matrix import a_student_in_an_open_window, accepted
 
 pytestmark = [pytest.mark.invariant, pytest.mark.integration, pytest.mark.lti]
@@ -372,6 +379,20 @@ def the_student_reads_her_results(
     return payload_of(answered, f"`GET {url}`"), answered
 
 
+def the_student_reads_her_latest_results(
+    student: StudentInTheReportWorld, door: ReportDoor
+) -> tuple[Any, Any]:
+    """The amendment's no-week results route (A2) for the hero section, required to be a 200.
+
+    The door stands after every window, so the latest published week is the
+    section's last; its payload lists every published week, which is the
+    readable-something control the caller asserts.
+    """
+    url = results_url(latest_results_route(door.application), section_id=student.taught_section_id)
+    answered = student.get(url)
+    return payload_of(answered, f"`GET {url}`"), answered
+
+
 # ---------------------------------------------------------------------------
 # The controls on the instrument, run before any payload is judged with it.
 # ---------------------------------------------------------------------------
@@ -587,8 +608,10 @@ def test_no_student_visible_route_carries_a_benchmark_shaped_key_at_any_depth(
     # E7-02's results route takes the section and the course week as path
     # parameters, so it is driven by name below rather than by the loop.
     results_template = results_route(application)
+    latest_template = latest_results_route(application)
     covered_elsewhere = {submit_route(report_door.tool)}
-    uncovered = sorted(paths_of(routes) - driven_here - covered_elsewhere - {results_template})
+    driven_by_name = {results_template, latest_template}
+    uncovered = sorted(paths_of(routes) - driven_here - covered_elsewhere - driven_by_name)
     assert not uncovered, (
         f"These student-visible routes are covered by nothing: {uncovered}. This sweep drives a "
         "parameterless GET and E7-02's results route by name; the submit path is driven by "
@@ -640,6 +663,19 @@ def test_no_student_visible_route_carries_a_benchmark_shaped_key_at_any_depth(
         "SPEC §4.1 item 1 and §5.4, over E7-02's results route."
     )
     swept.append(results_template)
+
+    # The amendment's no-week route (A2), for the same section.
+    latest_body, latest_answer = the_student_reads_her_latest_results(student, report_door)
+    assert latest_body[RESULTS_WEEKS], (
+        f"The no-week results route answered {latest_answer.text[:300]!r} with no published week, "
+        "in a world where every week of the section has published."
+    )
+    carried = benchmark_shaped(latest_body)
+    assert not carried, (
+        f"`GET {latest_template}` carries {len(carried)} benchmark-shaped key(s): {carried[:5]}. "
+        "SPEC §4.1 item 1 and §5.4, over the no-week results route."
+    )
+    swept.append(latest_template)
 
     assert swept, (
         f"None of the student-visible routes {sorted(paths_of(routes))} was driven, so this test "
@@ -716,8 +752,16 @@ def test_no_student_payload_carries_a_comparison_figure_the_instructor_is_served
         f"The results route answered {results_read.text[:300]!r} for a week with a published "
         "reply; a payload carrying nothing would hide a figure by carrying nothing."
     )
-    surface = f"{response_surface(read)} {response_surface(results_read)}"
-    carried = numbers_carried_by(student_body) + numbers_carried_by(results_body)
+    latest_body, latest_read = the_student_reads_her_latest_results(student, report_door)
+    assert latest_body[
+        RESULTS_WEEKS
+    ], f"The no-week results route answered {latest_read.text[:300]!r} with no published week."
+    surface = " ".join(response_surface(r) for r in (read, results_read, latest_read))
+    carried = (
+        numbers_carried_by(student_body)
+        + numbers_carried_by(results_body)
+        + numbers_carried_by(latest_body)
+    )
 
     for where, figure in statistics:
         needle = one_statistic_of(figure, where)
