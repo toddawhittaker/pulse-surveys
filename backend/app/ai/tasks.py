@@ -53,8 +53,10 @@ afterwards is what the two halves buy, and the fail-open taxonomy stays in one
 place either way.
 """
 
+import json
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from importlib.resources import files
 from uuid import UUID
 
@@ -63,7 +65,9 @@ from sqlalchemy.orm import Session
 from app.ai.contracts import (
     CommentStream,
     CommentValidityOutput,
+    DraftCheckOutput,
     ModerationOutput,
+    ResponseDraftOutput,
     ValidityVerdict,
     WeeklySummaryOutput,
     WeeklySummaryRecord,
@@ -677,3 +681,200 @@ def summarize_stream(
             "§5.3's draft check reads."
         )
     return WeeklySummaryRecord(summary=output, response_count=response_count)
+
+
+# ---------------------------------------------------------------------------
+# §7.4's response draft and draft check (E7-04)
+# ---------------------------------------------------------------------------
+
+# The two prompts, named as every version above is (ADR 0031, ADR 0032).
+RESPONSE_DRAFT_PROMPT_VERSION = "response_draft.v1"
+DRAFT_CHECK_PROMPT_VERSION = "draft_check.v1"
+
+# Where the week goes in both prompts, and where the instructor's draft goes in
+# the check's. Replaced with `str.replace`, for the reason `prompts/README.md`
+# gives: both files carry a JSON example.
+RESPONSE_WEEK_PLACEHOLDER = "[[RESPONSE_WEEK]]"
+RESPONSE_DRAFT_PLACEHOLDER = "[[RESPONSE_DRAFT]]"
+
+# How long either call may take. An instructor is waiting at the page for it,
+# unlike the Monday summary walk, so this is half the summary's minute; unlike a
+# student's submit there is no floor to fall onto and nothing is blocked, so it
+# is far above the validity task's four seconds. A limit rather than an
+# expectation, and not a configuration knob, for the reason
+# `VALIDITY_TIMEOUT_SECONDS` gives.
+RESPONSE_TASK_TIMEOUT_SECONDS = 30.0
+
+
+@dataclass(frozen=True, slots=True)
+class GatheredTheme:
+    """One stored theme as the two tasks are given it.
+
+    `comment_count` is `None` for a theme of a stream held below the threshold,
+    and only there (decision 12 of the E7 breakdown); `GatheredStream` refuses
+    any other combination.
+    """
+
+    label: str
+    comment_count: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class GatheredStream:
+    """One stream of one section-week, as the two tasks are given it: no comment, ever.
+
+    `summary` is the stored summary's text, or `None` where no summary is served
+    for the stream. `ratings` maps each rating, 1 to 5, to how many responses
+    gave it. `held` is the report's own answer for the stream
+    (`app.services.reporting._held_streams`).
+
+    **A held stream's theme with a count cannot be built, and neither can a shown
+    stream's theme without one.** The rule is the E7 breakdown's decision 12, and
+    it is checked here, where the value is made, so no later reader can be handed
+    the other shape.
+    """
+
+    stream: CommentStream
+    held: bool
+    summary: str | None
+    themes: tuple[GatheredTheme, ...]
+    ratings: Mapping[int, int]
+
+    def __post_init__(self) -> None:
+        for theme in self.themes:
+            if self.held and theme.comment_count is not None:
+                raise ValueError("A held stream's theme carries no count (E7 decision 12).")
+            if not self.held and theme.comment_count is None:
+                raise ValueError("A shown stream's theme carries its stored count.")
+
+
+@dataclass(frozen=True, slots=True)
+class ResponseGather:
+    """Everything the response draft and the draft check are fed for one section-week.
+
+    The week's response count, and per stream its stored summary, its stored
+    themes and its rating distribution. **No comment text, by construction:**
+    there is no field a comment could go in. Built by
+    `app.services.reporting.response_gather`, which applies the stored summary
+    filter and the count rule below the threshold.
+    """
+
+    responses: int
+    streams: tuple[GatheredStream, ...]
+
+    @property
+    def has_a_held_stream(self) -> bool:
+        return any(stream.held for stream in self.streams)
+
+
+def render_response_week(week: ResponseGather) -> str:
+    """The week as the one JSON document both prompts end their data section with.
+
+    **JSON, escaped to ASCII, and that is the injection boundary for this input.**
+    The summaries and theme labels are model text written from students'
+    comments, so they can carry anything a comment carried, including a copy of a
+    prompt's marker line. Rendered through `json.dumps`, no string in the document
+    can contain a raw line break, so no value can stand on a line of its own and
+    pose as a marker; `ensure_ascii` escapes U+2028 and U+2029 too, which a
+    reader splitting on Unicode line boundaries would otherwise treat as breaks.
+    This is the answer to the summary prompt's carried "forged block boundaries"
+    entry for these two prompts (ADR 0195).
+
+    A held stream's theme is written with `"comment_count": null` because
+    `GatheredTheme` holds `None` there: there is no number to write.
+    """
+    document = {
+        "responses": week.responses,
+        "streams": [
+            {
+                "stream": stream.stream.value,
+                "held_below_threshold": stream.held,
+                "summary": stream.summary,
+                "themes": [
+                    {"label": theme.label, "comment_count": theme.comment_count}
+                    for theme in stream.themes
+                ],
+                "ratings": {str(rating): count for rating, count in sorted(stream.ratings.items())},
+            }
+            for stream in week.streams
+        ],
+    }
+    return json.dumps(document, indent=2, ensure_ascii=True)
+
+
+def _render(version: str, replacements: Sequence[tuple[str, str]]) -> str:
+    """One response prompt with each placeholder replaced once, in the template's order.
+
+    **Split on the template, never `replace` on the growing prompt.** The values
+    are text nobody here wrote: a summary can carry the string
+    `[[RESPONSE_DRAFT]]`, and a later `replace` over a prompt that already holds
+    the week would then put the draft inside the week. So each placeholder is
+    found in what is left of the *template* after the previous one, exactly once,
+    and the value is spliced in beside it rather than searched through. A template
+    missing a placeholder, or carrying one twice, is refused.
+    """
+    rendered: list[str] = []
+    rest = load_prompt(version)
+    for placeholder, value in replacements:
+        head, found, rest = rest.partition(placeholder)
+        if not found or placeholder in rest:
+            raise PromptError(
+                f"The prompt `{version}.md` does not carry the {placeholder} marker exactly once, "
+                "in order. `app/ai/prompts/README.md` states the scheme."
+            )
+        rendered += [head, value]
+    return "".join([*rendered, rest])
+
+
+def draft_response(week: ResponseGather, gateway: AIGateway | None = None) -> ResponseDraftOutput:
+    """§7.4's response draft: one call in, one validated draft out.
+
+    Single-shot and advisory (SPEC §5.3): the draft is returned to the instructor
+    and nothing here stores or publishes it. The structural refusals of the answer
+    — a run of a hidden comment, a count beside a held stream — are the caller's,
+    in `app.services.reporting`, because they need the section-week's comments and
+    this module never sees one.
+
+    **No fail-open.** Every gateway failure propagates as its own class; there is
+    no heuristic that could stand in for a draft. **Nothing is logged here**, and
+    nothing raised carries the week or the answer.
+    """
+    gateway = gateway or process_gateway()
+    return gateway.run_task(
+        prompt=_render(
+            RESPONSE_DRAFT_PROMPT_VERSION,
+            [(RESPONSE_WEEK_PLACEHOLDER, render_response_week(week))],
+        ),
+        prompt_version=RESPONSE_DRAFT_PROMPT_VERSION,
+        output_model=ResponseDraftOutput,
+        timeout=RESPONSE_TASK_TIMEOUT_SECONDS,
+    )
+
+
+def check_draft(
+    week: ResponseGather, draft: str, gateway: AIGateway | None = None
+) -> DraftCheckOutput:
+    """§7.4's draft check: one call in, the week's unaddressed themes out.
+
+    The draft is the last thing in the prompt and nothing follows it
+    (`prompts/README.md`): it is free text the instructor typed. The week comes
+    before it as one JSON document, which cannot forge the line the draft
+    follows (`render_response_week`).
+
+    Whether the themes named are the week's stored ones, with the counts the
+    stream may show, is checked by the caller (`app.services.reporting`), which
+    holds the stored themes. No fail-open and nothing logged, as for the draft.
+    """
+    gateway = gateway or process_gateway()
+    return gateway.run_task(
+        prompt=_render(
+            DRAFT_CHECK_PROMPT_VERSION,
+            [
+                (RESPONSE_WEEK_PLACEHOLDER, render_response_week(week)),
+                (RESPONSE_DRAFT_PLACEHOLDER, draft),
+            ],
+        ),
+        prompt_version=DRAFT_CHECK_PROMPT_VERSION,
+        output_model=DraftCheckOutput,
+        timeout=RESPONSE_TASK_TIMEOUT_SECONDS,
+    )
