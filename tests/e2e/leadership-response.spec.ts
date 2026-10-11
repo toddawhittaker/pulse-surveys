@@ -34,6 +34,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 
+import { expectNoAxeViolations } from './support/axe';
 import { clearTheClock, setTheClockTo } from './support/clock';
 import { signInAs } from './support/doors';
 import { databaseStatement, stopTheScheduler } from './support/stack';
@@ -216,6 +217,7 @@ test('a lead sets the course to required and the page says when it takes effect'
   await toggle.click();
   await expect(page.getByText(SAVED)).toBeVisible();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await expectNoAxeViolations(page, 'The policy page after a change');
 
   expect(
     databaseStatement(
@@ -233,6 +235,7 @@ test('a section is owed at 48 hours past report open and not at 47', async ({ pa
   await expect(page.getByTestId(OWED_PAGE)).toBeVisible();
   await expect(page.getByText(EMPTY_TITLE)).toBeVisible();
   await expect(page.getByTestId(OWED_LIST)).toHaveCount(0);
+  await expectNoAxeViolations(page, 'The empty owed list');
 
   await setTheClockTo(page, plusHours(reportOpensAt, 48));
   // The clock control leaves the page on the console, so the list is opened
@@ -245,6 +248,7 @@ test('a section is owed at 48 hours past report open and not at 47', async ({ pa
   await expect(row.getByRole('link', { name: RESPOND })).toHaveCount(0);
   const text = (await page.getByTestId(OWED_PAGE).textContent()) ?? '';
   expect(text).not.toMatch(/delinquent|late|overdue/i);
+  await expectNoAxeViolations(page, 'The owed list with a week owed');
 });
 
 test('past 96 hours the lead publishes on behalf and reads the card under their own name', async ({
@@ -261,6 +265,7 @@ test('past 96 hours the lead publishes on behalf and reads the card under their 
   await expect(onBehalf.getByRole('textbox', { name: 'Your response' })).toBeVisible();
   // The distinctive comment is stored and is nowhere on the page.
   expect(await onBehalf.textContent()).not.toContain('Pelican-quartz-7731');
+  await expectNoAxeViolations(page, 'The on-behalf page before a publish');
 
   await onBehalf.getByRole('textbox', { name: 'Your response' }).fill(RESPONSE);
   await onBehalf.getByRole('button', { name: 'Publish' }).click();
@@ -270,6 +275,7 @@ test('past 96 hours the lead publishes on behalf and reads the card under their 
   await expect(card.getByText(`${LEAD_NAME}, Lead Faculty`, { exact: true })).toBeVisible();
   await expect(onBehalf.getByText('As students see it')).toBeVisible();
   expect(await onBehalf.textContent()).not.toContain('Pelican-quartz-7731');
+  await expectNoAxeViolations(page, 'The on-behalf page after a publish');
 
   // Answered, so it leaves the owed list.
   await page.goto('/app/leadership/responses-owed');
@@ -287,6 +293,7 @@ test('a chair sees the led course read-only, attributed to the lead’s role', a
   await expect(course).toContainText('Response required');
   await expect(course.getByText(READ_ONLY_NOTE)).toBeVisible();
   await expect(course.getByRole('switch')).toHaveCount(0);
+  await expectNoAxeViolations(page, 'The policy page, read by a chair');
 });
 
 test('the lead sets the course back to encouraged, so later weeks and later specs are not held', async ({

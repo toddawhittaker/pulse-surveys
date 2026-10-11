@@ -41,6 +41,7 @@
 
 import { test, expect, type Page } from '@playwright/test';
 
+import { expectNoAxeViolations } from './support/axe';
 import { clearTheClock, setTheClockTo } from './support/clock';
 import {
   SESSION_STORAGE_KEY,
@@ -257,6 +258,7 @@ test('a lead excludes a queued comment from the keyboard and finds it in the log
 
   await signInAs(page, LEAD_WEB_SUBJECT);
   await expect(page.getByTestId(LEADERSHIP_VIEW)).toBeVisible();
+  await expectNoAxeViolations(page, 'The leadership landing');
 
   // The landing's link, by keyboard.
   expect(await tabTo(page, QUEUE_LINK), 'The queue link is not reachable by Tab.').toBe(true);
@@ -274,11 +276,13 @@ test('a lead excludes a queued comment from the keyboard and finds it in the log
   await item.getByRole('button', { name: REVIEW }).focus();
   await page.keyboard.press('Enter');
   await expect(item.getByText(HELD_COMMENT, { exact: true })).toBeVisible();
+  await expectNoAxeViolations(page, 'The review queue with a card open');
   expect(await tabTo(page, EXCLUDE), 'The exclude control is not reachable by Tab.').toBe(true);
   await page.keyboard.press('Enter');
 
   await expect(queue.getByRole('status').first()).toHaveText(EXCLUDED);
   await expect(queue.getByText(HELD_COMMENT, { exact: true })).toHaveCount(0);
+  await expectNoAxeViolations(page, 'The review queue after an exclusion');
 
   // The log, from the landing, by keyboard.
   await page.goBack();
@@ -295,6 +299,7 @@ test('a lead excludes a queued comment from the keyboard and finds it in the log
   await expect(row).toContainText(NO_EXCERPT);
   await expect(row).not.toContainText(HELD_COMMENT);
   await expect(row).not.toContainText(/\d{1,2}:\d{2}/);
+  await expectNoAxeViolations(page, 'The exclusion log');
 });
 
 /** Launch the learner into `BIOL-215-R3WW` and answer the session the page now holds. */
@@ -369,6 +374,7 @@ test('a signed-in student opening each leadership page reads that it is not part
       page.getByText(SESSION_ENDED),
       `${path} told a signed-in learner that their session ended.`,
     ).toHaveCount(0);
+    await expectNoAxeViolations(page, `${path}, read by a student`);
   }
 });
 
@@ -401,5 +407,6 @@ test('a leadership page opened with a session the server will not verify reads t
       page.getByText(NOT_YOUR_ROLE),
       `${path} told a reader whose session ended that the page is not part of their role.`,
     ).toHaveCount(0);
+    await expectNoAxeViolations(page, `${path}, with an ended session`);
   }
 });
