@@ -5,7 +5,8 @@
 
 The work order settles the models whole: `StudentComment {text}`,
 `StudentReleasedComment {text, stream}` with `stream` one of `instructor` and
-`course`, `TrendPoint {course_week, mean}`, and `StudentStream {stream, trend,
+`course`, `StudentTrendPoint {course_week, mean}` (renamed from the work order's
+`TrendPoint`, which collides with the report's class in OpenAPI), and `StudentStream {stream, trend,
 distribution, small_n, comments}`, every one `extra="forbid"`. So the assertion
 is an **equality over each model's declared fields** — not a search for
 `answer_id`, which a `handle`, a `week` or a `submitted_at` walks past — and a
@@ -36,7 +37,7 @@ HOME = "app.schemas.response_loop"
 FIELDS = {
     "StudentComment": {"text"},
     "StudentReleasedComment": {"text", "stream"},
-    "TrendPoint": {"course_week", "mean"},
+    "StudentTrendPoint": {"course_week", "mean"},
     "StudentStream": {"stream", "trend", "distribution", "small_n", "comments"},
 }
 
@@ -73,7 +74,7 @@ def whole(name: str) -> dict[str, Any]:
         return {"text": A_TEXT}
     if name == "StudentReleasedComment":
         return {"text": A_TEXT, "stream": "instructor"}
-    if name == "TrendPoint":
+    if name == "StudentTrendPoint":
         return {"course_week": 1, "mean": 4.0}
     return {
         "stream": "course",

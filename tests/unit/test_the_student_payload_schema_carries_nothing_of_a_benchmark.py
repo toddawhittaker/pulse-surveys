@@ -365,7 +365,7 @@ SETTLED_RESULTS_MODELS = frozenset(
         "StudentWeekResults",
         "StudentResponse",
         "StudentStream",
-        "TrendPoint",
+        "StudentTrendPoint",
         "StudentComment",
         "StudentReleasedComment",
     }
@@ -450,7 +450,8 @@ def test_the_sweep_reaches_every_model_the_results_payload_is_built_from() -> No
     missing = sorted(SETTLED_RESULTS_MODELS - reached)
     assert not missing, (
         f"The walk from `{RESULTS_ROOT}` reaches {sorted(reached)} and not {missing}. E8-01's work "
-        "order puts `StudentStream`, `TrendPoint`, `StudentComment` and `StudentReleasedComment` "
+        "order puts `StudentStream`, `StudentTrendPoint`, `StudentComment` and "
+        "`StudentReleasedComment` "
         "under it."
     )
 

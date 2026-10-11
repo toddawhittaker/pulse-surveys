@@ -49,6 +49,7 @@ from fixtures.student_week import (
     plant_comment,
     read,
     released_texts,
+    route_owed_verdicts,
     streams_of,
 )
 from fixtures.the_hold import HoldWorld, report_opens
@@ -164,8 +165,11 @@ def test_a_release_batch_carries_its_published_and_kept_comments_and_none_of_the
     """The same six states in held week 3, released in a batch with its three canonical comments.
 
     The batch is cut before week 4 opened and read on week 4's page, where ruling
-    1 shows it. The exclude and keep are made after the batch is cut, through the
-    route, which accepts a decision on a comment in the instructor's release.
+    1 shows it. Week 3's verdicts are owed when the comments are planted (the
+    hold world's clock has closed week 1 only), so the clock is stood after week
+    4's opening and the owed verdicts routed before anything decides on them
+    (dispute E8-01-01). The exclude and keep are then made through the route,
+    which accepts a decision on a comment in the instructor's release.
 
     **The mutations this kills:** the released read taken from `released_cards`
     unfiltered — the instructor's release carries flagged and excluded comments
@@ -182,10 +186,10 @@ def test_a_release_batch_carries_its_published_and_kept_comments_and_none_of_the
         cut_at=report_opens(LATEST) - CUT_BEFORE_OPENING,
         answer_ids=[*canonical, *ids.values()],
     )
+    route_owed_verdicts(world, standing_after=LATEST)
     decide(world, ids["kept"], KEEP)
     decide(world, ids["excluded"], EXCLUDE)
     student = world.a_student("statuses-released", world.taught)
-    world.stand_after_the_opening(LATEST)
 
     statuses = instructor_released_statuses(instructor_report(world, LATEST))
     expected = {

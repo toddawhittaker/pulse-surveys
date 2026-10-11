@@ -18,7 +18,7 @@ identifiers" and "Settled decisions"):
     the group show);
   - `StudentStream {stream, trend, distribution, small_n, comments}`, with
     `stream` one of `instructor` and `course`, `trend` a list of
-    `TrendPoint {course_week, mean}`, `distribution` keyed "1" to "5", and
+    `StudentTrendPoint {course_week, mean}`, `distribution` keyed "1" to "5", and
     `comments` a list of `StudentComment {text}`, empty when `small_n`;
   - `StudentReleasedComment {text, stream}`;
   - decision 1: one trend point per published, non-`awaiting` week up to and
@@ -146,7 +146,7 @@ COURSE_NAME = "course"
 STREAM_ORDER = (INSTRUCTOR_NAME, COURSE_NAME)
 NAME_OF_STREAM = {INSTRUCTOR_STREAM: INSTRUCTOR_NAME, COURSE_STREAM: COURSE_NAME}
 
-# `TrendPoint`, `StudentComment` and `StudentReleasedComment`, whole.
+# `StudentTrendPoint`, `StudentComment` and `StudentReleasedComment`, whole.
 COURSE_WEEK = "course_week"
 MEAN = "mean"
 TREND_POINT_MEMBERS = frozenset({COURSE_WEEK, MEAN})
@@ -368,14 +368,31 @@ def plant_comment(
     verdict: str | None = CLEAR,
     cohort: str = TAUGHT_COHORT,
 ) -> Any:
-    """One new respondent's comment, its verdict routed, committed; its answer id.
+    """One new respondent's comment, committed; its answer id.
 
-    Planted while the clock still stands where the world left it (after every
-    window has closed), so the verdict is routed at once rather than owed.
+    **The verdict is routed at once only if the week's window has already closed
+    by the world's clock**; otherwise it is owed (`PendingVerdicts`), and the
+    comment is in no reader's view until `route_owed_verdicts` routes it. The
+    hold world's clock, as built, has closed course week 1 only (dispute
+    E8-01-01 measured it), so a comment planted into any later week must be
+    followed by `route_owed_verdicts` before anything decides on it or reads it.
     """
     return world.review.plant(
         course_week=course_week, stream=stream, text=text, verdict=verdict, cohort=cohort
     )
+
+
+def route_owed_verdicts(world: HoldWorld, *, standing_after: int) -> None:
+    """Stand an hour after `standing_after`'s report opens, and route every verdict now owed.
+
+    Moving the clock alone routes nothing (`HoldWorld.stand_at` only pretends);
+    the canonical world routes its owed verdicts the same way, with an explicit
+    `plant_pending()` after setting the clock (`tests/fixtures/report_api.py`,
+    `_build_report_door`). Committed, because the application connects for itself.
+    """
+    world.stand_after_the_opening(standing_after)
+    world.door.world.plant_pending()
+    world.door.commit()
 
 
 def answer_id_of(world: HoldWorld, text: str) -> Any:
