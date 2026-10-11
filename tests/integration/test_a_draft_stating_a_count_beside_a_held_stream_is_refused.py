@@ -41,6 +41,7 @@ from fixtures.response_draft import (
     SHOWN_THEME_A_COUNT,
     SMALL_N_SUMMARY_VERSION,
     THE_GUARD_BOUND,
+    UNUSABLE_ANSWER_STATUS,
     DraftDoor,
     assert_the_planted_texts_are_what_this_file_says,
     assert_unusable,
@@ -154,12 +155,14 @@ def test_a_draft_stating_a_count_in_a_week_with_a_held_stream_is_refused(
     """
     door = draft_door
     a_held_week(door)
+    answered = drafted(door, draft)
     assert_unusable(
-        drafted(door, draft),
+        answered,
         "draft",
         "states a count of students beside a stream held below the threshold, in a week whose "
         "held summary's prose carries a count",
     )
+    assert answered.status_code == UNUSABLE_ANSWER_STATUS
 
 
 @pytest.mark.parametrize("draft", COUNTING_DRAFTS, ids=("number-word-of-you", "digit-students"))

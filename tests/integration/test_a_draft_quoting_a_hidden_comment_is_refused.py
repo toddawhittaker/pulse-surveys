@@ -43,6 +43,7 @@ from fixtures.response_draft import (
     KEPT_COMMENT,
     PUBLISHED_COMMENT,
     RUN_OF,
+    UNUSABLE_ANSWER_STATUS,
     DraftDoor,
     a_draft_lifting,
     assert_the_planted_texts_are_what_this_file_says,
@@ -103,6 +104,7 @@ def test_the_planted_texts_are_what_this_suite_says() -> None:
     any tree, with or without E7-04.
     """
     assert_the_planted_texts_are_what_this_file_says()
+    assert all(run in comment for comment, run in RUN_OF.items()), "A run is not its comment's."
 
 
 @pytest.mark.parametrize(
@@ -124,11 +126,13 @@ def test_a_draft_reusing_a_run_of_a_hidden_comment_is_refused(
     """
     door = draft_door
     the_week_as_the_report_reads_it(door)
+    answered = drafted(door, hidden)
     assert_unusable(
-        drafted(door, hidden),
+        answered,
         "draft",
         f"reuses {RUN_OF[hidden]!r} from a comment {WHY_HIDDEN[hidden]}",
     )
+    assert answered.status_code == UNUSABLE_ANSWER_STATUS
 
 
 def test_a_draft_reusing_a_run_of_a_published_comment_in_a_shown_stream_is_accepted(
