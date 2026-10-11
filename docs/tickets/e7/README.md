@@ -155,9 +155,11 @@ Each was checked in the tree at ffec4dd6.
 
 - **Alembic.** The single head is `b7d2e94c1a05`
   (`20261011_b7d2e94c1a05_the_application_reads_two_columns_of_the_ended_grant_record.py`).
-  E7-01 owns **M1**, with `down_revision = "b7d2e94c1a05"`. No other ticket adds
-  a migration. A ticket that finds it needs one stops and says so in its pull
-  request; its `down_revision` is M1's id as merged.
+  E7-01 owns **M1**, with `down_revision = "b7d2e94c1a05"`. E7-02 owns **M2**
+  (`7f679faf4b8d`, `down_revision = "2c3d5a0de424"`), added by its work order: a
+  policy row covers one course (ADR 0193). No other ticket adds a migration. A
+  ticket that finds it needs one stops and says so in its pull request; its
+  `down_revision` is the latest E7 revision as merged.
 - **ADRs.** **0191** and **0192** are 01's (the name channel; the records and
   their keying). **0193** is 02's (the hold). **0194** is 03's (publish, policy
   and on-behalf). **0195** is 04's (the draft and the check). **0196** is 08's
