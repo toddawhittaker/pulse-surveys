@@ -164,6 +164,12 @@ class EnrolledSection(BaseModel):
     both while a survey is open and when nothing is ahead. The same scoping
     argument covers it: a "when does the next one open" lookup that stopped
     naming the section would put another section's calendar on this page.
+
+    **`instructors` names this section's own live teaching instructors and
+    nobody else** (E7-01, ADR 0191). The names come through the one staff-name
+    channel, which answers only a reader of the section, and the read keeps only
+    the teaching instructors of what it answers: a response author who does not
+    teach the section is not listed as its instructor.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -195,6 +201,12 @@ class EnrolledSection(BaseModel):
     )
     open_survey: OpenSurvey | None = Field(
         description="The open survey, or null when none is open."
+    )
+    instructors: list[str] = Field(
+        description=(
+            "The names of the people who teach the reader's own enrollment, sorted; empty "
+            "when nobody is assigned to teach it."
+        )
     )
 
 
