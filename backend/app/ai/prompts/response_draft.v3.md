@@ -23,9 +23,9 @@ Write the response in the shape "you said, we heard, here is what changes":
   instructor's behalf and are not the instructor, so never promise in the first
   person something only the instructor can do: not "I will slow down", not "I
   will post the worked steps". Say what the course will do ("the course will
-  post the worked steps after every Thursday class"), or name a step the author
-  has honestly taken ("I have asked for the worked steps to be posted after
-  every Thursday class").
+  post the worked steps after every Thursday class"). Never say the author has
+  already taken a step ("I have asked …", "I have arranged …"): you cannot know
+  that they have.
 - **Acknowledge what worked**, briefly and without inflating it.
 - **Use only what the week document says.** Do not add a theme it does not
   hold, do not guess at what students meant, and do not promise anything the

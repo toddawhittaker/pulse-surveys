@@ -137,7 +137,7 @@ RECORDED_SHA256: dict[str, str] = {
     # 0032's retention question is answered by the ticket: no draft is ever stored,
     # so no row cites either version. `response_draft.v3.md` replaces both; its row
     # is added with the file, from the digest of the committed bytes.
-    "response_draft.v3.md": "b929d40abecc87508a053facdb77990b7b5e54c733937d8c72dbb0be2e4677b3",
+    "response_draft.v3.md": "d2883cd05e423ed1f9e45045337f2926f6bb4776c2eebc5959e9d9e423a03aac",
 }
 
 
