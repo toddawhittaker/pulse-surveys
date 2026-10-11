@@ -5,11 +5,16 @@ import {
   readStudentResults,
   readStudentSurvey,
   type ResultsRead,
+  type StudentStream,
   type StudentWeekResults,
 } from '../../api/student';
+import { CommentCard } from '../../components/CommentCard';
+import { CommentGroup } from '../../components/CommentGroup';
 import { PulseDivider } from '../../components/PulseDivider';
+import { RatingHistogram, type RatingDistribution } from '../../components/RatingHistogram';
 import { ResponseCard } from '../../components/ResponseCard';
 import { StateNotice } from '../../components/StateNotice';
+import { TrendDuo } from '../../components/TrendDuo';
 import { WeekNav } from '../../components/WeekNav';
 import { copy, fillCopy } from '../../copy/studentResults';
 
@@ -17,9 +22,12 @@ import { copy, fillCopy } from '../../copy/studentResults';
  * SPEC §7.6's `StudentResults` — the shell: one section's reply for one
  * published week, and the way back through the published weeks (SPEC §5.4).
  *
- * **The response leads the page.** The student's own posted score follows it,
- * in every state. Aggregates, comments and the small-group notice are not yet
- * here; this page leaves room for them.
+ * **The course is named first, in every state.** The label is the section's own
+ * course and says nothing about the week. Then the response leads the page (the
+ * page is a reply, not a dashboard), the student's own posted score follows it,
+ * and below them, in a released week only, come the trend, the distributions, the
+ * workload median, the comments, the comments released from earlier weeks and the
+ * page's one confidentiality line.
  *
  * **The page asks and draws.** Which weeks exist, which state the week is in and
  * who wrote the reply are the API's answers; a week the API refuses is the same
@@ -30,11 +38,15 @@ import { copy, fillCopy } from '../../copy/studentResults';
  * name or response text, because the week is held and anything more would tease
  * it.
  *
+ * **Everything below the response is gated on the state before it is read.** A
+ * held week draws none of it whatever the payload happens to hold, the same
+ * fail-closed rule the response follows. A member the payload sends as null draws
+ * nothing, and no stream is ever compared with anything: the page holds this
+ * section's own figures only (SPEC §4.1 item 1, §5.4).
+ *
  * The survey read is made beside the results one for the one thing the results
  * do not carry: the institution's time zone, which the date on the card is shown
  * in. A failed survey read costs the card its date, not the page its reply.
- * The page names no course: a course label carries a number, and `awaiting` may
- * show none.
  */
 
 /** The two addresses this page answers, relative to the router's `/app` mount. */
@@ -190,6 +202,9 @@ function Body({
   const current = load.week ?? results.published_weeks.at(-1) ?? null;
   return (
     <>
+      <h2 className="pulse-results-course" data-testid="pulse-results-course">
+        {results.course_label}
+      </h2>
       {current === null ? null : (
         <div className="pulse-results-week">
           {/* A held week shows no number, not even its own week's. */}
@@ -209,6 +224,93 @@ function Body({
       )}
       <Reply results={results} timeZone={timeZone} />
       <Participation participation={results.participation ?? null} />
+      {results.state === 'awaiting' ? null : <Week results={results} />}
+    </>
+  );
+}
+
+const RATING_KEYS = ['1', '2', '3', '4', '5'] as const;
+
+/** The wire's distribution keyed 1 to 5, with a missing bucket read as none. */
+function distributionOf(stream: StudentStream): RatingDistribution {
+  const [one, two, three, four, five] = RATING_KEYS.map((key) => stream.distribution[key] ?? 0);
+  return { '1': one ?? 0, '2': two ?? 0, '3': three ?? 0, '4': four ?? 0, '5': five ?? 0 };
+}
+
+/**
+ * What a released week holds below the response, in the order the page reads:
+ * trend, distributions, workload, comments, comments from earlier weeks, and the
+ * confidentiality line once. Each member that arrived null draws nothing.
+ */
+function Week({ results }: { readonly results: StudentWeekResults }): JSX.Element {
+  const streams = results.streams ?? [];
+  const instructor = streams.find((stream) => stream.stream === 'instructor');
+  const course = streams.find((stream) => stream.stream === 'course');
+  const released = results.released ?? [];
+  const showsData = results.streams !== null || results.released !== null;
+  const lengthWeeks = Math.max(
+    1,
+    ...results.published_weeks,
+    ...streams.flatMap((stream) => stream.trend.map((point) => point.course_week)),
+  );
+  const points = (stream: StudentStream | undefined) =>
+    (stream?.trend ?? []).map((point) => ({
+      courseWeek: point.course_week,
+      termWeek: null,
+      mean: point.mean,
+    }));
+
+  return (
+    <>
+      {instructor === undefined || course === undefined ? null : (
+        <section className="pulse-results-figures" aria-labelledby="pulse-class-heading">
+          <h2 id="pulse-class-heading">{copy('student_results.class_heading')}</h2>
+          <TrendDuo
+            instructor={points(instructor)}
+            course={points(course)}
+            lengthWeeks={lengthWeeks}
+          />
+          <RatingHistogram stream="instructor" distribution={distributionOf(instructor)} />
+          <RatingHistogram stream="course" distribution={distributionOf(course)} />
+        </section>
+      )}
+      {results.workload_median === null ? null : (
+        <p className="pulse-results-workload">
+          {fillCopy('student_results.workload_median', {
+            hours: results.workload_median.toFixed(1),
+          })}
+        </p>
+      )}
+      {[instructor, course].map((stream) =>
+        stream === undefined ? null : (
+          <CommentGroup
+            key={stream.stream}
+            audience="student"
+            stream={stream.stream}
+            suppressed={stream.small_n}
+            // A held stream's comments are not read at all, whatever the array holds.
+            comments={stream.small_n ? [] : stream.comments.map(({ text }) => ({
+              text,
+              status: 'published' as const,
+            }))}
+          />
+        ),
+      )}
+      {released.length === 0 ? null : (
+        <section className="pulse-results-released" aria-labelledby="pulse-released-heading">
+          <h3 id="pulse-released-heading">{copy('student_results.released_heading')}</h3>
+          <ul className="pulse-comment-group__cards">
+            {released.map((comment, position) => (
+              <li key={position}>
+                <CommentCard text={comment.text} status="published" stream={comment.stream} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {showsData ? (
+        <p className="pulse-results-confidentiality">{copy('student_results.confidentiality')}</p>
+      ) : null}
     </>
   );
 }

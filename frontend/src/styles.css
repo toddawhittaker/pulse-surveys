@@ -694,3 +694,41 @@
     margin: var(--space-3) 0 0;
   }
 }
+
+/* The student results page below the response: the course name, the figures,
+ * the workload line, the released comments and the one confidentiality line. */
+@layer components {
+  .pulse-results-course {
+    margin: var(--space-2) 0 0;
+    font-family: var(--font-body);
+    font-size: var(--text-2);
+    font-weight: 500;
+  }
+
+  .pulse-results-figures {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    margin-top: var(--space-7);
+  }
+
+  .pulse-results-workload {
+    margin: var(--space-5) 0 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-2);
+  }
+
+  .pulse-results-released {
+    margin-top: var(--space-7);
+  }
+
+  .pulse-results-participation {
+    margin-top: var(--space-6);
+  }
+
+  .pulse-results-confidentiality {
+    margin: var(--space-7) 0 0;
+    color: var(--spruce-60);
+    font-size: var(--text-1);
+  }
+}

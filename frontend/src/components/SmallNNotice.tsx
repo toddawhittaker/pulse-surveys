@@ -2,12 +2,15 @@ import type { JSX } from 'react';
 
 import './instructorReportComments.css';
 import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
+import { copy as studentCopy } from '../copy/studentResults';
 
 /**
  * Why one comment group's raw comments are not on the page — SPEC §7.6's
- * `SmallNNotice`, in its **instructor** audience. The student audience is E8's,
- * and its words are a different sentence to a different person, so it is not
- * stubbed here.
+ * `SmallNNotice`, in two audiences whose words are different sentences to
+ * different people. The **student** audience frames the hold as protecting the
+ * student, says comments appear once enough classmates comment, and states no
+ * number at all: not the threshold, which would tell a student how many
+ * classmates must write before theirs shows, and not a count of anyone.
  *
  * SPEC §4 hides a stream's raw comments when fewer than the threshold of
  * distinct students commented in that stream that week; the design brief asks
@@ -39,22 +42,30 @@ import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
  * with the same title, and WCAG 2.2 asks landmarks of one type to be told apart;
  * the group's own labelled section and heading already say which stream this is.
  */
-export function SmallNNotice({
-  threshold,
-}: {
-  /** The configured number of distinct commenters a stream's raw comments are held until. */
-  readonly threshold: number;
-}): JSX.Element {
+export function SmallNNotice(
+  props:
+    | {
+        readonly audience?: 'instructor';
+        /** The configured number of distinct commenters a stream's raw comments are held until. */
+        readonly threshold: number;
+      }
+    | { readonly audience: 'student' },
+): JSX.Element {
+  const student = props.audience === 'student';
   return (
     <div className="pulse-small-n-notice">
       <FlatPulseLine />
       <p className="pulse-small-n-notice__title">
-        {copy('instructor_report_comments.small_n.title')}
+        {student
+          ? studentCopy('student_results.small_n_title')
+          : copy('instructor_report_comments.small_n.title')}
       </p>
       <p className="pulse-small-n-notice__body">
-        {fillCopy('instructor_report_comments.small_n.body', {
-          threshold: String(threshold),
-        })}
+        {'threshold' in props
+          ? fillCopy('instructor_report_comments.small_n.body', {
+              threshold: String(props.threshold),
+            })
+          : studentCopy('student_results.small_n_body')}
       </p>
     </div>
   );

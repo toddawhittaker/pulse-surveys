@@ -36,6 +36,22 @@ export const STUDENT_RESULTS_COPY = {
   'student_results.awaiting': 'There is no reply to show for this week yet.',
   'student_results.unanswered': 'There is no reply for this week.',
 
+  // The figures. The two streams are told apart by their words and not by a
+  // legend, because the trend draws one line in each panel and nothing else.
+  'student_results.class_heading': 'Your class this week',
+  'student_results.trend_instructor': 'Instructor',
+  'student_results.trend_course': 'Course',
+  'student_results.trend_mean_header': 'Mean rating',
+  'student_results.workload_median': 'Class median: {hours} h on this course',
+
+  // The comments. A stream held back says why in one voice to the student and
+  // states no number: how many commented is what the hold exists to keep.
+  'student_results.comments_none': 'No comments this week.',
+  'student_results.small_n_title': 'Comments in this group stay private this week',
+  'student_results.small_n_body':
+    'Comments appear here once enough classmates have commented. Until then they stay private, so that none can be traced back to the person who left it. They may appear later among comments from earlier weeks.',
+  'student_results.released_heading': 'Comments from earlier weeks',
+
   // A refusal of any kind, one calm sentence that says nothing about why.
   'student_results.nothing_to_show': 'There is nothing to show for this section yet.',
   'student_results.session_ended_title': 'Your session has ended',

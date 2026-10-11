@@ -53,3 +53,18 @@ describe('SmallNNotice', () => {
     expect(digits).toEqual([String(SMALL_N_THRESHOLD)]);
   });
 });
+
+describe('SmallNNotice, student audience', () => {
+  it('frames the hold as protecting the student and states no number at all', () => {
+    const { container } = render(<SmallNNotice audience="student" />);
+
+    expect(screen.getByText('Comments in this group stay private this week')).toBeTruthy();
+    const text = container.textContent ?? '';
+    expect(text).toContain('once enough classmates have commented');
+    // Neither the threshold nor a count of anyone: the student's notice has no
+    // prop a number could arrive through, and no digit in its words.
+    expect(text).not.toMatch(/\d/);
+    expect(text).not.toMatch(/at least|fewer than|only/i);
+    expect(screen.queryByRole('region')).toBeNull();
+  });
+});
