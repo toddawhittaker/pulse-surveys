@@ -182,7 +182,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 28** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 29** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -433,7 +433,7 @@ edit puts the comma back.
 
 ## 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 10** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
+**Caught: 11** · [the incidents, the root cause, and the whole rule](mistakes/44-a-guard-raised-in-a-fixture-turned-reds-into-errors.md)
 
 **Rule.** A tests-first suite's red must be a FAILED, never an ERROR: an error at
 setup proves nothing about the assertion the test exists to make, survives the
@@ -468,7 +468,7 @@ grant-shaped failure passes review as a green suite.
 
 ## 47. A route subclass's gate was discarded at dispatch while the class stayed visible
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
 
 **Rule.** On the pinned FastAPI, `include_router` does not serve the route objects
 a router holds: for a plain `starlette.routing.Route` it rebuilds one from the
@@ -556,7 +556,7 @@ that no longer exists names it exactly.
 
 ## 53. A closed-set guard is defeated one level out
 
-**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
+**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
 
 **Rule.** When you build or review a closed-set or inventory guard, attack the
 whole class in the first pass: name what encloses the set — the directory above

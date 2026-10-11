@@ -1,6 +1,6 @@
 # 44. A guard raised in a fixture turned a module's reds into setup errors
 
-**Caught: 10**
+**Caught: 11**
 
 *This file keeps the founding incident (it carries the root cause) and the
 three most recent catches. Two older catches were trimmed 2026-09-07 — E4-03's
@@ -12,7 +12,17 @@ paragraph inside the founding incident and was the removable one of the two.
 E4-15's exit drive (2026-09-08) and E4-18's section-list suite (2026-09-07)
 were trimmed on 2026-10-03, when the two E5.1 catches were added. E4-20's
 seeder reds (2026-09-09) were trimmed on 2026-10-09, when E6-01's catch was
-added.*
+added. E5.1-05's red run (2026-10-03) was trimmed on 2026-10-11, when E7-08's
+catch was added.*
+
+## A catch: E7-08's gate helpers are plain functions, not fixtures (2026-10-11)
+
+E7-08's test author put the route sweep and the sentence discovery for the
+leadership gate in `tests/fixtures/leadership_gate.py` as plain helpers called
+from each test body, with no fixture raising on a missing deliverable. The red
+run before the gate changed was 33 FAILED and no ERROR, the failures naming the
+401 the gate still answered. What it saved: a module whose reds would have read as setup errors on a
+tree where the new copy sentence did not exist yet.
 
 ## A catch: E6-01's payload test builds its world in the body, not in `report_door` (2026-10-09)
 
@@ -36,13 +46,6 @@ a FAILED and none an ERROR, and the builder confirmed the same count before
 writing code. The entry's rule shaped the suite: the guards that a deliverable
 exists were plain functions called from test bodies, so each red named what was
 missing rather than failing in setup.
-
-## A catch: E5.1-05's red run was all FAILED and no ERROR (2026-10-03)
-
-At the red commit (9acc9dc), E5.1-05's eight test modules gave 25 failed and 46
-passed, 18 unit and 7 integration reds, every one a FAILED with no ERROR. As
-above, the entry is why the suite was written so that its reds report in the
-test body.
 
 ## Instance: E3-01's rotation module errored at setup instead of failing (2026-09-04)
 

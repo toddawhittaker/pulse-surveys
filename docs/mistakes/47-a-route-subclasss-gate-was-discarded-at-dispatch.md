@@ -86,6 +86,14 @@ origin included, answers 403, and a same-origin POST still works
 A sweep that found the class on the route table would have passed whether or
 not the gate ran at dispatch.)*
 
+*(E7-08, 2026-10-11, the leadership gate's 403. The test author drove every
+leadership route the built application serves over HTTP, for a student, an
+instructor and the two-hat instructor session, and read the status and the body
+in both directions beside the lead admitted on the same request
+(`tests/integration/test_the_leadership_gate_tells_another_role_from_an_ended_session.py`).
+A sweep that found the dependency on each route would have passed a gate that
+answered 401 to everyone.)*
+
 ## The rule
 
 **On this FastAPI, a route's behaviour must live in its endpoint. Anything a
