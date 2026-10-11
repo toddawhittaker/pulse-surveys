@@ -20,6 +20,11 @@ import {
   ComparisonSetEditRoute,
 } from './routes/leadership/ComparisonSetForm';
 import { StudentLanding } from './routes/student';
+import {
+  LATEST_RESULTS_ROUTE,
+  StudentResultsRoute,
+  WEEK_RESULTS_ROUTE,
+} from './routes/student/StudentResults';
 
 /**
  * The client route table — SPEC §13's `router.tsx`.
@@ -67,6 +72,22 @@ const studentRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/student',
   component: StudentLanding,
+});
+
+// SPEC §5.4's results page, for one of the student's sections: the latest
+// published week, and any one published week. The section and the week are in the
+// path because that is what the API's routes are keyed by; whether the student
+// may see them is the API's answer, not this table's.
+const studentLatestResultsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: LATEST_RESULTS_ROUTE,
+  component: StudentResultsRoute,
+});
+
+const studentWeekResultsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: WEEK_RESULTS_ROUTE,
+  component: StudentResultsRoute,
 });
 
 const instructorRoute = createRoute({
@@ -191,6 +212,8 @@ const adminRoute = createRoute({
 export const routeTree = rootRoute.addChildren([
   indexRoute,
   studentRoute,
+  studentLatestResultsRoute,
+  studentWeekResultsRoute,
   instructorRoute,
   instructorReportRoute,
   leadershipRoute,
