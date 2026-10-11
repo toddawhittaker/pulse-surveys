@@ -329,7 +329,7 @@ it `responded` and `total`, which it now ignores. **Owner:** the next ticket tha
 touches either mockup; E8 and E9 are the candidates. **Done when:** neither
 passes the two attributes.
 
-**Half closed by E8-02** (#326, MERGE_326): `design/StudentResults.dc.html` passes
+**Half closed by E8-02** (#326, afc04110): `design/StudentResults.dc.html` passes
 neither attribute. `design/LeadershipRollup.dc.html` still does, and is carried
 to E9 in `../e9/carried-from-e8.md`.
 

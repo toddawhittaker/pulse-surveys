@@ -84,7 +84,7 @@ instructor-response and leadership-response drives each run an axe scan on
 every page they reach and fail on a violation.
 
 **Closed in E8.** Process pull request #322 (merged as 14bcb93d) added
-`@axe-core/playwright` 4.13.0. E8-02 (#326, MERGE_326) scans every page
+`@axe-core/playwright` 4.13.0. E8-02 (#326, afc04110) scans every page
 `student-results.spec.ts` reaches. E8-04 (this pull request) adds the scan to
 every page `instructor-report.spec.ts`, `leadership-moderation.spec.ts`,
 `instructor-response.spec.ts` and `leadership-response.spec.ts` reach, through
@@ -180,7 +180,7 @@ comment.
 **Closed by E8-01** (#324, merged as 295cc9fd), which adds the figures, the
 comments and the small-N state under the hold through `student_week_results`,
 with `test_a_held_week_serves_nothing_about_the_week_and_reaches_no_other_page.py`;
-and **E8-02** (#326, MERGE_326), the page.
+and **E8-02** (#326, afc04110), the page.
 
 ### For E8: release batches carry no week — closed by E8-01 and E8-02
 
@@ -194,7 +194,7 @@ something else), and the page follows it with a test.
 
 **Closed by E8-01** (#324, merged as 295cc9fd) under ruling 1 and ADR 0197,
 with `test_the_release_group_shows_on_the_latest_week_only_and_only_what_was_cut_before_it_opened.py`;
-and **E8-02** (#326, MERGE_326), which renders the group.
+and **E8-02** (#326, afc04110), which renders the group.
 
 ### For E8: the results page names no course — closed by E8-01 and E8-02
 
@@ -206,7 +206,7 @@ names the course where it can do so without a figure in a held week, or a
 record says why it does not.
 
 **Closed by E8-01** (#324, merged as 295cc9fd), `course_label` in every state
-(ruling 2); and **E8-02** (#326, MERGE_326), the heading.
+(ruling 2); and **E8-02** (#326, afc04110), the heading.
 
 ### For E8: the results page owes a confidentiality line once it shows student data — closed by E8-01 and E8-02
 
@@ -221,7 +221,7 @@ comments, or a small-N state) removes `student_results` from
 
 **Closed by E8-01** (#324, merged as 295cc9fd), which removes `student_results`
 from `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` and adds
-`student_results.confidentiality`; and **E8-02** (#326, MERGE_326), the line on
+`student_results.confidentiality`; and **E8-02** (#326, afc04110), the line on
 the page once, with a test.
 
 ### For E9: the attention list, staff names, and three leadership roles
@@ -341,7 +341,7 @@ builds a fresh stack each time, so none reds CI today:
 touches each spec. **Done when:** each spec runs green twice in a row on one
 stack, and the hold banner is driven once.
 
-**One spec closed by E8-02** (#326, MERGE_326): `student-results.spec.ts` guards
+**One spec closed by E8-02** (#326, afc04110): `student-results.spec.ts` guards
 every insert, so a second run adds nothing. The rest is carried to E9.
 
 ## The ledger

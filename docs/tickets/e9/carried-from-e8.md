@@ -31,7 +31,7 @@ request and the merge commit:
   the confidentiality line's surface; the role-assignment `EXPLAIN`; the
   policy-of-record rule written once; and the note for E8 on what a student's
   comment read uses.
-- E8-02 (#326, MERGE_326): the page for each of those; `design/StudentResults.dc.html`'s
+- E8-02 (#326, afc04110): the page for each of those; `design/StudentResults.dc.html`'s
   count attributes; `student-results.spec.ts` made re-runnable; the scan on the
   student results drive.
 - Process pull request #322 (merged as 14bcb93d) and E8-04 (this pull request):
