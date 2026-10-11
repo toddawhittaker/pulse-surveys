@@ -155,7 +155,7 @@ day, on the privacy review of this breakdown. No ticket reopens them.
 | 4 | 05 | Calls 03's and 04's routes, and reuses 06's `ResponseCard`. |
 | 5 | 07 | Reuses 05's composer and calls 03's leadership routes. |
 | 6 | 09 | Waits for everything. |
-| 7 | 10, 11 | Added after the boundary review, which ran on the epic head once 09 merged. 10 fixes the backend and test findings; 11 fixes the accessibility findings. They share no files. |
+| 7 | 10, 11 | Added after the boundary review, which ran on the epic head once 01 to 08 had merged, while 09 was still building. 10 fixes the backend and test findings; 11 fixes the accessibility findings. They share no files. |
 
 ## Counters, allotted now
 

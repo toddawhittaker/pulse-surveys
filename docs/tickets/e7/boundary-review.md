@@ -121,9 +121,9 @@ response card matches its prototype; failures of a draft or check no longer
 mark the field invalid; "Use draft" became "Draft with AI"; the toggle has its
 help text attached; and the owed-list copy no longer says "section-weeks".
 
-**Not ours:** `CLAUDE.md` still names E6 as the active epic
-(`adr-docs-completeness`, MED). Process pull request #305 changes it, and it
-waits for the owner. `lti-oidc` found nothing.
+**Not ours:** `CLAUDE.md` named E6 as the active epic
+(`adr-docs-completeness`, MED). Process pull request #305 changed it to E7 and
+has merged. `lti-oidc` found nothing.
 
 **The carry-over rule.** The spec did not settle what happens to a course's
 policy when its lead changes. E7-10 writes the rule into SPEC §5.3 and §8: the
