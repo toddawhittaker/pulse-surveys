@@ -35,7 +35,7 @@
     <div style="font-family:var(--font-mono);font-size:var(--text-2);color:var(--spruce);margin-top:var(--space-5)">Class median: {{ medianH }} h on this course</div>
 
     <div style="margin-top:var(--space-7)">
-      <dc-import name="RatingHistogram" title="“My instructor supported my learning”" counts="{{ q1Counts }}" show-benchmark="{{ false }}" hint-size="100%,180px"></dc-import>
+      <dc-import name="RatingHistogram" title="“My instructor supported my learning”" counts="{{ q1Counts }}" unit="percent" hint-size="100%,180px"></dc-import>
     </div>
     <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
       <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-5) 0 var(--space-3)">About the instructor</div>
@@ -52,7 +52,7 @@
     </sc-if>
 
     <div style="margin-top:var(--space-7)">
-      <dc-import name="RatingHistogram" title="“Materials and activities supported my learning”" counts="{{ q2Counts }}" show-benchmark="{{ false }}" hint-size="100%,180px"></dc-import>
+      <dc-import name="RatingHistogram" title="“Materials and activities supported my learning”" counts="{{ q2Counts }}" unit="percent" hint-size="100%,180px"></dc-import>
     </div>
     <sc-if value="{{ showComments }}" hint-placeholder-val="{{ true }}">
       <div style="font-family:var(--font-mono);font-size:var(--text-1);letter-spacing:0.08em;text-transform:uppercase;color:var(--spruce-60);margin:var(--space-5) 0 var(--space-3)">About the course</div>
@@ -83,31 +83,31 @@ class Component extends DCLogic {
   SEC_C = [4.0, 3.9, 3.5, 4.1, 3.6, 3.3, 3.4];
   DATES = ['Mon Sep 7', 'Mon Sep 14', 'Mon Sep 21', 'Mon Sep 28', 'Mon Oct 5', 'Mon Oct 12', 'Mon Oct 19'];
   WEEKS = [
-    { q1: [0, 1, 4, 7, 8], q2: [0, 1, 5, 8, 6], med: 4.0,
+    { q1: [0, 5, 20, 35, 40], q2: [0, 5, 25, 40, 30], med: 4.0,
       resp: 'Welcome to BIOL 2150 \u2014 glad the first week landed well. Field trip dates are now posted on Canvas under Schedule, ten weeks out, so commuters and folks with work shifts can plan ahead.',
       instr: [{ text: 'Clear about expectations on day one. I know exactly what the big assignments are.' }, { text: 'Approachable \u2014 stayed after class to answer questions about the lab schedule.' }],
       course: [{ text: 'Canvas site is well organized. Would like the field trip dates posted sooner so I can plan work shifts.' }, { text: 'The intro reading was a reasonable length. Good on-ramp.' }] },
-    { q1: [0, 1, 5, 8, 7], q2: [0, 2, 5, 8, 6], med: 4.5,
+    { q1: [0, 5, 24, 38, 33], q2: [0, 9, 24, 38, 29], med: 4.5,
       resp: 'Good suggestion on worked examples \u2014 starting this week I\u2019ll photograph the board work and post it with the slides. A practice problem set with an answer key goes up Thursday, ahead of quiz 1.',
       instr: [{ text: 'Lectures are clear but go fast. Posting the worked examples afterward would help a lot.' }, { text: 'Good at connecting lecture to the local ecosystems we will see on field trips.' }],
       course: [{ text: 'The population growth simulator was actually fun. More interactive stuff like that.' }, { text: 'Reading load felt right this week. Two chapters is manageable.' }] },
-    { q1: [0, 2, 6, 7, 4], q2: [1, 2, 6, 7, 3], med: 5.0,
+    { q1: [0, 10, 32, 37, 21], q2: [5, 10, 32, 37, 16], med: 5.0,
       resp: 'Fair criticism on quiz 1 \u2014 the species-interaction questions leaned harder on the reading than lecture signaled. Future quizzes will come with a short topic list, and I\u2019m reweighting question 4. A second office-hours slot (Wed 4\u20135) starts next week.',
       instr: [{ text: 'Fast email replies, even on the weekend. Appreciated.' }, { text: 'In lecture the quiz was described as \u201cstraightforward.\u201d It was not. Set expectations more carefully.' }],
       course: [{ text: 'Quiz 1 leaned hard on species interactions that we only touched briefly in lecture.' }, { text: 'The mutualism examples in the reading were the best part of the week.' }] },
-    { q1: [0, 1, 4, 9, 8], q2: [0, 1, 4, 9, 8], med: 5.0,
+    { q1: [0, 5, 18, 41, 36], q2: [0, 5, 18, 41, 36], med: 5.0,
       resp: 'Really glad the stream session worked \u2014 your enthusiasm made it. Two more field sessions are on the schedule (weeks 9 and 11), and yes, we\u2019re fixing the wader sizes before then.',
       instr: [{ text: 'The stream demo was the best class so far. Walking through the sampling live made it stick.' }, { text: 'Patient with everyone who fell behind on the macroinvertebrate IDs. No one got left out.' }],
       course: [{ text: 'More field sessions like this one, please. Worth every minute of the drive.' }, { text: 'The field data sheet was well designed \u2014 easy to fill out with wet hands.' }] },
-    { q1: [1, 2, 5, 6, 4], q2: [0, 2, 6, 7, 3], med: 5.5,
+    { q1: [6, 11, 28, 33, 22], q2: [0, 11, 33, 39, 17], med: 5.5,
       resp: 'You\u2019re right that quiz 2 grades are late \u2014 they\u2019ll be back by Friday, with notes on the free-response. I\u2019ve also moved the lab report deadline to Monday so it no longer collides with the article discussions.',
       instr: [{ text: 'Still waiting on quiz 2 grades after two weeks. Hard to know where I stand.' }, { text: 'Office hours were useful for the article discussion \u2014 got more there than in lecture.' }],
       course: [{ text: 'Two journal articles plus a lab report in one week is a lot for a 2000-level course.' }, { text: 'The Hubbell article was dense. A reading guide would have helped a lot.' }] },
-    { q1: [1, 3, 6, 5, 2], q2: [1, 3, 5, 6, 2], med: 6.0,
+    { q1: [6, 18, 35, 29, 12], q2: [6, 18, 29, 35, 12], med: 6.0,
       resp: 'Message received on pacing \u2014 I\u2019d rather you learn it than skim it. This week I\u2019m marking each reading as core or supplemental, and lecture will build in time for questions again. Keep the candid feedback coming.',
       instr: [{ text: 'Lately questions in lecture get pushed to office hours because we are behind. Slowing down a little would help.' }, { text: 'Still a fair and organized instructor. Just feels rushed lately.' }],
       course: [{ text: 'The reading is stacking up faster than I can keep pace with, and the lab rubric is strict.' }, { text: 'I like the material, but the pace means I am skimming instead of learning.' }] },
-    { q1: [1, 2, 5, 6, 4], q2: [1, 3, 5, 6, 3], med: 6.5,
+    { q1: [6, 11, 28, 33, 22], q2: [5, 17, 28, 33, 17], med: 6.5,
       resp: 'Thank you for the candid feedback on pacing. You\u2019re right that this week stacked three chapters against the midterm \u2014 I\u2019m moving one to after break and posting a reading priority guide tonight. Also fixing the problem set instructions that contradicted Tuesday\u2019s lecture. Glad the field sampling lab worked; more of that is coming.',
       instr: [{ text: 'Office hours were genuinely helpful, but the problem set instructions contradicted what was said in Tuesday\u2019s lecture. I lost time reconciling the two.' }, { text: 'Credit where due: the field sampling lab was designed and run really well.' }],
       course: [{ text: 'The field sampling lab finally made the quadrat math click for me. More weeks like this one.' }, { text: 'The pace this week was rough. We covered three chapters and the reading roughly doubled right before the midterm \u2014 something has to give.' }, { text: 'Three chapters in one week before an exam is too much. Cut a chapter or move the midterm.' }, { text: 'Most of my hours go to the lab write-ups. The rubric is clear \u2014 it\u2019s just a lot on top of the reading.' }]
@@ -140,7 +140,7 @@ class Component extends DCLogic {
         courseLine: 'BIOL 2150 — Principles of Ecology · R1WW',
         responseBody: 'Thanks to everyone who has responded so far. The reading load note is heard \u2014 I\u2019m posting a priority guide for the midterm chapters this week.',
         trendI: [3.7, 4.0, 3.3, 3.7, 4.0, 3.7, 3.7], trendC: [3.3, 3.7, 3.0, 3.3, 3.7, 3.3, 4.0],
-        q1Counts: [0, 0, 1, 2, 0], q2Counts: [0, 0, 1, 1, 1],
+        q1Counts: [0, 0, 33, 67, 0], q2Counts: [0, 0, 34, 33, 33],
         medianH: '5.5',
         instrComments: [], courseComments: [],
         hasInstr: false, noInstr: false, hasCourse: false, noCourse: false
