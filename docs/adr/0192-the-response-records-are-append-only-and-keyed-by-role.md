@@ -21,8 +21,11 @@ chairs the department is keyed.
 Two tables in `backend/app/models/loop.py`, created by M1 (`2c3d5a0de424`):
 
 - **`instructor_response`**: `section_id`, `week_id` (the course week, as
-  `weekly_summary` keys it), `author_person_id` (`RESTRICT`), `role`, `ai_seeded`,
-  `body`, `published_at` and `sequence`.
+  `weekly_summary` keys it), `term_id`, `author_person_id` (`RESTRICT`), `role`,
+  `ai_seeded`, `body`, `published_at` and `sequence`. The week belongs to the
+  section's term: two composite keys, `(section_id, term_id) → section (id,
+  term_id)` and `(week_id, term_id) → week (id, term_id)`, the pattern `response`
+  uses ([ADR 0018](0018-cross-table-length-rules-are-enforced-by-a-composite-foreign-key.md)).
 - **`response_policy`**: `prefix_id`, `set_by_person_id` (`RESTRICT`), `role`,
   `mode`, `set_at` and `sequence`.
 
@@ -47,6 +50,25 @@ reads it, never a time. The two time columns are written by the application from
 no `UPDATE`, `DELETE` or `TRUNCATE`
 (`backend/app/views_sql/response_loop_grants_v001.sql`).
 
+**Who may write a row is checked when it is written**
+(`backend/app/views_sql/response_loop_guard_v001.sql`). A grant cannot say who
+a row may name, so each table has a `BEFORE INSERT` trigger, `SECURITY DEFINER`
+and owned by the NOLOGIN `pulse_response_guard_definer`, which reads the grants
+and mappings and writes nothing. `pulse_app` holds no `EXECUTE` on either
+function. A refusal is SQLSTATE 42501 and names no person.
+
+- A response is refused unless its author holds the stated role for the
+  section: `INSTRUCTOR` the section's `INSTRUCTOR` grant; `LEAD_FACULTY` the
+  assignment and the mapping for the section's course; `CHAIR` the chair of
+  the course's department, where nobody leads the course.
+- **One author per section-week** (ruling 3): a response is refused when the
+  section-week already holds a row by somebody else. The trigger first takes a
+  transaction-scoped advisory lock on the section-week, so two writers racing
+  for one week are serialised and only the first lands.
+- A policy is refused unless its setter holds the stated role in the prefix:
+  `LEAD_FACULTY` the assignment and the mapping for at least one course in the
+  prefix; `CHAIR` a `CHAIR` assignment on the prefix's department.
+
 **The rows' own rules sit in the database.** The roles and the mode are `CHECK`ed
 vocabularies. The text holds at least one character Python's `str.strip()` would
 keep, and at most `RESPONSE_TEXT_MAX = 4000` characters, one constant the `CHECK`
@@ -66,6 +88,12 @@ downgrades do.
 - **A policy keyed by prefix and person only.** A lead who chairs the department
   would then hold one switch for two different course sets, and turning it off as
   chair would turn it off as lead.
+- **The writer check in the service that will write the rows (E7-02, E7-03)
+  only.** The staff-name definer answers whoever a row names, so a row written
+  around the service would hand a name to the application connection.
+- **A unique constraint for one author per section-week.** Every edit is a new
+  row by the same author, so no unique key over the existing columns says
+  "one author", and a constraint cannot read the other rows.
 - **A `now()` default on the time columns.** The dev clock moves the application's
   time and not the server's, so a response would carry a time that disagrees with
   every deadline computed beside it.
@@ -75,7 +103,11 @@ downgrades do.
 
 ## Consequences
 
-- E7-02 and E7-03 write through these grants and add no migration.
+- E7-02 and E7-03 write through these grants and add no migration, and map the
+  trigger's 42501 to their own refusals.
+- `response_policy` has one index, `(prefix_id, set_by_person_id, role,
+  sequence)`, for the one read it is made for: the latest row for a prefix,
+  person and role. `instructor_response` has one, `(section_id, week_id)`.
 - A response's author is a `person` key. Its name reaches a reader only through
   the staff-name definer ([ADR 0191](0191-a-staff-name-reaches-a-reader-through-one-definer.md)),
   which answers a published response's author to readers of the section.

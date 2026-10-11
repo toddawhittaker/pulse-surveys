@@ -28,6 +28,14 @@ it. The body is `backend/app/views_sql/section_staff_names_v001.sql`.
 - **What it answers:** the section's live teaching instructors, and anyone who has
   published a response to the section, each once. The name is
   `person.identity_name`. No other column.
+- **The author half is bounded when the row is written.** A response's author
+  becomes a name this function answers, so a `BEFORE INSERT` trigger on
+  `instructor_response` refuses a row unless the author holds the stated role
+  for the section at that moment, by the same three rules as the staff checks
+  below ([ADR 0192](0192-the-response-records-are-append-only-and-keyed-by-role.md),
+  `response_loop_guard_v001.sql`). Without it, one forged insert followed by one
+  call would hand any person's name, a student's included, to the application
+  connection.
 - **Every reader check sits inside the function, the staff checks included.**
   Exactly one reader key is non-null, or the answer is empty. The student check
   runs on the user key: a live enrollment in the section. The staff checks run on
@@ -59,9 +67,10 @@ it. The body is `backend/app/views_sql/section_staff_names_v001.sql`.
 - **The staff checks in Python before the call, the student check alone in SQL.**
   The ticket allowed it. It would leave the function answering any member of staff
   for any section, so a second caller, or a bug in the first, would read names
-  across the institution. With every check inside, the function's answer is bounded
-  whoever calls it, and the cost is one more copy of two Python rules, held to
-  them by tests.
+  across the institution. With every check inside, the reader half of the answer
+  does not depend on the caller's code, and the cost is one more copy of two
+  Python rules, held to them by tests. Who the answer names is bounded by what
+  the rows say: the teaching grants and the response authors (see Consequences).
 - **One key, the reader's `person`.** A launched student has no `person`, so the
   student, the reader the channel exists for, could not be asked about.
 - **A fourth parameter for the institution's date.** The settled signature has
@@ -79,6 +88,15 @@ it. The body is `backend/app/views_sql/section_staff_names_v001.sql`.
   `section_staff_names_v001.sql` too, as a new versioned file
   ([ADR 0041](0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md)).
 - `test_identity_grants.py` now lists eleven functions `pulse_app` may execute,
-  the first that returns a name, and seven definer owners.
+  the first that returns a name, and eight definer owners (the eighth is the
+  write guard's, ADR 0192).
+- **Accepted residue: the instructor half trusts the teaching grants.** The
+  names this function answers as instructors are whoever holds a section's
+  `INSTRUCTOR` grant, and `public.record_teaching_instructor`, which `pulse_app`
+  may execute for the roster sync, accepts any person key. So a caller who can
+  run SQL as `pulse_app` can make a person a section's instructor and then read
+  their name here. That caller can already grant teaching rights, which is the
+  larger compromise, so this ticket does not close it; it is carried to the E7
+  exit's hand-off.
 - Staff names on leadership pages are E9's, and use this channel or argue for
   another.
