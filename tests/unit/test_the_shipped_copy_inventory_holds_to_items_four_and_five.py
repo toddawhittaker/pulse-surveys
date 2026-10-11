@@ -75,7 +75,12 @@ refusals make it seven:
   - `leadership_response`, E7-03's: the two refusals the policy switch and the
     on-behalf doors answer with, registered in `app/copy/response_loop.py` (the
     ruling on dispute E7-03-03). Refusals alone, so it owes item 5 no line until
-    E7-07's pages ask the question again.
+    E7-07's pages ask the question again;
+  - `student_results`, E7-06's results page, moved out of `student_survey.` by
+    E7-10 (done-when 8): the student's view of a published week and the response
+    to it. It shows only staff-written text today, so it owes item 5 no line;
+    `docs/tickets/e8/carried-from-e7.md` reopens the question when E8 adds
+    anything derived from students to the page.
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
@@ -216,6 +221,7 @@ COMPARISON_SETS = "comparison_sets"
 ENTRY = "entry"
 LEADERSHIP_MODERATION = "leadership_moderation"
 LEADERSHIP_RESPONSE = "leadership_response"
+STUDENT_RESULTS = "student_results"
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
@@ -296,6 +302,17 @@ GOVERNED_SURFACES = {
     # that registers nothing under `leadership_response.` is red in
     # `test_every_governed_surface_collects_at_least_one_string`.
     "leadership_response": LEADERSHIP_RESPONSE,
+    # E7-06's results page — the week's state and the response a student reads —
+    # whose strings E7-06 filed under `student_survey.results_*`, which counted
+    # them toward the survey surface and its one confidentiality line. They are a
+    # different screen (E7-10 done-when 8), so they are their own prefix and their
+    # own surface, placed in the no-line map below with the reason.
+    #
+    # **The mutation this row kills** is the state it replaces: the results
+    # page's strings counted on the survey surface, where a confidentiality
+    # sentence added to the results page would read as the survey's second line —
+    # or the survey's own line, moved there, as satisfying both.
+    "student_results": STUDENT_RESULTS,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -370,6 +387,14 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
         "E6-05-02 placement for backend refusals alone: whether E7-07's policy, owed and "
         "on-behalf pages owe item 5 a line is that ticket's question, and the on-behalf "
         "composer shows stored summaries, so it is asked again there (MISTAKES entry 22)."
+    ),
+    STUDENT_RESULTS: (
+        "E7-06's results page: a published week's state and the response to it, which only "
+        "staff write — the instructor, or a lead or chair on behalf — shown with its author's "
+        "name and role. Nothing on it is a student's response, comment or rating, so there is "
+        "no student whose identity it could promise anything about, and item 5's sentence would "
+        "have no subject (E7-10 done-when 8). `docs/tickets/e8/carried-from-e7.md` reopens the "
+        "question when E8 adds anything derived from students to the page."
     ),
 }
 
@@ -3145,6 +3170,54 @@ def test_the_entry_surface_owes_no_line_and_collects_from_the_registry() -> None
         f"The {ENTRY} surface owes item 5 no line and carries {carrying}.\n"
         "\n"
         f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[ENTRY]}"
+    )
+
+
+@pytest.mark.invariant
+def test_the_results_page_is_its_own_surface_and_owes_no_line() -> None:
+    """SPEC §4.1 item 5's answer for E7-06's results page, asserted as a named fact (E7-10 done-when 8).
+
+    The page's strings move from `student_survey.results_*` to `student_results.`,
+    so they stop counting toward the survey surface, and the surface is recorded
+    as owing no line with the reason: it shows only staff-written text today.
+
+    **The mutations it kills:** the strings left under `student_survey.` (any
+    collected key still spelled `student_survey.results_…`); the surface moved into
+    `CONFIDENTIALITY_KEY_OF_SURFACE`, which would demand a promise about students
+    on a page showing none of their words; the reason emptied; the frontend copy
+    module dropping out of the collector, which makes the zero meaningless; and a
+    reassuring identity sentence added to the page. **The near miss it spares:**
+    the survey surface's own line, still counted once on `student_survey.`.
+    """
+    assert STUDENT_RESULTS in SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
+        f"The {STUDENT_RESULTS} surface is not recorded as owing item 5 no line. Done-when 8: "
+        "placed in the surfaces that owe no confidentiality line, with the reason."
+    )
+    assert (
+        SURFACES_WITH_NO_CONFIDENTIALITY_LINE[STUDENT_RESULTS].strip()
+    ), f"The {STUDENT_RESULTS} row records no reason (ADR 0158: an omission reading as a decision)."
+    assert (
+        STUDENT_RESULTS not in CONFIDENTIALITY_KEY_OF_SURFACE
+    ), f"The {STUDENT_RESULTS} surface is in both line maps."
+
+    frontend = [string.key for string in collect_frontend_copy(FRONTEND_COPY_DIRECTORY)]
+    assert frontend, "The frontend collector read nothing, so this rule passed over nothing."
+    moved = [key for key in frontend if prefix_of(key) == STUDENT_RESULTS]
+    assert moved, (
+        f"No frontend string is collected under `{STUDENT_RESULTS}.`. Done-when 8: the results "
+        "page's strings move to that prefix, so a zero counted over it is not an answer to item 5."
+    )
+    left_behind = sorted(key for key in frontend if key.startswith("student_survey.results_"))
+    assert not left_behind, (
+        f"These results-page strings are still filed on the survey surface: {left_behind}. "
+        f"Done-when 8: they move to `{STUDENT_RESULTS}.`."
+    )
+
+    inventory = collect_shipped_copy()
+    carrying = sorted(string.key for string in confidentiality_strings(inventory, STUDENT_RESULTS))
+    assert not carrying, (
+        f"The {STUDENT_RESULTS} surface owes item 5 no line and carries {carrying}.\n\n"
+        f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[STUDENT_RESULTS]}"
     )
 
 

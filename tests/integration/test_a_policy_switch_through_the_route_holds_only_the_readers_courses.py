@@ -19,6 +19,11 @@ a *second* department whose read and write must reach nothing in this prefix.
 
 **Which failure a red is, before E7-03 lands.** `find_route` fails naming the
 policy routes.
+
+**Two tests carry `invariant`** (E7-10 done-when 7): the lead's switch reaching
+nothing of a sibling lead's course, and another department's chair reading and
+setting nothing here — SPEC §4.1 item 2's "no sibling course" for the policy
+route. The rest are scope rules within the reader's own department.
 """
 
 from typing import Any
@@ -66,6 +71,7 @@ def assert_success(answered: Any, what: str) -> None:
     ), f"{what} answered {answered.status_code}, not {OK}. Body {answered.text[:400]!r}."
 
 
+@pytest.mark.invariant
 def test_a_leads_switch_holds_their_course_and_nothing_of_the_sibling_leads(
     response_loop: LoopWorld,
 ) -> None:
@@ -185,6 +191,7 @@ def test_a_lead_who_also_chairs_sets_each_course_under_the_role_it_is_held_by(
     }, f"The two-hat switch left {rows}. Decision 2: the role per course is the one it is held by."
 
 
+@pytest.mark.invariant
 def test_another_departments_chair_reads_and_sets_nothing_in_this_prefix(
     response_loop: LoopWorld,
 ) -> None:
