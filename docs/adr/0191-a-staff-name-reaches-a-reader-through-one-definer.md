@@ -100,3 +100,28 @@ it. The body is `backend/app/views_sql/section_staff_names_v001.sql`.
   exit's hand-off.
 - Staff names on leadership pages are E9's, and use this channel or argue for
   another.
+
+## Measured: the `role_assignment` reads by section (E8-01)
+
+`role_assignment` has indexes on `person_id` and `reports_to` and none on
+`section_id`. The student path reads it by section in two places: the
+definer's named half (`role = 'INSTRUCTOR' AND section_id = ?`) and
+`authz.teaching_instructors_of`, the same predicate. Measured on 2026-10-11 on
+PostgreSQL 17.11, against a session copy of the table with its indexes
+(`CREATE TEMP TABLE ... (LIKE public.role_assignment INCLUDING INDEXES ...)`)
+holding 20,000 rows: 19,000 `INSTRUCTOR` grants over 12,000 sections and 1,000
+leadership grants, then `ANALYZE`.
+
+- **By role and section:** `Seq Scan`, 19,998 rows removed by the filter, 228
+  buffers, **1.1 ms** execution.
+- **The definer's reader check (b), by person, role and section:** `Index Scan
+  using` the `person_id` index, 0.15 ms.
+- **With a partial index on `(section_id) WHERE role = 'INSTRUCTOR'`**, for
+  comparison: `Bitmap Index Scan`, 0.03 ms.
+
+**No index is added.** The first read is a sequential scan, but at the size the
+carried entry names it costs about a millisecond, once per results or survey
+read, which does not dominate a read that already sends a statement per figure
+and per stream. The scan grows with the table, so a deployment far past twenty
+thousand grants should add the partial index above; it is one additive
+migration.

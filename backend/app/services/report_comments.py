@@ -18,7 +18,7 @@ a query, a serializer and a template:
 >
 > Comment display order is randomized; timestamps are never shown with comments.
 
-Four callables and one payload:
+Four callables and one payload for the instructor's report:
 
 * `stream_is_suppressed` — whether one stream of one section-week is below the
   threshold of distinct commenters; the one definition every reader of the rule
@@ -33,6 +33,11 @@ Four callables and one payload:
   02:40;
 * `ReportComment` — what a caller may be told about one comment: its text, its
   moderation status, and which of §5.1's two groups it belongs to. Nothing else.
+
+And the student's two reads (SPEC §5.4, ADR 0197): `student_comments` and
+`student_released_comments`, each the instructor's read above kept to the
+`published` and `kept` statuses and answered as text and stream only, the
+second only from batches cut before the instant it is given.
 
 ## The release gate is three conditions, not §4's one
 
@@ -66,13 +71,15 @@ posts into the gradebook (ADR 0125), narrows the author to the students who
 completed that week's comment item — and in a four-response week that
 intersection can be one person.
 
-**No student-facing parameter.** Neither read takes a viewer, a subject or a
+**No student-facing parameter.** No read here takes a viewer, a subject or a
 user; there is no argument position a launching student's own claim could be
-filled into (SPEC §4.1 item 6). §5.4 gives students a different rule over the
-same rows — their own section, published comments only, and a notice in place of
-comments below the threshold — and E8 writes it in its own module.
+filled into (SPEC §4.1 item 6). §5.4 gives students a narrower rule over the
+same rows — their own section, published and kept comments only, and a notice in
+place of comments below the threshold — and the two student reads apply it as a
+filter over the instructor's, so every rule of those holds for students too.
 `tests/unit/test_the_report_comment_service_names_nothing_a_student_path_can_reach.py`
-sweeps the four student-facing modules for an import of this one.
+sweeps the four student-facing modules for an import of this one, and allows
+`app.services.response_loop` the two student reads and nothing else.
 
 **No moderation write.** The status a comment carries is read from the record
 E4-02 shipped; a moderation verdict and its route are written only by the

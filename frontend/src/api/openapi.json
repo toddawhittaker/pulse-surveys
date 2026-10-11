@@ -2324,7 +2324,7 @@
           "set_by_role"
         ],
         "title": "PolicyCourse",
-        "description": "One course's response policy as one reader reads it (E7-03, decision 2).\n\n`mode` is the course's latest policy row now, or `ENCOURAGED` with none.\n`set_by_role` says which role set it, and only on a course the reader cannot\nset (a chair reading a course with a lead): on a course the reader sets, it is\nabsent, so nothing on it moves with anybody else's change (done-when 4).\nNever a name: the setter's name is E9's."
+        "description": "One course's response policy as one reader reads it (ADR 0194).\n\n`mode` is the course's latest policy row now, or `ENCOURAGED` with none.\n`set_by_role` says which role set it, and only on a course the reader cannot\nset (a chair reading a course with a lead): on a course the reader sets, it is\nabsent, so nothing on it moves with anybody else's change (done-when 4).\nNever a name: the setter's name is E9's."
       },
       "PolicyMode": {
         "type": "string",

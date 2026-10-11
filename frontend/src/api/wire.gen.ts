@@ -1539,7 +1539,7 @@ export interface components {
         };
         /**
          * PolicyCourse
-         * @description One course's response policy as one reader reads it (E7-03, decision 2).
+         * @description One course's response policy as one reader reads it (ADR 0194).
          *
          *     `mode` is the course's latest policy row now, or `ENCOURAGED` with none.
          *     `set_by_role` says which role set it, and only on a course the reader cannot

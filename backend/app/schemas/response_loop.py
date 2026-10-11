@@ -175,7 +175,7 @@ class StudentWeekResults(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# E7-03: the publish and edit doors, the policy, the owed read and on behalf.
+# The publish and edit doors, the policy, the owed read and on behalf (ADR 0194).
 #
 # Every model refuses a member it never declared, as the student models above
 # do, so a later join cannot quietly carry a comment, a name or a time onto a
@@ -240,7 +240,7 @@ class PolicyWrite(BaseModel):
 
 
 class PolicyCourse(BaseModel):
-    """One course's response policy as one reader reads it (E7-03, decision 2).
+    """One course's response policy as one reader reads it (ADR 0194).
 
     `mode` is the course's latest policy row now, or `ENCOURAGED` with none.
     `set_by_role` says which role set it, and only on a course the reader cannot
