@@ -51,9 +51,14 @@ otherwise. The first row decides, so an edit never changes the release. Students
 read the latest row's text and time, under the first row's author and role (the
 same person, since only the first author may edit).
 
-**The student results route** finds the section among the student's live
-enrollments and the week among the section's published weeks, before reading any
-response. Every refusal is one 404 with one sentence.
+**Two student results routes.** `GET /student/sections/{section_id}/weeks/{course_week}/results`
+answers one week, and `GET /student/sections/{section_id}/results` answers the
+latest published week, which is where the student's page opens. Both find the
+section among the student's live enrollments and the week among the section's
+published weeks before reading any response. Both carry `published_weeks`, the
+section's course weeks whose report has opened, ascending, so the page pages back
+through published weeks only (SPEC §5.4). Every refusal on either route is one 404
+with one sentence, a section with no published week included.
 
 ## Alternatives rejected
 
@@ -80,3 +85,12 @@ response. Every refusal is one 404 with one sentence.
   edit routes in front of `publish_response`. Both writers decide nothing about
   who may write; the doors and the guard trigger do.
 - The migration's downgrade refuses while `response_policy` holds a row.
+- **A known edge, for review.** The author's name comes through the staff-name
+  definer, which judges the student's enrollment on the UTC date of the database clock
+  ([ADR 0191](0191-a-staff-name-reaches-a-reader-through-one-definer.md)), while
+  the route judges it on the institution's date from `services/clock`. Near
+  midnight the two can disagree, and a live student whose enrollment starts or
+  ends that day can then reach a released week whose author the definer does not
+  answer. The read raises in that case (a 500) rather than serving the response
+  without its author. Kept simple on purpose; a role-only attribution is the
+  alternative if it shows up in practice.
