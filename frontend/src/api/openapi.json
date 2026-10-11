@@ -583,6 +583,57 @@
       }
     },
     "/instructor/sections/{section_id}/weeks/{course_week}/response": {
+      "get": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "The response to one week of my report, as students read it",
+        "description": "The week's state and response, behind the report's own gate and its own 404s.",
+        "operationId": "read_week_response_instructor_sections__section_id__weeks__course_week__response_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeekResponseView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
       "post": {
         "tags": [
           "instructor"

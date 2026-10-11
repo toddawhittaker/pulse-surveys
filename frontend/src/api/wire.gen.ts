@@ -576,7 +576,11 @@ export interface paths {
             readonly path?: never;
             readonly cookie?: never;
         };
-        readonly get?: never;
+        /**
+         * The response to one week of my report, as students read it
+         * @description The week's state and response, behind the report's own gate and its own 404s.
+         */
+        readonly get: operations["read_week_response_instructor_sections__section_id__weeks__course_week__response_get"];
         /**
          * Edit the response I published to one week of my report
          * @description SPEC §5.3's edit: a new row, by the person who first published, and never a re-hold.
@@ -2763,6 +2767,38 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["DraftCheckView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_week_response_instructor_sections__section_id__weeks__course_week__response_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["WeekResponseView"];
                 };
             };
             /** @description Validation Error */
