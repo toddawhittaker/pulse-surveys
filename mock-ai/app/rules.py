@@ -746,7 +746,7 @@ def draft_for(week_text: str) -> Answer:
     **It carries no count token and quotes nothing by default** — no digit and
     no number word, quantity words such as "both", "few" or "several" included —
     so a development stack gets a draft the tool's held-week count rule
-    (`states_a_count_of_people`, E7-04's fix round) accepts in any week. Keep it
+    (`states_a_count_of_people`, ADR 0195) accepts in any week. Keep it
     that way when editing the sentence below. With
     `QUOTES_THE_WEEK_MARKER` in the week it repeats every summary and label
     verbatim, which is how a stack drives the tool's two draft refusals.

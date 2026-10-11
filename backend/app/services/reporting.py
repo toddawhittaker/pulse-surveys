@@ -139,7 +139,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
         WorkloadBenchmarkFigures,
         WorkloadBenchmarkView,
     )
-    from app.schemas.response_loop import OnBehalfStream, OnBehalfStreamName
+    from app.schemas.response_loop import OnBehalfStream
     from app.services.benchmarks import BenchmarkPoint, WorkloadComparison
 
 logger = logging.getLogger(__name__)
@@ -153,20 +153,6 @@ logger = logging.getLogger(__name__)
 STREAM_ASKED_ABOUT: dict[str, CommentStream] = {
     token: CommentStream[token] for token in REPORT_STREAMS
 }
-
-# How a stored stream token is spelled on the on-behalf read (E7-03): the member
-# names the report's own `StreamsView` already uses for the two streams. Written
-# out because the wire type is a closed `Literal`; the check below fails at import
-# if `REPORT_STREAMS` ever gains a stream this does not spell.
-STREAM_ON_THE_WIRE: dict[str, "OnBehalfStreamName"] = {
-    "INSTRUCTOR": "instructor",
-    "COURSE": "course",
-}
-if set(STREAM_ON_THE_WIRE) != set(REPORT_STREAMS):  # pragma: no cover - a broken edit, not a branch
-    raise RuntimeError(
-        f"STREAM_ON_THE_WIRE spells {sorted(STREAM_ON_THE_WIRE)}; the report's streams are "
-        f"{sorted(REPORT_STREAMS)}."
-    )
 
 # The two states a moderator is holding a comment in. SPEC §5.1: the summaries
 # "exclude flagged-held content". `FLAGGED_COLLAPSED` is where a comment waits for
@@ -1966,7 +1952,10 @@ def on_behalf_streams(
     responses, _ = _response_counts(session, section_id=section_id, week_id=week_id)
     return [
         OnBehalfStream(
-            stream=STREAM_ON_THE_WIRE[token],
+            # The on-behalf read spells a stream as the report's `StreamsView`
+            # does, the stored token lower-cased; `OnBehalfStream` refuses any
+            # other spelling, so a new stream fails loudly here.
+            stream=token.lower(),
             summary_text=None if token not in rows else str(rows[token].summary_text),
             response_count=responses,
             rating_distribution={
@@ -2086,7 +2075,8 @@ class UnusableAnswerError(Exception):
     """
 
 
-# The count rule for a week with a held stream (E7-04's fix round, G1; ADR 0195).
+# The count rule for a week with a held stream (SPEC §5.3, the E7 breakdown's
+# decision 12; ADR 0195).
 # **A token rule, not a phrase list.** The first version matched a number beside
 # a list of nouns for people ("students", "of you"), and review found phrasings
 # it missed in minutes: "two of your classmates", "2 learners said", "the 7 who
@@ -2260,7 +2250,7 @@ def instructor_response_draft(
       comparison is `_reused_run` against the section-week's excluded,
       still-flagged and held-stream comments, as
       `refuse_a_summary_reusing_a_comment` does for a small-N summary.
-    - **A number beside a held stream** (residue A, fix-round G1): in a week
+    - **A number beside a held stream** (decision 12, ADR 0195): in a week
       with a held stream, a draft carrying any number except one naming a
       course structure is refused (`states_a_count_of_people`), because the
       summary's *prose* can carry the count decision 12 keeps out of the themes.
@@ -2390,7 +2380,7 @@ def refuse_a_check_naming_an_unstored_theme(
     its stored count exactly, a held stream's with no count. So an invented
     theme, a shown count off by any amount, a shown theme with no count, and a
     held theme with a count (even the true one) are each refused whole
-    (E7-04 done-when 2 and 3, residue B). The comparison is by exact pair, so a
+    (E7-04 done-when 2 and 3, ADR 0195). The comparison is by exact pair, so a
     label that two streams share is accepted in either stream's form.
 
     An empty answer is a legitimate one and passes. Raises `UnusableAnswerError`.

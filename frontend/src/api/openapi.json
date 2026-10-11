@@ -1744,7 +1744,7 @@
           "draft"
         ],
         "title": "DraftCheckRequest",
-        "description": "What the draft check is sent: the instructor's draft, and nothing else.\n\nBounded at the edge, so a body far over any response's length is refused with\na 422 before any model is asked (E7-04 done-when 6)."
+        "description": "What the draft check is sent: the instructor's draft, and nothing else.\n\nBounded at the edge by the published response's own bound\n(`RESPONSE_TEXT_MAX` in `app.models.loop`), because the draft checked is the\ntext that will become one; a body over it is refused with a 422 before any\nmodel is asked (E7-04 done-when 6)."
       },
       "DraftCheckView": {
         "properties": {
