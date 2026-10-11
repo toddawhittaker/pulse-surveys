@@ -87,6 +87,13 @@ export const LEADERSHIP_MODERATION_COPY = {
   'leadership_moderation.session_ended_title': 'This page is not signed in',
   'leadership_moderation.session_ended_body':
     'The session this page was opened with has ended. Open Pulse Surveys again to come back to it.',
+
+  // What the leadership gate's 403 says (E7-08, ADR 0196): the reader is signed
+  // in, in another role. Not the 401's words, which would tell a signed-in
+  // student or instructor their session ended. It names no role and no person.
+  'leadership_moderation.not_your_role_title': 'This page is not part of your role',
+  'leadership_moderation.not_your_role_body':
+    'You are signed in, in a role this page is not for. Open Pulse Surveys again the way you usually do, and it opens the pages your role has.',
 } as const satisfies Record<string, string>;
 
 /** Every key this surface publishes. */
