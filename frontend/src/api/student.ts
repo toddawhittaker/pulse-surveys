@@ -214,3 +214,71 @@ export async function submitWeeklySurvey(
   if (response.status === CONFLICT_STATUS) return { kind: 'closed', message: sentence };
   return { kind: 'refused', message: sentence };
 }
+
+/** One week of results for one of this reader's sections (SPEC §5.4). */
+export type StudentWeekResults = Schemas['StudentWeekResults'];
+
+/** The published response a student reads, and who wrote it. */
+export type StudentResponse = Schemas['StudentResponse'];
+
+/** The role a response was written under; the last two mean it was written for the instructor. */
+export type ResponseAuthorRole = StudentResponse['author_role'];
+
+/**
+ * Where a section's results page lives in the client, for a link.
+ *
+ * Without a week it opens the latest published week. These are the client's
+ * addresses; the API's are `resultsPath` below. `/app` is the mount
+ * (`router.tsx`).
+ */
+export function resultsAddress(sectionId: string, courseWeek?: number): string {
+  const base = `/app/student/sections/${encodeURIComponent(sectionId)}`;
+  return courseWeek === undefined ? `${base}/results` : `${base}/weeks/${courseWeek}/results`;
+}
+
+/** The API's two results routes, `app.api.student`'s. */
+export function resultsPath(sectionId: string, courseWeek?: number): string {
+  const base = `/student/sections/${encodeURIComponent(sectionId)}`;
+  return courseWeek === undefined ? `${base}/results` : `${base}/weeks/${courseWeek}/results`;
+}
+
+/**
+ * What the results read answered.
+ *
+ * `nothing` is the API's single 404, which it answers for every refusal alike
+ * (not enrolled, a week not yet published, a section that does not exist). It
+ * carries no detail on purpose and this client adds none: telling the refusals
+ * apart here would say what the server chose not to.
+ */
+export type ResultsRead =
+  | { readonly kind: 'results'; readonly results: StudentWeekResults }
+  | { readonly kind: 'nothing' }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'unavailable' };
+
+const NOT_FOUND_STATUS = 404;
+const STATES = ['awaiting', 'published', 'on-behalf', 'unanswered'];
+
+/** One week's results for one of this reader's sections; no week means the latest published. */
+export async function readStudentResults(
+  sectionId: string,
+  courseWeek?: number,
+): Promise<ResultsRead> {
+  let response: Response;
+  try {
+    response = await fetch(resultsPath(sectionId, courseWeek), { headers: readHeaders() });
+  } catch {
+    return { kind: 'unavailable' };
+  }
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (response.status === NOT_FOUND_STATUS) return { kind: 'nothing' };
+  if (!response.ok) return { kind: 'unavailable' };
+
+  const body = await jsonBody(response);
+  if (typeof body !== 'object' || body === null) return { kind: 'unavailable' };
+  const { state, published_weeks: weeks } = body as Record<string, unknown>;
+  if (typeof state !== 'string' || !STATES.includes(state) || !Array.isArray(weeks)) {
+    return { kind: 'unavailable' };
+  }
+  return { kind: 'results', results: body as StudentWeekResults };
+}

@@ -232,6 +232,12 @@ GOVERNED_SURFACES = {
     "student_survey": SURVEY,
     "submit": SURVEY,
     "student": SURVEY,
+    # The student's reply page and its response card, reached from the survey's
+    # section heading. They join the survey's surface rather than starting one:
+    # the page will carry comments, which makes it a student screen that owes
+    # item 5's line, and the survey's line is the student's one standing
+    # sentence. It adds no second copy of it, so the count stays one.
+    "student_results": SURVEY,
     "instructor_report_page": REPORT,
     "instructor_report_trend": REPORT,
     "instructor_report_stats": REPORT,
