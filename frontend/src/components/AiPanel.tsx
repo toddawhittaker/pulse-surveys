@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 
 import './instructorReportComments.css';
 import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
@@ -36,16 +36,23 @@ export function AiPanel({
   text,
   responseCount,
   heldNote,
+  children,
 }: {
   readonly heading: string;
   readonly text: string;
-  readonly responseCount: number;
+  readonly responseCount?: number;
   /**
    * The type of a comment held for review, per ADR 0148's `held_note_type` —
    * `null` whenever the payload holds none, which is every E4 week (E6 writes
    * the moderation states that populate it).
    */
-  readonly heldNote: string | null;
+  readonly heldNote?: string | null;
+  /**
+   * Further AI content under the text, for a panel that is not a summary — the
+   * draft check's list of themes. Such a panel states no response count, since
+   * it summarises no responses, and passes none.
+   */
+  readonly children?: ReactNode;
 }): JSX.Element {
   const headingId = useId();
 
@@ -58,14 +65,17 @@ export function AiPanel({
         </p>
       </div>
       <p className="pulse-ai-panel__text">{text}</p>
-      <p className="pulse-ai-panel__meta">
-        {responseCount === 1
-          ? copy('instructor_report_comments.ai.generated_from_one')
-          : fillCopy('instructor_report_comments.ai.generated_from', {
-              count: String(responseCount),
-            })}
-      </p>
-      {heldNote === null ? null : (
+      {children}
+      {responseCount === undefined ? null : (
+        <p className="pulse-ai-panel__meta">
+          {responseCount === 1
+            ? copy('instructor_report_comments.ai.generated_from_one')
+            : fillCopy('instructor_report_comments.ai.generated_from', {
+                count: String(responseCount),
+              })}
+        </p>
+      )}
+      {heldNote === undefined || heldNote === null ? null : (
         <p className="pulse-ai-panel__meta">
           {fillCopy('instructor_report_comments.ai.held_note', { type: heldNote })}
         </p>

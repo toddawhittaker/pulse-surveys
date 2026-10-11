@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
-import { SECTIONS_PATH, decisionsPath, publishedWeeksPath, reportPath } from '../../api/instructor';
+import {
+  SECTIONS_PATH,
+  decisionsPath,
+  publishedWeeksPath,
+  reportPath,
+  weekResponsePath,
+} from '../../api/instructor';
 import { InstructorMondayReport } from './InstructorMondayReport';
 import {
   A_PUBLISHED_WEEK,
@@ -461,7 +467,13 @@ describe('a published week with data in it', () => {
     open(null);
     await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
 
-    expect(asked).toEqual([publishedWeeksPath(SECTION_ID), reportPath(SECTION_ID, 7)]);
+    // The third read is the week's response, which the composer asks for once the
+    // report is drawn; it is for the same week 7 and not for another.
+    expect(asked).toEqual([
+      publishedWeeksPath(SECTION_ID),
+      reportPath(SECTION_ID, 7),
+      weekResponsePath(SECTION_ID, 7),
+    ]);
   });
 
   it('moves focus to the heading when another week arrives, and not on the first one', async () => {
@@ -833,6 +845,48 @@ describe('a decision on a comment (SPEC §5.2)', () => {
       },
     ]);
     expect(published.className).not.toContain('--muted');
+  });
+});
+
+describe('a decision on a released comment (SPEC §5.2, ADR 0189)', () => {
+  const RELEASED_ID = '0f6b3c1e-2d4a-4e8b-9c7d-1a2b3c4d5e03';
+
+  it('excludes a released comment and undoes it, sending that comment’s own handle', async () => {
+    const sent: { url: string; body: unknown }[] = [];
+    const cards = [
+      { text: RELEASED_COMMENT, status: 'excluded', stream: 'COURSE', answer_id: RELEASED_ID, flag: null, decided_by_you: true },
+      { text: RELEASED_COMMENT, status: 'published', stream: 'COURSE', answer_id: RELEASED_ID, flag: null, decided_by_you: false },
+    ];
+    const reads: Record<string, unknown> = {
+      [publishedWeeksPath(SECTION_ID)]: { published_weeks: PUBLISHED_WEEKS },
+      [reportPath(SECTION_ID, 4)]: A_WEEK_WITH_A_RELEASE,
+    };
+    vi.stubGlobal('fetch', (input: string, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        sent.push({ url: input, body: JSON.parse(init.body as string) });
+        return Promise.resolve(json(200, cards.shift()));
+      }
+      const answer = reads[input];
+      if (answer === undefined) return Promise.reject(new Error(`No answer for ${input}.`));
+      return Promise.resolve(json(200, answer));
+    });
+    open(4);
+
+    const card = (await screen.findByText(RELEASED_COMMENT)).closest('article') as HTMLElement;
+    fireEvent.click(within(card).getByRole('button', { name: 'Exclude from student view' }));
+    fireEvent.change(within(card).getByRole('textbox'), { target: { value: 'Off topic.' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Exclude with this reason' }));
+
+    await within(card).findByText(/^Excluded — students will not see this comment/);
+    fireEvent.click(within(card).getByRole('button', { name: 'Undo' }));
+    await waitFor(() => {
+      expect(within(card).queryByText(/^Excluded/)).toBeNull();
+    });
+
+    expect(sent).toEqual([
+      { url: decisionsPath(RELEASED_ID), body: { action: 'exclude', reason: 'Off topic.' } },
+      { url: decisionsPath(RELEASED_ID), body: { action: 'undo', reason: null } },
+    ]);
   });
 });
 
