@@ -56,6 +56,7 @@ import {
 import {
   INSTRUCTOR_SUBJECT,
   LEARNER_SUBJECT,
+  STUDENT_VIEW,
   clearTheWeek,
   sectionStartClock,
   standTheLearnerIn,
@@ -137,6 +138,9 @@ async function leadOpens(page: Page, link: string): Promise<void> {
 /** Launch as the learner and open one course week's results page. */
 async function studentReads(page: Page, courseWeek: number): Promise<Locator> {
   await launchAs(page, LEARNER_SUBJECT, placement);
+  // The launch hands the session over in the address bar; the landing showing
+  // means the page has stored it, so the navigation below carries it.
+  await expect(page.getByTestId(STUDENT_VIEW)).toBeVisible();
   await page.goto(`/app/student/sections/${sectionId}/weeks/${String(courseWeek)}/results`);
   const results = page.getByTestId('pulse-student-results');
   await expect(results).toBeVisible();
@@ -325,6 +329,7 @@ test('course week 4 is owed at 48 hours, and past 96 the lead publishes on behal
 test('the student, opening a leadership page, reads that it is not part of their role', async ({ page }) => {
   test.setTimeout(CASE_TIMEOUT_MS);
   await launchAs(page, LEARNER_SUBJECT, placement);
+  await expect(page.getByTestId(STUDENT_VIEW)).toBeVisible();
   await page.goto('/app/leadership/responses-owed');
   await expect(page.getByText(NOT_YOUR_ROLE).first()).toBeVisible();
   await expect(page.getByText(LEADS)).toHaveCount(0);
