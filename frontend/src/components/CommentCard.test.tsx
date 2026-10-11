@@ -287,6 +287,79 @@ describe('CommentCard moderation (SPEC §5.2)', () => {
     expect(screen.getByText(FLAGGED_COMMENT.text)).toBeTruthy();
   });
 
+  describe('keyboard focus and announcements', () => {
+    it('has its status region before any decision, and fills it when one lands', async () => {
+      const decide = deciding(
+        decided({ ...FLAGGED_COMMENT, status: 'kept', decidedByYou: true }),
+        decided({ ...FLAGGED_COMMENT }),
+      );
+      render(<CommentCard {...FLAGGED_COMMENT} decide={decide} />);
+      const region = screen.getByRole('status');
+      expect(region.textContent).toBe('');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Review comment' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Keep for students' }));
+      await screen.findByText('You kept this comment for students.');
+
+      // The same node, not a new one: a replaced live region is not announced.
+      expect(screen.getByRole('status')).toBe(region);
+      expect(region.textContent).toBe('Comment kept for students.');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+      await screen.findByText('Flagged: privacy');
+      expect(region.textContent).toBe('Decision undone.');
+    });
+
+    it('moves focus to the card when the pressed control goes away', async () => {
+      const decide = deciding(
+        decided({ ...FLAGGED_COMMENT, status: 'excluded', decidedByYou: true }),
+      );
+      render(<CommentCard {...FLAGGED_COMMENT} decide={decide} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Review comment' }));
+      const exclude = screen.getByRole('button', { name: 'Exclude from student view' });
+      exclude.focus();
+      fireEvent.click(exclude);
+      await screen.findByText(EXCLUDED_NOTICE);
+
+      expect(exclude.isConnected).toBe(false);
+      expect(document.activeElement).toBe(screen.getByRole('article'));
+      expect(screen.getByRole('status').textContent).toBe(
+        'Comment excluded from the student view.',
+      );
+    });
+
+    it('focuses the reason field on opening, and Cancel returns focus to Exclude', () => {
+      render(<CommentCard {...PUBLISHED_COMMENT} decide={deciding()} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Exclude from student view' }));
+      expect(document.activeElement).toBe(screen.getByRole('textbox'));
+
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(document.activeElement).toBe(
+        screen.getByRole('button', { name: 'Exclude from student view' }),
+      );
+    });
+
+    it('links a refusal to the reason field and marks the field invalid only while it shows', async () => {
+      const refusal = 'A stated reason can be at most 500 characters long. Nothing was changed.';
+      render(
+        <CommentCard {...PUBLISHED_COMMENT} decide={deciding({ kind: 'refused', detail: refusal })} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Exclude from student view' }));
+      const field = screen.getByRole('textbox');
+      expect(field.getAttribute('aria-invalid')).toBe('false');
+
+      fireEvent.change(field, { target: { value: 'Names a classmate.' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Exclude with this reason' }));
+      const alert = await screen.findByRole('alert');
+
+      expect(field.getAttribute('aria-invalid')).toBe('true');
+      expect(field.getAttribute('aria-describedby')?.split(' ')).toContain(alert.id);
+      expect(alert.id).not.toBe('');
+    });
+  });
+
   describe('the stated reason for excluding an unflagged comment', () => {
     it('asks for a reason, and sends nothing while the field holds no words', () => {
       const decide = deciding();

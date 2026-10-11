@@ -234,7 +234,7 @@ test('a lead excludes a queued comment from the keyboard and finds it in the log
   const log = page.getByTestId(LOG_LIST);
   await expect(log).toBeVisible();
   const row = log.getByRole('listitem').filter({ hasText: 'BIOL 215 R3WW' }).first();
-  await expect(row).toContainText('Lead Faculty');
+  await expect(row).toContainText('Decided by lead faculty');
   await expect(row).toContainText('Excluded · AI-flagged');
   // One respondent: the comment's own report does not show it, so no excerpt.
   await expect(row).toContainText(NO_EXCERPT);

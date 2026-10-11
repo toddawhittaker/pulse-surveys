@@ -183,7 +183,7 @@ describe('the review queue', () => {
     decideOn(biology, EXCLUDE);
 
     await waitFor(() => {
-      expect(screen.getByRole('status').textContent).toBe(EXCLUDED);
+      expect(screen.getAllByRole('status')[0]?.textContent).toBe(EXCLUDED);
     });
     const left = await items();
     expect(left).toHaveLength(1);
@@ -235,7 +235,7 @@ describe('the review queue', () => {
     expect(alert.textContent).toBe(NOT_IN_QUEUE);
     expect(await items()).toHaveLength(1);
     expect(within(biology).getByText(A_BIOLOGY_ITEM.text)).toBeTruthy();
-    expect(screen.getByRole('status').textContent).toBe('');
+    expect(screen.getAllByRole('status')[0]?.textContent).toBe('');
   });
 
   it('shows the server’s sentence for a reader with no review grant, not the empty state', async () => {
