@@ -26,7 +26,7 @@ privilege `pulse_app` certainly holds (`docs/MISTAKES.md` entry 35).
 `instructor_response` and `response_policy`.
 """
 
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -132,7 +132,7 @@ def a_whole_row(session: Any, tables: dict[str, Any], table: Any, chain: dict[st
             elif isinstance(kind, DateTime):
                 values[column.name] = datetime.now(UTC)
             elif isinstance(kind, Date):
-                values[column.name] = date.today()
+                values[column.name] = datetime.now(UTC).date()
             elif isinstance(kind, String):
                 values[column.name] = f"E7-01 {table.name}.{column.name} written as pulse_app"
             elif isinstance(kind, Integer):

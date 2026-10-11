@@ -118,7 +118,7 @@ def a_distinctive_student(world: StaffNameWorld) -> Any:
 def test_no_reader_asking_any_section_is_answered_a_student_or_an_address(
     staff_names: StaffNameWorld,
 ) -> None:
-    """Every reader × every section: only staff come back, in two columns, and never the student.
+    """Every reader by every section: only staff come back, in two columns, and never the student.
 
     **The positive control** is the instructor's own answer for `F1WW`, which must
     carry the instructor's name — a definer answering nobody would satisfy every
