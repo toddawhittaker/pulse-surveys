@@ -60,7 +60,7 @@ label, the direction (`decision`, the stored `EXCLUDED` or `KEPT`, so the log
 shows both directions as SPEC §5.2 asks), the stored role, whether the AI flagged the comment, the reason, the date
 in the institution's zone, and an excerpt of 140 characters. *Amended at
 E6-08:* the log leaves out every row from a section the reader teaches, by the
-same `taught_section_ids` filter as the queue; the row is removed, not
+same taught-section filter as the queue; the row is removed, not
 redacted, because its section, date and reason say what the reader's own
 report hides. **The excerpt is
 null unless the comment's own report shows it under its week**
@@ -102,6 +102,16 @@ stated reason is free text shown beside a date, and could quote a held comment.
 - **An excerpt for released comments.** Re-attaches the week.
 
 ## Consequences
+
+- *Amended at E6-09:* "taught" includes a section whose teaching grant the
+  roster has ended. The queue, the leader door and the log all filter by
+  `authz.taught_or_once_taught_section_ids`: the live grants plus
+  `ended_teaching_grant`, which `pulse_app` reads two columns of
+  ([0183](0183-a-teaching-grant-is-deleted-and-enrollment-means-student.md)'s
+  amendment). **Accepted residual:** the reverse order. A lead who reviews a
+  section's comments and later starts teaching it has already read that held
+  text as a leader; the rule keeps it out from then on and cannot take back
+  what was read.
 
 - An assistant dean, a dean and a vice president read no queue and no log
   until E9 decides what their purview reaches here.
