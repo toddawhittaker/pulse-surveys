@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { JSX } from 'react';
 
 // Two copy modules, because the two strings belong to two surfaces. The stream
@@ -6,9 +7,10 @@ import type { JSX } from 'react';
 // so the page's inventory sweeps it beside the rest of the page's sentences.
 import { fillCopy as fillPageCopy } from '../copy/instructorReportPageCopy';
 import { copy, fillCopy } from '../copy/instructorReportStatCopy';
-import { fillCopy as fillStudentCopy } from '../copy/studentResults';
+import { copy as studentCopy, fillCopy as fillStudentCopy } from '../copy/studentResults';
 import { formatStatistic } from './instructorReportFigures';
 import './instructorReportStats.css';
+import './instructorReportTrend.css';
 
 /** The two comment streams SPEC §5.1 reports each week under. */
 export type RatingStream = 'instructor' | 'course';
@@ -115,8 +117,15 @@ export function RatingHistogram({
   const tallest = Math.max(...buckets.map((bucket) => bucket.count), 1);
 
   const title = copy(STREAM_TITLE[stream]);
+  const [numbersShown, setNumbersShown] = useState(false);
   const heading =
-    questionText === undefined || questionText.trim() === ''
+    unit === 'percent'
+      ? studentCopy(
+          stream === 'instructor'
+            ? 'student_results.ratings_title_instructor'
+            : 'student_results.ratings_title_course',
+        )
+      : questionText === undefined || questionText.trim() === ''
       ? title
       : fillPageCopy('instructor_report_page.histogram_question_title', {
           question: questionText.trim(),
@@ -176,6 +185,42 @@ export function RatingHistogram({
           </li>
         ))}
       </ul>
+      {percent ? (
+        <>
+          <button
+            type="button"
+            className="pulse-trend-numbers-toggle"
+            aria-label={fillStudentCopy(
+              numbersShown ? 'student_results.ratings_hide_numbers' : 'student_results.ratings_show_numbers',
+              { stream: title },
+            )}
+            onClick={() => {
+              setNumbersShown(!numbersShown);
+            }}
+          >
+            {studentCopy(
+              numbersShown ? 'student_results.ratings_hide_button' : 'student_results.ratings_show_button',
+            )}
+          </button>
+          <table className={numbersShown ? 'pulse-trend-table' : 'sr-only'}>
+            <caption>{fillStudentCopy('student_results.ratings_table_caption', { stream: title })}</caption>
+            <thead>
+              <tr>
+                <th scope="col">{studentCopy('student_results.ratings_table_rating')}</th>
+                <th scope="col">{studentCopy('student_results.ratings_table_percent')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buckets.map((bucket) => (
+                <tr key={bucket.value}>
+                  <th scope="row">{bucket.value}</th>
+                  <td>{`${String(bucket.count)}%`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { CommentCard } from './CommentCard';
 import type { CommentDecision, DecisionAnswer, ReportComment } from './CommentCard';
 import { SmallNNotice } from './SmallNNotice';
 import './instructorReportComments.css';
-import { copy } from '../copy/instructorReportCommentCopy';
+import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
 import { copy as studentCopy } from '../copy/studentResults';
 
 /**
@@ -138,9 +138,17 @@ export function CommentGroup(
       {suppressed ? (
         <div className="pulse-comment-group__small-n">
           {props.audience === 'student' ? (
-            <SmallNNotice audience="student" />
+            <SmallNNotice
+              title={studentCopy('student_results.small_n_title')}
+              body={studentCopy('student_results.small_n_body')}
+            />
           ) : (
-            <SmallNNotice threshold={props.threshold} />
+            <SmallNNotice
+              title={copy('instructor_report_comments.small_n.title')}
+              body={fillCopy('instructor_report_comments.small_n.body', {
+                threshold: String(props.threshold),
+              })}
+            />
           )}
         </div>
       ) : (

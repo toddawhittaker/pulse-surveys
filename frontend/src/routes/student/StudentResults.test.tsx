@@ -179,7 +179,7 @@ describe('paging', () => {
 });
 
 describe('the student’s own posted score', () => {
-  const SCORE = { score_text: '61.50', ledger_text: 'Week 1: 3 of 3 items; Week 2: 1 of 3 items' };
+  const SCORE = { score_text: '61.50', ledger_text: 'Week 1: 3 of 3 items\nWeek 2: 1 of 3 items' };
   const NOTE =
     'A comment counted when you submitted it can be re-checked later, so a week’s count can go down.';
 
@@ -195,8 +195,12 @@ describe('the student’s own posted score', () => {
   ] as const)('%s: shows the score and ledger as posted, with the sentence', async (state, role) => {
     serving({ [LATEST]: () => json(200, withScore(state, role)), [SURVEY]: survey });
     mountAt(`/app${LATEST}`);
-    await screen.findByText('Score posted to your gradebook: 61.50');
-    expect(page().textContent).toContain(SCORE.ledger_text);
+    await screen.findByText('Your participation: 61.50%');
+    // One list item per ledger line, as the server joins them with a newline.
+    const lines = Array.from(page().querySelectorAll('.pulse-results-ledger li')).map(
+      (item) => item.textContent,
+    );
+    expect(lines).toEqual(SCORE.ledger_text.split('\n'));
     expect(page().textContent).toContain(NOTE);
   });
 
@@ -219,7 +223,7 @@ describe('the student’s own posted score', () => {
       serving({ [LATEST]: () => json(200, body), [SURVEY]: survey });
       mountAt(`/app${LATEST}`);
       await screen.findByText(REPLY);
-      expect(page().textContent).not.toContain('Score posted');
+      expect(page().textContent).not.toContain('Your participation');
       expect(page().textContent).not.toContain(NOTE);
       expect(page().querySelector('.pulse-results-participation')).toBeNull();
     },
@@ -291,7 +295,7 @@ describe('the released page', () => {
         at('pulse-results-participation'),
         at('pulse-trend-duo'),
         at('pulse-stat-histogram"'),
-        at('Class median: 4.5 h on this course'),
+        at('Class median: 4.5 hours on this course'),
         at(INSTRUCTOR_COMMENT),
         at(COURSE_COMMENT),
         at('Comments from earlier weeks'),
@@ -347,7 +351,7 @@ describe('the released page', () => {
     const [first, second] = Array.from(groups);
     expect(first?.querySelector('.pulse-small-n-notice')).not.toBeNull();
     expect(first?.textContent).not.toMatch(/\d/);
-    expect(first?.textContent).toContain('Comments in this group stay private this week');
+    expect(first?.textContent).toContain('Comments in this group are not shown this week');
     expect(second?.querySelector('.pulse-small-n-notice')).toBeNull();
     expect(second?.textContent).toContain(COURSE_COMMENT);
   });
@@ -395,7 +399,8 @@ describe('the released page', () => {
     expect(page().querySelector('.pulse-comment-group')).toBeNull();
     expect(page().querySelector('.pulse-results-released')).toBeNull();
     expect(page().textContent).not.toContain('Class median');
-    expect(page().textContent).not.toContain(CONFIDENTIALITY);
+    // A released week carries the page's one line whatever else it holds.
+    expect(page().textContent).toContain(CONFIDENTIALITY);
   });
 });
 
@@ -463,14 +468,14 @@ describe('ratings as shares', () => {
     await mountWith(withFigures('published', { streams: [ratingsOnly, stream('course', { comments: [] })] }));
     await screen.findByText(INSTRUCTOR_COMMENT);
     expect(page().textContent).toContain('Ratings about the instructor are not shown this week');
-    expect(page().textContent).not.toContain('Comments in this group stay private');
+    expect(page().textContent).not.toContain('Comments in this group are not shown');
     cleanup();
     // Comments held, ratings shown: nothing says ratings are hidden.
     const commentsOnly = { ...stream('instructor', { small: true }), shares: { '1': 0, '2': 10, '3': 20, '4': 40, '5': 30 } };
     await mountWith(withFigures('published', { streams: [commentsOnly, stream('course', { comments: [] })] }));
     await screen.findByText(CONFIDENTIALITY);
-    expect(page().textContent).toContain('Comments in this group stay private');
-    expect(page().textContent).not.toContain('Ratings about');
+    expect(page().textContent).toContain('Comments in this group are not shown');
+    expect(page().textContent).not.toContain('Ratings about the instructor are not shown');
   });
 
   it('says a week with no mean has no figure, with no number or reason', async () => {
