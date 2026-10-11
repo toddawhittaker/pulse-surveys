@@ -68,6 +68,8 @@ students.
 
 ## The accessibility scan is not run on any moderation or response page
 
+**Lands in:** a `process/` pull request that adds the package, then [E8-02](E8-02-the-results-page.md) (the student-results drive) and [E8-04](E8-04-e8-exit.md) (the other drives). Without the package, [E8-04](E8-04-e8-exit.md) passes it on to E9.
+
 `@axe-core/playwright` is still not installed: no `process/` pull request added
 it during E7, and adding it touches `package.json`, which the merger refuses on
 a ticket pull request. So E7-05's composer, E7-06's results page and E7-07's
@@ -91,6 +93,8 @@ frontend/src` finds no comment naming a ticket, and each such comment cites an
 ADR or a SPEC section for the why and says what the code does now.
 
 ## A stored summary can carry a comment excluded after it was written
+
+**Lands in:** no E8 ticket. E8 shows students no summary (SPEC §5.4), so the rule has no E8 reader; [E8-04](E8-04-e8-exit.md) re-carries it to E9.
 
 `../e7/carried-from-e6.md`'s entry, closed for the on-behalf reader only (ADR
 0194). **Owner:** the first ticket that shows a stored summary to a student
@@ -133,6 +137,8 @@ The answers are in `../e7/boundary-review.md`.
 
 ### For E8: the student results route answers the state and the response only
 
+**Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) (the read under the hold, and the test that a held week serves nothing) and [E8-02](E8-02-the-results-page.md) (the page).
+
 E7's route (`GET /student/sections/{section_id}/weeks/{course_week}/results`,
 ADR 0193) carries `state`, `response` and `published_weeks`. **Owner:** E8.
 **Done when:** E8 adds the week's aggregates, comments and small-N state to
@@ -144,6 +150,8 @@ comment.
 
 ### For E8: release batches carry no week
 
+**Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md), under ruling 1 of the [E8 breakdown](README.md) and ADR 0197; [E8-02](E8-02-the-results-page.md) renders the group.
+
 `release_batch` holds a section, a term and a cut instant, and no week. A
 batch's comments therefore have no week to be held with. **Owner:** E8.
 **Done when:** a record decides how a release batch sits beside a held week on
@@ -152,12 +160,16 @@ something else), and the page follows it with a test.
 
 ### For E8: the results page names no course
 
+**Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) (the course label on the payload in every state, ruling 2) and [E8-02](E8-02-the-results-page.md) (the heading).
+
 E7-06 (#311) left the course off the page, because a course label carries a
 number and a held week may show none. **Owner:** E8. **Done when:** the page
 names the course where it can do so without a figure in a held week, or a
 record says why it does not.
 
 ### For E8: the results page owes a confidentiality line once it shows student data
+
+**Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) (the surface map and the key) and [E8-02](E8-02-the-results-page.md) (the line on the page).
 
 E7-10 moved the results page's strings to the `student_results.` copy surface
 and listed it among the surfaces that owe no confidentiality line, because the
@@ -217,6 +229,8 @@ forces the race.
 
 ### Two near-duplicates proposed by E7-03
 
+**Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) for the policy-of-record pair. The chair's department walk stays carried; [E8-04](E8-04-e8-exit.md) re-carries it.
+
 `policy_of_record` and the set-based clock read apply one policy-of-record rule
 in two forms, and the chair's department walk appears twice in
 `services/authz.py` (`lead_review_courses`, `chaired_courses_with_a_lead`).
@@ -254,6 +268,8 @@ definer reads the real date. **Owner:** the next ticket that touches
 parameter from the application clock, or a record argues the edge.
 
 ### The e2e suite's shared-stack residue
+
+**Lands in:** [E8-02](E8-02-the-results-page.md) for `student-results.spec.ts`. The rest stays carried; [E8-04](E8-04-e8-exit.md) re-carries it unless it touches those specs.
 
 Each of these leaves rows a second run on the same local stack trips over; CI
 builds a fresh stack each time, so none reds CI today:
@@ -378,6 +394,8 @@ are not repeated.
 
 ### Five simplifications the boundary review proposed
 
+**Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md) for the policy-of-record rule. [E8-04](E8-04-e8-exit.md) re-carries the other four.
+
 From `code-reviewer`, accepted as not worth the risk inside the epic: the
 lead-and-chair rule is written three times in SQL; the chair's walk to courses
 with a lead appears twice; the policy-of-record rule is written in two forms;
@@ -387,6 +405,8 @@ each file. **Done when:** each rule is written once, or a record argues the
 extra copy, and `publish_response` takes the week its caller already resolved.
 
 ### The role-assignment table has no index on its section
+
+**Lands in:** [E8-01](E8-01-the-students-week-under-the-hold.md).
 
 From `data-model`. E7 adds reads keyed by section on the student path (the
 staff-name definer and the teaching-instructor lookup). **Owner:** E8, which
@@ -403,6 +423,8 @@ entry "The draft and check evals have no floor". **Done when:** every case
 builds its input and checks its output through those types.
 
 ### Two response paths no drive reaches
+
+**Lands in:** [E8-04](E8-04-e8-exit.md).
 
 From `spec-conformance`. The exit drive reads an on-behalf response, but no
 drive on the running stack publishes on behalf of a course, and none reads an
