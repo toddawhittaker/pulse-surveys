@@ -4,7 +4,6 @@ import { useNavigate, useParams } from '@tanstack/react-router';
 import {
   readStudentResults,
   readStudentSurvey,
-  type EnrolledSection,
   type ResultsRead,
   type StudentWeekResults,
 } from '../../api/student';
@@ -30,10 +29,11 @@ import { copy, fillCopy } from '../../copy/studentResults';
  * name or response text, because the week is held and anything more would tease
  * it.
  *
- * The survey read is made beside the results one for two things the results do
- * not carry — the institution's time zone, which the date on the card is shown
- * in, and the course's label for the heading. Neither is needed to draw the
- * reply, so a failed survey read costs the page a date and a label, not a reply.
+ * The survey read is made beside the results one for the one thing the results
+ * do not carry: the institution's time zone, which the date on the card is shown
+ * in. A failed survey read costs the card its date, not the page its reply.
+ * The page names no course: a course label carries a number, and `awaiting` may
+ * show none.
  */
 
 /** The two addresses this page answers, relative to the router's `/app` mount. */
@@ -46,12 +46,6 @@ type Load =
   | { readonly kind: 'loading' }
   | { readonly kind: 'read'; readonly answer: Exclude<ResultsRead, { kind: 'results' }> }
   | { readonly kind: 'results'; readonly results: StudentWeekResults; readonly week: number | null };
-
-/** What the survey read adds: the zone and the section's label. */
-interface Context {
-  readonly timeZone: string | undefined;
-  readonly section: EnrolledSection | undefined;
-}
 
 /** A course week from an address, or `null` for anything that is not a positive whole number. */
 function weekOfAddress(raw: string | undefined): number | null | undefined {
@@ -71,7 +65,7 @@ export function StudentResults({
   readonly onSelectWeek: (week: number) => void;
 }): JSX.Element {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
-  const [context, setContext] = useState<Context>({ timeZone: undefined, section: undefined });
+  const [timeZone, setTimeZone] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let live = true;
@@ -101,24 +95,18 @@ export function StudentResults({
     let live = true;
     void readStudentSurvey().then((answer) => {
       if (!live || answer.kind !== 'view') return;
-      setContext({
-        timeZone: answer.view.institution_timezone,
-        section: answer.view.sections.find((it) => it.section_id === sectionId),
-      });
+      setTimeZone(answer.view.institution_timezone);
     });
     return () => {
       live = false;
     };
-  }, [sectionId]);
+  }, []);
 
   return (
     <main className="pulse-survey" data-testid="pulse-student-results" aria-labelledby={HEADING_ID}>
       <h1 id={HEADING_ID}>{copy('student_results.heading')}</h1>
-      {context.section === undefined ? null : (
-        <p className="pulse-section-instructors">{context.section.course_label}</p>
-      )}
       <PulseDivider />
-      <Body load={load} timeZone={context.timeZone} onSelectWeek={onSelectWeek} />
+      <Body load={load} timeZone={timeZone} onSelectWeek={onSelectWeek} />
     </main>
   );
 }
@@ -169,7 +157,12 @@ function Body({
     <>
       {current === null ? null : (
         <div className="pulse-results-week">
-          <p className="pulse-eyebrow">{fillCopy('student_results.week_label', { week: String(current) })}</p>
+          {/* A held week shows no number, not even its own week's. */}
+          {results.state === 'awaiting' ? null : (
+            <p className="pulse-eyebrow">
+              {fillCopy('student_results.week_label', { week: String(current) })}
+            </p>
+          )}
           <WeekNav
             publishedWeeks={results.published_weeks}
             currentWeek={current}

@@ -222,7 +222,7 @@ export type StudentWeekResults = Schemas['StudentWeekResults'];
 export type StudentResponse = Schemas['StudentResponse'];
 
 /** The role a response was written under; the last two mean it was written for the instructor. */
-export type ResponseAuthorRole = StudentResponse['author_role'];
+export type ResponseAuthorRole = Schemas['ResponseRole'];
 
 /**
  * Where a section's results page lives in the client, for a link.
