@@ -43,7 +43,8 @@ test, stops and re-lanes in its pull request.
 
 Rulings 1 to 4 are the owner's, made on 2026-10-10 at the start of the epic.
 Rulings 5 to 11 were settled the same day as breakdown decisions, each
-following from the spec or from an E6 ruling. No ticket reopens them.
+following from the spec or from an E6 ruling. Decision 12 was settled the same
+day, on the privacy review of this breakdown. No ticket reopens them.
 
 1. **A policy covers only its setter's own courses in that prefix.** The
    required-response policy is keyed by prefix and by the person responsible.
@@ -93,6 +94,13 @@ following from the spec or from an E6 ruling. No ticket reopens them.
     say the page is not part of their role. A reader whose session has really
     ended still gets the 401 and the ended-session sentence. This changes
     `api/deps.py`, so it is a heavy ticket of its own (08).
+12. **Below the threshold, a theme carries no count.** For a stream held below
+    the threshold, the draft and the draft check get no per-theme count, and
+    the check names such a theme without one. So no count reaches a page or a
+    published response. A count of comments in a small week is the
+    participation trace SPEC §5.2 rules out. A shown stream's themes keep their
+    counts. Old-format (`summary.v1`) rows of a held stream give no themes at
+    all. E7-04 builds it; SPEC §5.3 says so.
 
 **Facts checked in the code at ffec4dd6, which the tickets build on:**
 
