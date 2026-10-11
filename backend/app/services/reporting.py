@@ -2027,7 +2027,7 @@ def student_streams(
             trend=[
                 StudentTrendPoint(
                     course_week=course_week,
-                    mean=_mean_of(ratings.get((trend_week_id, token), {}))
+                    mean=_to_one_decimal(_mean_of(ratings.get((trend_week_id, token), {})))
                     if shown(trend_week_id, token)
                     else None,
                 )
@@ -2052,7 +2052,18 @@ def student_workload_median(session: Session, *, section_id: UUID, week_id: UUID
     if answered.get((week_id, None), 0) < n_threshold():
         return None
     _mean, median = _workload(session, section_id=section_id, week_id=week_id)
-    return median
+    return _to_one_decimal(median)
+
+
+def _to_one_decimal(figure: float | None) -> float | None:
+    """A student figure to the one decimal the page shows, on the server (ADR 0197).
+
+    Beside whole-number shares, an exact mean such as 30/7 names how many
+    classmates rated, so no student figure leaves with more precision than the
+    page prints. Python's `round`, half to even. The instructor's figures do not
+    pass through here.
+    """
+    return None if figure is None else round(figure, 1)
 
 
 def _people_who_answered(
