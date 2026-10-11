@@ -54,8 +54,9 @@ section and the classes of what was raised, and nothing else.
 """
 
 import logging
+import re
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from datetime import time as time_of_day
@@ -67,9 +68,23 @@ from pydantic import BaseModel, ConfigDict, PrivateAttr
 from sqlalchemy import column, func, or_, select, table
 from sqlalchemy.orm import Session
 
-from app.ai.contracts import CommentStream, WeeklySummaryRecord
+from app.ai.contracts import (
+    CheckTheme,
+    CommentStream,
+    CommentTheme,
+    DraftCheckOutput,
+    WeeklySummaryRecord,
+)
 from app.ai.gateway import AIGateway, AIGatewayError
-from app.ai.tasks import SUMMARY_PROMPT_VERSION, summarize_stream
+from app.ai.tasks import (
+    SUMMARY_PROMPT_VERSION,
+    GatheredStream,
+    GatheredTheme,
+    ResponseGather,
+    check_draft,
+    draft_response,
+    summarize_stream,
+)
 from app.config import Settings
 from app.models.identity import Enrollment
 from app.models.org import Course, Prefix, Section
@@ -1971,3 +1986,269 @@ def _course_label(session: Session, section: Section) -> str:
         section_code=section.lms_section_code,
         term_name=term.name,
     )
+
+
+# ---------------------------------------------------------------------------
+# The response draft and the draft check (SPEC §5.3, §7.4; E7-04, ADR 0195).
+# ---------------------------------------------------------------------------
+
+
+class UnusableAnswerError(Exception):
+    """A model answer the draft or the check may not hand on, refused after it arrived.
+
+    One class for every structural refusal of either task, and it carries nothing:
+    no comment, no draft, no theme. The router answers every instance with one
+    fixed sentence (the E7-04 work order's decision 2), so a refusal cannot say
+    *which* hidden comment a draft matched. A refusal that differed by comment
+    would be an oracle for "is this phrase in a comment I am not shown", run one
+    edit at a time against a held stream.
+    """
+
+
+# A number of people, comments or responses, as residue A of the E7 breakdown
+# review states the rule: digits or a number word next to "comment", "student",
+# "response", "classmate" or "of you". Respondents, people and persons are the
+# same count in other words, so they are here too. "Two of the students" and
+# "three different students" are caught by the one optional word between; "3
+# worked examples" is not, because nothing counted follows it.
+_NUMBER = (
+    r"(?:\d+%?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|"
+    r"fifty|sixty|seventy|eighty|ninety|hundred|dozen|both|couple|handful|several|few|half)"
+)
+_COUNTED = r"(?:comments?|students?|responses?|respondents?|classmates?|people|persons?)"
+STATES_A_COUNT = re.compile(
+    rf"\b{_NUMBER}\s+(?:of\s+you\b|(?:of\s+(?:the|my|our)\s+)?(?:[a-z-]+\s+)?{_COUNTED}\b)",
+    re.IGNORECASE,
+)
+
+
+def response_gather(
+    session: Session, *, section_id: UUID, week_id: UUID, for_on_behalf: bool
+) -> ResponseGather:
+    """What the response draft and the draft check are fed for one section-week.
+
+    **No comment, ever** (E7-04 done-when 1). The week's response count, and per
+    stream: the stored summary, its stored themes, and the rating distribution.
+    `ResponseGather` has no field a comment could be put in.
+
+    **The summaries and the themes come from one filtered read,
+    `_served_summary_rows`**, the read the report's `_stored_summaries` makes, so
+    an old ordinary-mode (`summary.v1`) row of a stream that is now held gives
+    neither a summary nor a theme, here exactly as on the report.
+
+    **A held stream's themes carry no count** (the E7 breakdown's decision 12).
+    Held is `_held_streams`' answer, which is the report's own (the work order's
+    decision 4). A theme's count is a count of comments, not of people
+    (`docs/MISTAKES.md` entry 50), and nothing here compares it with the
+    threshold: it is dropped because the stream is held, never the other way
+    round. A shown stream's themes keep their stored counts.
+
+    **The instructor's gather keeps a summary written before an exclusion**
+    (ADR 0195): the instructor already reads that summary on the report and is
+    the author of whatever is published, and the draft's run refusal blocks
+    quoting the excluded comment. The on-behalf gather leaves such a summary out
+    (the E7 breakdown's ruling 9); E7-03 builds it, and until then
+    `for_on_behalf=True` is refused rather than answered with the instructor's
+    gather.
+
+    Authorization is the caller's: this answers any section-week it is asked
+    about, and every caller reaches it through `_published_section_week` or its
+    on-behalf equivalent.
+    """
+    if for_on_behalf:
+        raise NotImplementedError(
+            "The on-behalf gather leaves out a summary written before the week's latest "
+            "exclusion (E7 ruling 9). E7-03 builds it; it is not the instructor's gather."
+        )
+    held = _held_streams(session, section_id=section_id, week_id=week_id)
+    rows = {
+        row.stream: row
+        for row in _served_summary_rows(session, section_id=section_id, week_id=week_id)
+    }
+    ratings = _rating_counts(session, section_id=section_id, week_ids=[week_id])
+    responses, _ = _response_counts(session, section_id=section_id, week_id=week_id)
+    return ResponseGather(
+        responses=responses,
+        streams=tuple(
+            GatheredStream(
+                stream=STREAM_ASKED_ABOUT[token],
+                held=held[token],
+                summary=None if token not in rows else str(rows[token].summary_text),
+                themes=_gathered_themes(rows.get(token), held=held[token]),
+                ratings={
+                    value: ratings.get((week_id, token), {}).get(value, 0)
+                    for value in LIKERT_VALUES
+                },
+            )
+            for token in REPORT_STREAMS
+        ),
+    )
+
+
+def _gathered_themes(row: Any, *, held: bool) -> tuple[GatheredTheme, ...]:
+    """One stored row's themes, each read through the summary's own contract.
+
+    Read through `CommentTheme` so a stored theme that is not the summary's shape
+    fails loudly here rather than reaching a prompt. A held stream's theme keeps
+    its label and loses its count.
+    """
+    if row is None or not row.themes:
+        return ()
+    themes = [CommentTheme.model_validate(item) for item in row.themes]
+    return tuple(
+        GatheredTheme(label=theme.label, comment_count=None if held else theme.comment_count)
+        for theme in themes
+    )
+
+
+def instructor_response_draft(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+    gateway: AIGateway | None = None,
+) -> str:
+    """The AI draft of a response, for one of this person's own published weeks (SPEC §5.3).
+
+    The report's own gate first (`_published_section_week`), so a section the
+    reader does not teach, one that does not exist, and a week not yet published
+    are refused with the report's exceptions **before any model call**. Then the
+    gather, one call, and two refusals of the answer:
+
+    - **A run of a comment students will not see** (E7-04 done-when 4): the
+      comparison is `_reused_run` against the section-week's excluded,
+      still-flagged and held-stream comments, as
+      `refuse_a_summary_reusing_a_comment` does for a small-N summary.
+    - **A count of people beside a held stream** (residue A): in a week with a
+      held stream, a draft stating a number of students, comments or responses is
+      refused, because the summary's *prose* can carry the count decision 12
+      keeps out of the themes.
+
+    Raises `SectionUnavailableError`, `CourseWeekUnavailableError`,
+    `UnusableAnswerError`, or the gateway's own `AIGatewayError` classes. Logs
+    nothing that the draft, a summary or a comment is in.
+    """
+    _, week, _ = _published_section_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
+    gather = response_gather(
+        session, section_id=section_id, week_id=week.week_id, for_on_behalf=False
+    )
+    draft = draft_response(gather, gateway).draft
+    refuse_a_draft_students_should_not_read(
+        session, draft=draft, section_id=section_id, week_id=week.week_id, gather=gather
+    )
+    return draft
+
+
+def instructor_draft_check(
+    session: Session,
+    *,
+    person_id: UUID | None,
+    section_id: UUID,
+    course_week: int,
+    draft: str,
+    settings: Settings,
+    gateway: AIGateway | None = None,
+) -> tuple[CheckTheme, ...]:
+    """The week's themes this draft does not address, for one of this person's published weeks.
+
+    The same gate, the same gather, one call, and one refusal of the answer:
+    `refuse_a_check_naming_an_unstored_theme`. What comes back is exactly what
+    the model named, once it has passed.
+
+    Raises as `instructor_response_draft` does.
+    """
+    _, week, _ = _published_section_week(
+        session,
+        person_id=person_id,
+        section_id=section_id,
+        course_week=course_week,
+        settings=settings,
+    )
+    gather = response_gather(
+        session, section_id=section_id, week_id=week.week_id, for_on_behalf=False
+    )
+    answer = check_draft(gather, draft, gateway)
+    refuse_a_check_naming_an_unstored_theme(answer, gather=gather)
+    return answer.unaddressed_themes
+
+
+def refuse_a_check_naming_an_unstored_theme(
+    answer: DraftCheckOutput, *, gather: ResponseGather
+) -> None:
+    """Refuse a check naming anything but a stored theme, as the stream may show it.
+
+    Every theme named must be one of the gathered themes: a shown stream's with
+    its stored count exactly, a held stream's with no count. So an invented
+    theme, a shown count off by any amount, a shown theme with no count, and a
+    held theme with a count (even the true one) are each refused whole
+    (E7-04 done-when 2 and 3, residue B). The comparison is by exact pair, so a
+    label that two streams share is accepted in either stream's form.
+
+    An empty answer is a legitimate one and passes. Raises `UnusableAnswerError`.
+    """
+    allowed = {
+        (theme.label, theme.comment_count) for stream in gather.streams for theme in stream.themes
+    }
+    if any(
+        (theme.label, theme.comment_count) not in allowed for theme in answer.unaddressed_themes
+    ):
+        raise UnusableAnswerError
+
+
+def refuse_a_draft_students_should_not_read(
+    session: Session,
+    *,
+    draft: str,
+    section_id: UUID,
+    week_id: UUID,
+    gather: ResponseGather,
+) -> None:
+    """Refuse a draft that reuses a hidden comment's words, or counts people beside a held stream.
+
+    **The hidden comments are read here, for this comparison only**, through
+    `report_comment` v004 (`COMMENT_VIEW`), and never returned, logged or sent.
+    Hidden means what students will not see: a comment whose latest state is
+    `FLAGGED_COLLAPSED` or `EXCLUDED`, and every comment of a held stream
+    (`_held_streams`). A published or kept comment of a shown stream is not
+    hidden, and a draft answering it in its own words is what SPEC §5.3 asks for.
+
+    Raises `UnusableAnswerError`, which carries nothing of either text.
+    """
+    if gather.has_a_held_stream and STATES_A_COUNT.search(draft):
+        raise UnusableAnswerError
+    hidden = _comments_students_do_not_see(session, section_id=section_id, week_id=week_id)
+    if hidden and _reused_run(draft, hidden):
+        raise UnusableAnswerError
+
+
+def _comments_students_do_not_see(
+    session: Session, *, section_id: UUID, week_id: UUID
+) -> list[str]:
+    """This section-week's comments that are excluded, still flagged, or in a held stream.
+
+    Read through `report_comment` v004, the one view every comment reader uses
+    (ADR 0187), with the moderation state from the one resolution of it
+    (`reported_status_of`). A Care-class comment is not in the view at all, and
+    the instructor never reads one either.
+    """
+    held: Mapping[str, bool] = _held_streams(session, section_id=section_id, week_id=week_id)
+    status = reported_status_of(COMMENT_VIEW.c.answer_id)
+    return [
+        str(text)
+        for text, stream, state in session.execute(
+            select(COMMENT_VIEW.c.comment_text, COMMENT_VIEW.c.stream, status).where(
+                COMMENT_VIEW.c.section_id == section_id,
+                COMMENT_VIEW.c.week_id == week_id,
+            )
+        )
+        if held[stream] or state in HELD_MODERATION_STATES
+    ]
