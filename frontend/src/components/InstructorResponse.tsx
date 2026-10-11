@@ -10,6 +10,7 @@ import type {
   WeekResponseRead,
 } from '../api/instructor';
 import { copy, fillCopy } from '../copy/instructorReportPageCopy';
+import { copy as leadershipCopy } from '../copy/leadershipResponseCopy';
 import { AiPanel } from './AiPanel';
 import { ResponseCard } from './ResponseCard';
 import { StateNotice } from './StateNotice';
@@ -63,12 +64,20 @@ export function InstructorResponse({
   initial,
   actions,
   timeZone,
+  onBehalf = false,
 }: {
   /** The week's state and response, as the instructor's read of it answered. */
   readonly initial: WeekResponseRead;
   readonly actions: ResponseActions;
   /** The institution's IANA zone, for the card's date, when the page has it. */
   readonly timeZone?: string;
+  /**
+   * The lead or chair responding for a section (SPEC §5.3). The same composer
+   * pointed at the on-behalf doors through `actions`; this changes the words
+   * that name who is writing, and lets the reader edit what they published,
+   * which the server reports as the `on-behalf` state.
+   */
+  readonly onBehalf?: boolean;
 }): JSX.Element {
   const [view, setView] = useState<WeekResponseRead>(initial);
   const [editing, setEditing] = useState(false);
@@ -215,7 +224,9 @@ export function InstructorResponse({
         ref={headingRef}
         tabIndex={-1}
       >
-        {copy('instructor_report_page.response_heading')}
+        {onBehalf
+          ? leadershipCopy('leadership_response.composer.heading')
+          : copy('instructor_report_page.response_heading')}
       </h2>
       <p className="pulse-instructor-response__live" role="status">
         {announcement}
@@ -241,7 +252,7 @@ export function InstructorResponse({
             publishedAt={published.published_at}
             timeZone={timeZone}
           />
-          {view.state === 'published' ? (
+          {view.state === 'published' || (onBehalf && view.state === 'on-behalf') ? (
             <div className="pulse-instructor-response__actions">
               <button type="button" className="pulse-instructor-response__button" onClick={startEdit}>
                 {copy('instructor_report_page.response_edit')}
@@ -259,7 +270,9 @@ export function InstructorResponse({
           }}
         >
           <p className="pulse-instructor-response__intro">
-            {copy('instructor_report_page.response_intro')}
+            {onBehalf
+              ? leadershipCopy('leadership_response.composer.intro')
+              : copy('instructor_report_page.response_intro')}
           </p>
           <label className="pulse-instructor-response__label" htmlFor={fieldId}>
             {copy('instructor_report_page.response_field_label')}

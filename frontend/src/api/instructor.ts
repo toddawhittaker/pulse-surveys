@@ -478,7 +478,7 @@ export type DraftCheckOutcome =
  * wrote, shown as sent; a 5xx without one, or no answer at all, is
  * `unavailable` and the caller uses its own words.
  */
-async function responseCall(
+export async function responseCall(
   path: string,
   init: RequestInit,
 ): Promise<
@@ -503,7 +503,7 @@ async function responseCall(
 }
 
 /** The bound on the cast: the week's state is the member every render reads. */
-function weekResponseOf(body: unknown): WeekResponseRead | null {
+export function weekResponseOf(body: unknown): WeekResponseRead | null {
   if (typeof body !== 'object' || body === null) return null;
   if (typeof (body as Record<string, unknown>).state !== 'string') return null;
   return body as WeekResponseRead;

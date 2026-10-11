@@ -44,6 +44,14 @@
 
 import type { components } from './wire.gen';
 import { jsonBody, readHeaders, refusalSentence, writeHeaders } from '../lib/http';
+import type {
+  CheckThemeView,
+  DraftCheckOutcome,
+  ResponseDraftOutcome,
+  ResponseWriteOutcome,
+  ResponseWriteView,
+} from './instructor';
+import { responseCall, weekResponseOf } from './instructor';
 
 /** The generated wire schemas (ADR 0185); every wire type below is one of these. */
 type Schemas = components['schemas'];
@@ -475,4 +483,214 @@ export async function readExclusionLog(): Promise<ExclusionLogRead> {
     return { kind: 'unavailable', detail: null };
   }
   return { kind: 'log', rows: (body as { rows: readonly LogRowView[] }).rows };
+}
+
+// ---------------------------------------------------------------------------
+// The response loop's leadership doors (SPEC §5.3, §5.6): the response policy,
+// the responses owed, and responding on behalf of a section.
+//
+// The same outcomes as above for a 401 and for the gate's 403. The on-behalf
+// doors refuse with one 404 whatever the cause (`app.api.leadership`), which
+// the read renders as the not-found state and the composer's calls hand back
+// as the sentence they were sent.
+// ---------------------------------------------------------------------------
+
+/** `app.api.leadership.POLICY_PATH` — every course whose policy the reader sets or reads. */
+export const RESPONSE_POLICY_PATH = '/leadership/response-policy';
+
+/** `app.api.leadership.OWED_PATH` — the section-weeks owed a response. */
+export const RESPONSES_OWED_PATH = '/leadership/responses-owed';
+
+/** `app.api.leadership.POLICY_PREFIX_PATH`, with the prefix filled in. */
+export function responsePolicyPrefixPath(prefixId: string): string {
+  return `${RESPONSE_POLICY_PATH}/${encodeURIComponent(prefixId)}`;
+}
+
+/** `app.api.leadership.ON_BEHALF_PATH`, with the section and the course week filled in. */
+export function onBehalfPath(sectionId: string, courseWeek: number): string {
+  return `/leadership/sections/${encodeURIComponent(sectionId)}/weeks/${String(courseWeek)}/on-behalf`;
+}
+
+/** Every prefix and the courses of it the reader sets or reads. */
+export type ResponsePolicyView = Schemas['PolicyOverview'];
+
+/** One prefix with its courses. */
+export type PolicyPrefixView = Schemas['PolicyPrefix'];
+
+/** One course's setting as the reader reads it. */
+export type PolicyCourseView = Schemas['PolicyCourse'];
+
+/** Encouraged or required. */
+export type PolicyModeView = Schemas['PolicyMode'];
+
+/** One section-week owed a response. */
+export type OwedWeekView = Schemas['OwedWeek'];
+
+/** One stream of the on-behalf read. */
+export type OnBehalfStreamView = Schemas['OnBehalfStream'];
+
+/** What a lead reads before responding on behalf: stored summaries and ratings, never a comment. */
+export type OnBehalfWeekView = Schemas['OnBehalfWeek'];
+
+/** What a read of the response policy answered. */
+export type ResponsePolicyRead =
+  | { readonly kind: 'policy'; readonly policy: ResponsePolicyView }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** What switching a prefix answered: the overview as it now stands, or why not. */
+export type ResponsePolicyWriteOutcome =
+  | { readonly kind: 'saved'; readonly policy: ResponsePolicyView }
+  | { readonly kind: 'refused'; readonly detail: string | null }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** What a read of the responses owed answered. */
+export type ResponsesOwedRead =
+  | { readonly kind: 'owed'; readonly weeks: readonly OwedWeekView[] }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** What a read of one section-week for responding on behalf answered. */
+export type OnBehalfRead =
+  | { readonly kind: 'week'; readonly week: OnBehalfWeekView }
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** The courses the reader sets or reads a response policy for, by prefix. */
+export async function readResponsePolicy(): Promise<ResponsePolicyRead> {
+  let response: Response;
+  try {
+    response = await fetch(RESPONSE_POLICY_PATH, { headers: readHeaders() });
+  } catch {
+    return { kind: 'unavailable', detail: null };
+  }
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
+  const body = await jsonBody(response);
+  if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
+  if (typeof body !== 'object' || body === null) return { kind: 'unavailable', detail: null };
+  if (!Array.isArray((body as Record<string, unknown>).prefixes)) {
+    return { kind: 'unavailable', detail: null };
+  }
+  return { kind: 'policy', policy: body as ResponsePolicyView };
+}
+
+/** Switch every course of a prefix the reader sets; the server decides which that is. */
+export async function setResponsePolicy(
+  prefixId: string,
+  mode: PolicyModeView,
+): Promise<ResponsePolicyWriteOutcome> {
+  let response: Response;
+  try {
+    response = await fetch(responsePolicyPrefixPath(prefixId), {
+      method: 'PUT',
+      headers: writeHeaders(),
+      body: JSON.stringify({ mode }),
+    });
+  } catch {
+    return { kind: 'unavailable', detail: null };
+  }
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
+  const body = await jsonBody(response);
+  if (!response.ok) return { kind: 'refused', detail: refusalSentence(body) };
+  if (typeof body !== 'object' || body === null) return { kind: 'unavailable', detail: null };
+  if (!Array.isArray((body as Record<string, unknown>).prefixes)) {
+    return { kind: 'unavailable', detail: null };
+  }
+  return { kind: 'saved', policy: body as ResponsePolicyView };
+}
+
+/** The section-weeks in the reader's courses that are owed a response. */
+export async function readResponsesOwed(): Promise<ResponsesOwedRead> {
+  let response: Response;
+  try {
+    response = await fetch(RESPONSES_OWED_PATH, { headers: readHeaders() });
+  } catch {
+    return { kind: 'unavailable', detail: null };
+  }
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
+  const body = await jsonBody(response);
+  if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
+  if (!Array.isArray(body)) return { kind: 'unavailable', detail: null };
+  return { kind: 'owed', weeks: body as readonly OwedWeekView[] };
+}
+
+/** The week's stored summaries and ratings, for the reader who may respond on behalf. */
+export async function readOnBehalfWeek(
+  sectionId: string,
+  courseWeek: number,
+): Promise<OnBehalfRead> {
+  let response: Response;
+  try {
+    response = await fetch(onBehalfPath(sectionId, courseWeek), { headers: readHeaders() });
+  } catch {
+    return { kind: 'unavailable', detail: null };
+  }
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
+  if (response.status === NOT_FOUND_STATUS) return { kind: 'not-found' };
+  const body = await jsonBody(response);
+  if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
+  if (typeof body !== 'object' || body === null) return { kind: 'unavailable', detail: null };
+  if (!Array.isArray((body as Record<string, unknown>).streams)) {
+    return { kind: 'unavailable', detail: null };
+  }
+  return { kind: 'week', week: body as OnBehalfWeekView };
+}
+
+/** An AI draft over the on-behalf gather. Advisory: nothing is stored or posted. */
+export async function requestOnBehalfDraft(
+  sectionId: string,
+  courseWeek: number,
+): Promise<ResponseDraftOutcome> {
+  const answer = await responseCall(`${onBehalfPath(sectionId, courseWeek)}/response-draft`, {
+    method: 'POST',
+    headers: writeHeaders(),
+  });
+  if (answer.kind !== 'body') return answer;
+  const text = (answer.body as Record<string, unknown> | null)?.text;
+  return typeof text === 'string' ? { kind: 'draft', text } : { kind: 'unavailable', detail: null };
+}
+
+/** The themes of the week an on-behalf draft does not address. Advisory. */
+export async function requestOnBehalfCheck(
+  sectionId: string,
+  courseWeek: number,
+  draft: string,
+): Promise<DraftCheckOutcome> {
+  const answer = await responseCall(`${onBehalfPath(sectionId, courseWeek)}/draft-check`, {
+    method: 'POST',
+    headers: writeHeaders(),
+    body: JSON.stringify({ draft }),
+  });
+  if (answer.kind !== 'body') return answer;
+  const themes = (answer.body as Record<string, unknown> | null)?.unaddressed;
+  return Array.isArray(themes)
+    ? { kind: 'checked', unaddressed: themes as readonly CheckThemeView[] }
+    : { kind: 'unavailable', detail: null };
+}
+
+/** Publish (`POST`) or edit (`PUT`) the on-behalf response. Only a person pressing publish calls this. */
+export async function writeOnBehalfResponse(
+  method: 'POST' | 'PUT',
+  sectionId: string,
+  courseWeek: number,
+  write: ResponseWriteView,
+): Promise<ResponseWriteOutcome> {
+  const answer = await responseCall(`${onBehalfPath(sectionId, courseWeek)}/response`, {
+    method,
+    headers: writeHeaders(),
+    body: JSON.stringify(write),
+  });
+  if (answer.kind !== 'body') return answer;
+  const view = weekResponseOf(answer.body);
+  return view === null ? { kind: 'unavailable', detail: null } : { kind: 'saved', view };
 }
