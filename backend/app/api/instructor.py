@@ -12,9 +12,11 @@ the list of course weeks a reader may page to, and the list of sections they
 teach; E4-11 consumes all three and E4-15 drives them against the running stack.
 Since E6-03, a decision on one comment of that report: exclude, keep, or undo
 (SPEC §5.2). Since E7-04, the AI draft of a response to one week, and the AI
-check of a draft (SPEC §5.3). The posts carry `csrf_verified_instructor`, the
-reads `require_instructor`; the decision is `app.services.moderation`'s and the
-draft and check are `app.services.reporting`'s.
+check of a draft (SPEC §5.3). Since E7-03, the week's response itself: read,
+publish and edit (SPEC §5.3), which are `app.services.response_loop`'s. The
+writes carry `csrf_verified_instructor`, the reads `require_instructor`; the
+decision is `app.services.moderation`'s and the draft and check are
+`app.services.reporting`'s.
 
 **The third one is what makes the other two askable** (E4-18, ADR 0156). Both of
 them take a section key in the path, and until it shipped nothing a client holds
@@ -93,6 +95,7 @@ from app.copy.instructor_report import (
 )
 from app.copy.instructor_report import SECTION_UNAVAILABLE as SECTION_UNAVAILABLE_COPY
 from app.copy.instructor_report import WEEK_UNAVAILABLE as WEEK_UNAVAILABLE_COPY
+from app.copy.response_loop import NOT_YOURS_TO_EDIT, RESPONSE_ALREADY_PUBLISHED
 from app.db import get_session
 from app.schemas.report import (
     CommentDecision,
@@ -104,6 +107,7 @@ from app.schemas.report import (
     ResponseDraftView,
     TaughtSections,
 )
+from app.schemas.response_loop import ResponseWrite, WeekResponseView
 from app.services.moderation import (
     CommentNotOnReportError,
     DecisionAction,
@@ -122,6 +126,13 @@ from app.services.reporting import (
     instructor_response_draft,
     published_course_weeks,
     taught_sections,
+)
+from app.services.response_loop import (
+    NotYoursToEditError,
+    ResponseAlreadyPublishedError,
+    edit_as_instructor,
+    instructor_week_response,
+    publish_as_instructor,
 )
 from app.services.session import SessionClaims
 
@@ -151,6 +162,15 @@ DECISIONS_PATH = "/instructor/comments/{answer_id}/decisions"
 # `csrf_verified_instructor` rather than the reads' `require_instructor`.
 RESPONSE_DRAFT_PATH = "/instructor/sections/{section_id}/weeks/{course_week}/response-draft"
 DRAFT_CHECK_PATH = "/instructor/sections/{section_id}/weeks/{course_week}/draft-check"
+
+# Where the week's response is read, published and edited (E7-03). Keyed as the
+# draft and the check are, so the three a page needs for one week share a stem.
+RESPONSE_PATH = "/instructor/sections/{section_id}/weeks/{course_week}/response"
+CREATED = 201
+# A publish when the week already has a response, and an edit with nothing of
+# the reader's to edit: 409, because the request conflicts with the week's
+# state, which the reader's own report already shows (E7-03, decision 1).
+RESPONSE_CONFLICT_STATUS = 409
 
 # The one refusal of a model answer either route answers (E7-04's work order,
 # decision 2): 502, because the server's upstream gave it nothing it could use.
@@ -417,6 +437,106 @@ def check_a_draft(
     except (UnusableAnswerError, AIGatewayError):
         raise _assistant_unusable() from None
     return DraftCheckView(unaddressed=themes)
+
+
+@router.get(RESPONSE_PATH, summary="The response to one week of my report, as students read it")
+def read_week_response(
+    section_id: UUID,
+    course_week: int,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(require_instructor),
+    session: Session = Depends(get_session),
+) -> WeekResponseView:
+    """The week's state and response, behind the report's own gate and its own 404s."""
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return instructor_week_response(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            settings=settings,
+        )
+    except SectionUnavailableError:
+        raise _unavailable(SECTION_UNAVAILABLE) from None
+    except CourseWeekUnavailableError:
+        raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
+
+
+@router.post(
+    RESPONSE_PATH, status_code=CREATED, summary="Publish my response to one week of my report"
+)
+def publish_week_response(
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_instructor),
+    session: Session = Depends(get_session),
+) -> WeekResponseView:
+    """SPEC §5.3's publish: one response per section-week, under the reader's name.
+
+    The report's 404s first; a week that already has a response is a 409 with
+    one sentence, and nothing is written.
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return publish_as_instructor(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            write=write,
+            settings=settings,
+        )
+    except SectionUnavailableError:
+        raise _unavailable(SECTION_UNAVAILABLE) from None
+    except CourseWeekUnavailableError:
+        raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
+    except ResponseAlreadyPublishedError:
+        raise HTTPException(
+            status_code=RESPONSE_CONFLICT_STATUS, detail=RESPONSE_ALREADY_PUBLISHED.text
+        ) from None
+
+
+@router.put(RESPONSE_PATH, summary="Edit the response I published to one week of my report")
+def edit_week_response(
+    section_id: UUID,
+    course_week: int,
+    write: ResponseWrite,
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(csrf_verified_instructor),
+    session: Session = Depends(get_session),
+) -> WeekResponseView:
+    """SPEC §5.3's edit: a new row, by the person who first published, and never a re-hold.
+
+    The report's 404s first; no response yet, or one somebody else published,
+    is one 409 with one sentence, so it never says who published.
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return edit_as_instructor(
+            session,
+            person_id=person_of(claims),
+            section_id=section_id,
+            course_week=course_week,
+            write=write,
+            settings=settings,
+        )
+    except SectionUnavailableError:
+        raise _unavailable(SECTION_UNAVAILABLE) from None
+    except CourseWeekUnavailableError:
+        raise _unavailable(COURSE_WEEK_UNAVAILABLE) from None
+    except NotYoursToEditError:
+        raise HTTPException(
+            status_code=RESPONSE_CONFLICT_STATUS, detail=NOT_YOURS_TO_EDIT.text
+        ) from None
 
 
 def _assistant_unusable() -> HTTPException:

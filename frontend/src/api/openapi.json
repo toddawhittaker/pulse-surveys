@@ -582,6 +582,181 @@
         }
       }
     },
+    "/instructor/sections/{section_id}/weeks/{course_week}/response": {
+      "get": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "The response to one week of my report, as students read it",
+        "description": "The week's state and response, behind the report's own gate and its own 404s.",
+        "operationId": "read_week_response_instructor_sections__section_id__weeks__course_week__response_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeekResponseView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "Publish my response to one week of my report",
+        "description": "SPEC \u00a75.3's publish: one response per section-week, under the reader's name.\n\nThe report's 404s first; a week that already has a response is a 409 with\none sentence, and nothing is written.",
+        "operationId": "publish_week_response_instructor_sections__section_id__weeks__course_week__response_post",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeekResponseView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "instructor"
+        ],
+        "summary": "Edit the response I published to one week of my report",
+        "description": "SPEC \u00a75.3's edit: a new row, by the person who first published, and never a re-hold.\n\nThe report's 404s first; no response yet, or one somebody else published,\nis one 409 with one sentence, so it never says who published.",
+        "operationId": "edit_week_response_instructor_sections__section_id__weeks__course_week__response_put",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeekResponseView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/leadership/comparison-sets": {
       "get": {
         "tags": [
@@ -925,6 +1100,401 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ExclusionLog"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/response-policy": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "The response policy of every course I set or read it for",
+        "description": "The courses the reader sets the policy for, and a chair's led courses, which they read.",
+        "operationId": "read_response_policy_leadership_response_policy_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyOverview"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/response-policy/{prefix_id}": {
+      "put": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "Switch the response policy for my courses in one prefix",
+        "description": "One row per course of the prefix the reader sets the policy for; answered with the new read.",
+        "operationId": "switch_response_policy_leadership_response_policy__prefix_id__put",
+        "parameters": [
+          {
+            "name": "prefix_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Prefix Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyOverview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/responses-owed": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "The weeks of my courses that are owed a response now",
+        "description": "Section and course week, and whether on behalf is open: no name, no time.",
+        "operationId": "read_responses_owed_leadership_responses_owed_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OwedWeek"
+                  },
+                  "type": "array",
+                  "title": "Response Read Responses Owed Leadership Responses Owed Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/sections/{section_id}/weeks/{course_week}/on-behalf": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "One owed week's summaries and ratings, before I respond",
+        "description": "Stored summaries, response count and rating distributions; never a comment.",
+        "operationId": "read_on_behalf_leadership_sections__section_id__weeks__course_week__on_behalf_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OnBehalfWeek"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/sections/{section_id}/weeks/{course_week}/on-behalf/response-draft": {
+      "post": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "An AI draft of a response on the instructor's behalf",
+        "description": "The instructor's draft task over the on-behalf gather; the gate before any model call.",
+        "operationId": "draft_on_behalf_leadership_sections__section_id__weeks__course_week__on_behalf_response_draft_post",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResponseDraftView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/sections/{section_id}/weeks/{course_week}/on-behalf/draft-check": {
+      "post": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "The week's themes an on-behalf draft does not address",
+        "description": "The instructor's check task over the on-behalf gather; the gate before any model call.",
+        "operationId": "check_on_behalf_leadership_sections__section_id__weeks__course_week__on_behalf_draft_check_post",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftCheckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftCheckView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/sections/{section_id}/weeks/{course_week}/on-behalf/response": {
+      "post": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "Publish a response on the instructor's behalf",
+        "description": "Under the reader's own name and the role they answer for the course under.",
+        "operationId": "publish_on_behalf_response_leadership_sections__section_id__weeks__course_week__on_behalf_response_post",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeekResponseView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "Edit a response I published on the instructor's behalf",
+        "description": "By the person who first published it, while they still answer for the course.",
+        "operationId": "edit_on_behalf_response_leadership_sections__section_id__weeks__course_week__on_behalf_response_put",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResponseWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeekResponseView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1483,6 +2053,81 @@
         "title": "LogRow",
         "description": "One decision a person made about a comment inside the reader's own grant."
       },
+      "OnBehalfStream": {
+        "properties": {
+          "stream": {
+            "type": "string",
+            "enum": [
+              "instructor",
+              "course"
+            ],
+            "title": "Stream"
+          },
+          "summary_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Text"
+          },
+          "response_count": {
+            "type": "integer",
+            "title": "Response Count",
+            "description": "How many responses the week received."
+          },
+          "rating_distribution": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Rating Distribution",
+            "description": "How many responses gave each rating, 1 to 5."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "summary_text",
+          "response_count",
+          "rating_distribution"
+        ],
+        "title": "OnBehalfStream",
+        "description": "One stream of one section-week as the on-behalf reader reads it: never a comment.\n\nThe stored summary, or `null` where none is served to this reader (including\none written before the week's latest exclusion, ruling 9); the week's\nresponse count; and the rating distribution, rating to count, as the report\nshows it."
+      },
+      "OnBehalfWeek": {
+        "properties": {
+          "section_label": {
+            "type": "string",
+            "title": "Section Label",
+            "description": "The section's course label and section code."
+          },
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "streams": {
+            "items": {
+              "$ref": "#/components/schemas/OnBehalfStream"
+            },
+            "type": "array",
+            "title": "Streams"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "section_label",
+          "course_week",
+          "streams"
+        ],
+        "title": "OnBehalfWeek",
+        "description": "What a lead (or a chair acting as lead) reads before responding on behalf (decision 5)."
+      },
       "OpenSurvey": {
         "properties": {
           "window_id": {
@@ -1559,6 +2204,39 @@
         "title": "OpenSurvey",
         "description": "The one survey open for a section right now (SPEC \u00a73.1's one-open rule).\n\nPresent only while the window is open. \u00a73.1 says a missed week cannot be\nback-filled, so a closed week is not something the form can answer and is not\noffered as one; the section it belonged to is still reported, which is how a\nstudent is told they are enrolled and there is nothing to do this minute.\n\n**`length_weeks` is the reader's own section's length and nobody else's**\n(E4-17). It is the `length_weeks` column of the section the window belongs\nto, reached through the section the reader is enrolled in \u2014 the same scoping\nargument `EnrolledSection.course_label` stands on, and \u00a74.1 item 1 is what it\nhas to hold against. It names no other section, carries no identity, and\ndiscloses nothing new: SPEC \u00a72.2 puts the length in the section code the\nstudent is already shown. It is a number about a calendar rather than about a\nperson, so no confidentiality rule in \u00a74 reaches it.\n\nIt is a plain integer because the column is `NOT NULL` on the section row. An\noptional one would let a read path that found no length answer a half-eyebrow\n\u2014 \"COURSE WK 04 / , TERM WK 07\" \u2014 instead of failing where the data is wrong."
       },
+      "OwedWeek": {
+        "properties": {
+          "section_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Section Id"
+          },
+          "section_label": {
+            "type": "string",
+            "title": "Section Label",
+            "description": "The section's course label and section code."
+          },
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "on_behalf_open": {
+            "type": "boolean",
+            "title": "On Behalf Open",
+            "description": "Whether a response may now be written on behalf."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "section_id",
+          "section_label",
+          "course_week",
+          "on_behalf_open"
+        ],
+        "title": "OwedWeek",
+        "description": "One section-week owed a response now, in a course the reader answers for (decision 4).\n\nNo instructor name (E9's) and no time: whether the on-behalf door is open is\nthe one fact about the clock the list carries."
+      },
       "OwnSubmission": {
         "properties": {
           "first_submitted_at": {
@@ -1591,6 +2269,130 @@
         ],
         "title": "OwnSubmission",
         "description": "What this reader has already submitted for this week, if anything.\n\nTheir own and only ever their own. SPEC \u00a75.4 gives a student their own section\nand never another individual's raw data, and \u00a74 keys every response to its\nauthor; the lookup behind this is over the reader, the section and the week\ntogether, and the denial suite is what proves the reader is in that key."
+      },
+      "PolicyCourse": {
+        "properties": {
+          "course_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Course Id"
+          },
+          "course_label": {
+            "type": "string",
+            "title": "Course Label",
+            "description": "The course's prefix, number and title."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/PolicyMode"
+          },
+          "can_set": {
+            "type": "boolean",
+            "title": "Can Set",
+            "description": "Whether this reader's switch for the prefix reaches it."
+          },
+          "set_by_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PolicyRole"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The role that set it; only for a course this reader cannot set."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "course_id",
+          "course_label",
+          "mode",
+          "can_set",
+          "set_by_role"
+        ],
+        "title": "PolicyCourse",
+        "description": "One course's response policy as one reader reads it (E7-03, decision 2).\n\n`mode` is the course's latest policy row now, or `ENCOURAGED` with none.\n`set_by_role` says which role set it, and only on a course the reader cannot\nset (a chair reading a course with a lead): on a course the reader sets, it is\nabsent, so nothing on it moves with anybody else's change (done-when 4).\nNever a name: the setter's name is E9's."
+      },
+      "PolicyMode": {
+        "type": "string",
+        "enum": [
+          "ENCOURAGED",
+          "REQUIRED"
+        ],
+        "title": "PolicyMode",
+        "description": "Whether a response is encouraged or required for the courses a policy covers."
+      },
+      "PolicyOverview": {
+        "properties": {
+          "prefixes": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyPrefix"
+            },
+            "type": "array",
+            "title": "Prefixes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "prefixes"
+        ],
+        "title": "PolicyOverview",
+        "description": "Every course whose response policy this reader sets or reads, by prefix."
+      },
+      "PolicyPrefix": {
+        "properties": {
+          "prefix_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Prefix Id"
+          },
+          "prefix_code": {
+            "type": "string",
+            "title": "Prefix Code"
+          },
+          "courses": {
+            "items": {
+              "$ref": "#/components/schemas/PolicyCourse"
+            },
+            "type": "array",
+            "title": "Courses"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "prefix_id",
+          "prefix_code",
+          "courses"
+        ],
+        "title": "PolicyPrefix",
+        "description": "One prefix and the courses of it this reader reads the policy of."
+      },
+      "PolicyRole": {
+        "type": "string",
+        "enum": [
+          "LEAD_FACULTY",
+          "CHAIR"
+        ],
+        "title": "PolicyRole",
+        "description": "The role a response policy was set under. An instructor sets no policy (SPEC \u00a75.3)."
+      },
+      "PolicyWrite": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/PolicyMode",
+            "description": "REQUIRED or ENCOURAGED."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "title": "PolicyWrite",
+        "description": "A switch of the response policy for every course of one prefix the reader sets it for."
       },
       "PublishedWeeks": {
         "properties": {
@@ -1715,6 +2517,30 @@
         ],
         "title": "ResponseRole",
         "description": "The role a response was written under; the value is the stored token.\n\n`LEAD_FACULTY` and `CHAIR` are the on-behalf roles: SPEC \u00a75.3 has the lead\nrespond for the instructor, and ruling 5 has the chair act as lead for a\ncourse with no lead."
+      },
+      "ResponseWrite": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Text",
+            "description": "The response students will read, exactly as written."
+          },
+          "ai_seeded": {
+            "type": "boolean",
+            "title": "Ai Seeded",
+            "description": "Whether the text began as the AI draft."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "ai_seeded"
+        ],
+        "title": "ResponseWrite",
+        "description": "A response's text as its author publishes or edits it, and whether the AI draft seeded it.\n\n**Bounded and refused, never repaired** (`docs/MISTAKES.md` entry 29): a text\nover `RESPONSE_TEXT_MAX` characters, an empty one, or one of only whitespace\nis a 422 before anything is read, and nothing here strips or shortens it. The\ntable's `CHECK` holds the same rule underneath."
       },
       "ReviewQueue": {
         "properties": {
@@ -2599,6 +3425,40 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WeekResponseView": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "awaiting",
+              "published",
+              "on-behalf",
+              "unanswered"
+            ],
+            "title": "State",
+            "description": "Whether the week is held, answered, or neither."
+          },
+          "response": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudentResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The published response; absent while awaiting and when unanswered."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "response"
+        ],
+        "title": "WeekResponseView",
+        "description": "One week's state and its response, as students read them, for the response's author.\n\nWhat the instructor's response routes, and the on-behalf publish and edit,\nanswer: the state a student of the section reads now, and the response with\nits author's name (through the staff-name definer, asked as the reader),\nrole and time. Nothing a student does not read."
       },
       "WeekView": {
         "properties": {

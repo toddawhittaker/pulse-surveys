@@ -58,7 +58,7 @@ sentence from `app.copy`, whatever triggered it and whatever the model did:
 instructor already reads that summary on the report, and is the author of
 whatever is published; the run refusal blocks quoting the excluded comment.
 The on-behalf gather, which E7-03 builds behind `for_on_behalf=True`, leaves
-such a summary out (the E7 breakdown's ruling 9). Until 03 lands, that flag raises.
+such a summary out (the E7 breakdown's ruling 9). E7-03 built it (ADR 0194).
 
 **The forged summary block boundaries entry does not trigger here.** No comment
 is rendered into either prompt. The summaries and labels that are rendered are
@@ -98,3 +98,9 @@ owner's endpoint (SPEC §9.3).
 - Every model failure, an outage included, reads as the same 502.
 - `RESPONSE_TEXT_MAX` (4000) bounds the check's draft in `app.schemas.report`
   until E7-01's bound merges and replaces it.
+
+**Amended by E7-03 (ADR 0194's ticket).** The count rule also counts a
+hyphenated word when any part of it is a cardinal ("two-thirds"), adds
+"single", "dozens", "hundreds" and "tens" to the quantity words, and counts
+"third", "thirds", "quarter" and "quarters" only when the next word is "of"
+("a third of you"), so the ordinal in "the third week" stays allowed.

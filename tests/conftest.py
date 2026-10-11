@@ -295,6 +295,7 @@ pytest_plugins = (
     "fixtures.staff_names",
     "fixtures.the_hold",
     "fixtures.response_draft",
+    "fixtures.response_loop_doors",
 )
 
 
