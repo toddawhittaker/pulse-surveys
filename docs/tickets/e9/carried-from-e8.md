@@ -137,7 +137,7 @@ The answers are in `../e8/boundary-review.md`.
 - **The session-read sweep's two disclosed limits**: re-affirmed by planting in
   the results route and in `services/response_loop.py`. **Owner:** each
   boundary; the structural close is E13's.
-- **The denial-module inventory and the collection floor**: nine new E8
+- **The denial-module inventory and the collection floor**: twelve new E8
   invariant-marked modules, every one collected. **Owner:** a candidate process
   ticket. **Done when:** unchanged.
 

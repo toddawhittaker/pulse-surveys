@@ -116,12 +116,12 @@ const LEDGER_TEXT = 'Week 1: 5 of 5 items';
 
 // Governed words, transcribed (`docs/MISTAKES.md` entry 19).
 const AWAITING = 'There is no reply to show for this week yet.';
-const POSTED_SCORE = `Score posted to your gradebook: ${SCORE_TEXT}`;
+const POSTED_SCORE = `Your participation: ${SCORE_TEXT}%`;
 const CONFIDENTIALITY_LINE = 'Comments are shown without the names of the students who wrote them.';
-const SMALL_N_TITLE = 'Comments in this group stay private this week';
+const SMALL_N_TITLE = 'Comments in this group are not shown this week';
 const INSTRUCTOR_RATINGS_HELD = 'Ratings about the instructor are not shown this week';
 const COURSE_RATINGS_HELD = 'Ratings about the course are not shown this week';
-const WORKLOAD_MEDIAN = /^Class median: \d+\.\d h on this course$/;
+const WORKLOAD_MEDIAN = /^Class median: \d+\.\d hours on this course$/;
 const LEADS_BYLINE = `${LEAD_NAME}, Lead Faculty`;
 const LEADERSHIP_VIEW = 'pulse-landing-leadership';
 const POLICY_LINK = 'Response policy';
@@ -427,6 +427,9 @@ test.describe('the student’s week, from her seat', () => {
 
     // Six classmates rated both streams: two distributions, and the workload median.
     await expect(results.locator('.pulse-stat-histogram')).toHaveCount(2);
+    for (const title of ['Ratings about the instructor', 'Ratings about the course']) {
+      await expect(results.locator('.pulse-stat-histogram-title').getByText(title, { exact: true })).toBeVisible();
+    }
     await expect(results.getByText(INSTRUCTOR_RATINGS_HELD)).toHaveCount(0);
     await expect(results.getByText(COURSE_RATINGS_HELD)).toHaveCount(0);
     await expect(results.locator('.pulse-results-workload')).toHaveText(WORKLOAD_MEDIAN);

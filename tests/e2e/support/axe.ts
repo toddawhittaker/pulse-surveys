@@ -8,6 +8,17 @@ import { expect, type Page } from '@playwright/test';
 
 /** Scan the page as it stands; any violation fails the test, naming `where`. */
 export async function expectNoAxeViolations(page: Page, where: string): Promise<void> {
+  // A card that has just opened fades in over 200ms, and axe measures the
+  // colour it sees, so a scan mid-fade reads a half-transparent text as low
+  // contrast. Finite animations are let finish first; colours are not touched.
+  await page.evaluate(async () => {
+    await Promise.all(
+      document
+        .getAnimations()
+        .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime ?? Infinity))
+        .map((animation) => animation.finished.catch(() => undefined)),
+    );
+  });
   const scan = await new AxeBuilder({ page }).analyze();
   expect(
     scan.violations.map(

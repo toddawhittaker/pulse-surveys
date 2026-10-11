@@ -177,14 +177,17 @@ Re-carried with the date.
 
 ### Every new E8 invariant-marked module is collected by the isolated pass
 
-Nine test modules added in E8 carry the `invariant` marker, all from E8-01, and
-`pytest -m invariant --collect-only` collects every one of them (971 tests in
-all on the E8-04 branch). E8-01 also extended four existing invariant-marked
+Twelve test modules added in E8 carry the `invariant` marker, nine from E8-01
+and three from E8-05, and `pytest -m invariant --collect-only` collects every
+one of them (977 tests in all on the E8-04 branch, with E8-05 merged in). E8-01 also extended four existing invariant-marked
 modules: the student-path import sweep, the copy inventory's items 4 and 5, and
 the two student payload sweeps. Each new module and its collected count:
 
 | Module | Collected |
 |---|---|
+| `test_a_students_mean_and_median_carry_no_more_precision_than_the_page_shows.py` | 3 |
+| `test_the_participation_score_names_nothing_but_the_readers_own_row.py` | 2 |
+| `test_the_student_frontend_copy_names_nothing_a_student_may_not_see.py` | 1 |
 | `test_a_held_week_serves_nothing_about_the_week_and_reaches_no_other_page.py` | 2 |
 | `test_a_students_comment_model_carries_nothing_but_its_text_and_stream.py` | 24 |
 | `test_a_students_figures_are_shares_and_are_withheld_below_the_threshold.py` | 7 |
