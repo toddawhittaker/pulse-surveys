@@ -27,7 +27,7 @@ context, over the epic's cumulative diff against `main`.
 | `a11y-copy` | 1ecd5b55 | 5 MED, 2 LOW |
 | `lti-oidc` | 1ecd5b55 | 1 MED, 1 LOW |
 | `threat-model` |  | not run: SPEC §14.3 does not mark E8 ⚠ |
-| `epic-exit` | | |
+| `epic-exit` | 95c10fc5 | Exit clause met (a first run on 86518348 found two blockers, fixed in this ticket) |
 
 ## The findings, and where each went
 
@@ -201,5 +201,26 @@ the two student payload sweeps. Each new module and its collected count:
 
 ## CI on the exit commit
 
-Recorded with the reviews, by the run's id on the final epic head
+**`epic-exit`'s verdict on 95c10fc5** (this ticket's head, which carries
+every other E8 ticket). The clause is met. CI run 38168138770 on 95c10fc5
+completed with success in every job. Its Playwright job ran 125 tests with no
+failure and no skip. All ten tests of `exit-student-loop.spec.ts` ran and
+passed, covering the held week's closed door with the student's own score, the
+released page with the response first, the on-behalf path and the unanswered
+week as the lead. The drive's ten axe scans run every rule. The reviewer also
+ran, host-side, the exit-story integration test, all twelve invariant modules
+E8 added, and the two student sweeps E8 extended: 89 passed.
+
+Its first run, on 86518348, found two blockers. The exit drive still expected
+the score sentence E8-06 had replaced, so its serial block skipped every later
+test. And axe reported a colour-contrast failure on the moderation queue's
+comment cards. That second one was a scan taken during a 200 ms fade-in, when
+the text was half transparent; the colours pass (spruce on paper 12.45:1), and
+the scan now waits for finite animations to end. Fixing the drive also showed
+four older drives depending on the reply link E8-06 hides when the results lead
+shows, and on a nursing enrollment the exit drive left behind. Both are fixed
+here.
+
+**CI on the exit commit.** Run 38168138770, success, on 95c10fc5. The epic
+pull request records the run on the final epic head by its id
 (`docs/MISTAKES.md` entry 42).
