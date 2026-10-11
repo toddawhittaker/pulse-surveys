@@ -315,10 +315,19 @@ async function signedInAsTheLearner(page: Page): Promise<string> {
  * the sentence and never ask (`docs/MISTAKES.md` entry 3).
  */
 async function openAndReadItsStatus(page: Page, path: string, read: string): Promise<number> {
-  const answered = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname.endsWith(read) && response.request().method() === 'GET',
-  );
+  // Only the page's own API read: the document navigation to
+  // `/app/leadership/comparison-sets` ends with that read's path too, and is the
+  // SPA's HTML answered 200 to anybody.
+  const answered = page.waitForResponse((response) => {
+    const pathname = new URL(response.url()).pathname;
+    const kind = response.request().resourceType();
+    return (
+      (kind === 'fetch' || kind === 'xhr') &&
+      !pathname.startsWith('/app/') &&
+      pathname.endsWith(read) &&
+      response.request().method() === 'GET'
+    );
+  });
   await page.goto(`${TOOL_ORIGIN}${path}`);
   return (await answered).status();
 }
