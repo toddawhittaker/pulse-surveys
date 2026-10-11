@@ -69,11 +69,13 @@ describe('the section heading', () => {
       closedSection(SECOND_ID, 'BBBB', ['Ada Lovelace']),
     ]);
     const first = within(screen.getByTestId('survey-section-AAAA')).getByRole('link', {
-      name: 'See your instructor’s reply',
+      name: 'See your instructor’s reply for Course AAAA',
     });
     const second = within(screen.getByTestId('survey-section-BBBB')).getByRole('link', {
-      name: 'See your instructor’s reply',
+      name: 'See your instructor’s reply for Course BBBB',
     });
+    // The visible text is the start of the accessible name (WCAG 2.5.3).
+    expect(first.textContent).toBe('See your instructor’s reply');
     expect(first.getAttribute('href')).toBe(`/app/student/sections/${FIRST_ID}/results`);
     expect(second.getAttribute('href')).toBe(`/app/student/sections/${SECOND_ID}/results`);
   });

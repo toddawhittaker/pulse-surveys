@@ -1,4 +1,4 @@
-import type { JSX } from 'react';
+import { useId, type JSX } from 'react';
 
 import { copy } from '../copy/leadershipResponseCopy';
 import './policyToggle.css';
@@ -15,7 +15,8 @@ import './policyToggle.css';
  *
  * It is a button with `role="switch"`, so Space and Enter work and a screen
  * reader hears the state. It holds no state of its own: whether it is on is the
- * server's last answer, and `busy` disables it while a change is in flight.
+ * server's last answer, and `busy` marks it `aria-disabled` and ignores presses while a change is in
+ * flight; it stays focusable, so a keyboard user's place is not lost.
  */
 export function PolicyToggle({
   detail,
@@ -31,6 +32,7 @@ export function PolicyToggle({
   readonly busy: boolean;
   readonly onToggle: (next: boolean) => void;
 }): JSX.Element {
+  const helpId = useId();
   return (
     <div className="pulse-policy-toggle">
       <div className="pulse-policy-toggle__row">
@@ -43,16 +45,18 @@ export function PolicyToggle({
           role="switch"
           aria-checked={checked}
           aria-label={ariaLabel}
-          disabled={busy}
+          aria-describedby={helpId}
+          aria-disabled={busy}
           className="pulse-policy-toggle__track"
           onClick={() => {
+            if (busy) return;
             onToggle(!checked);
           }}
         >
           <span className="pulse-policy-toggle__knob" />
         </button>
       </div>
-      <p className="pulse-policy-toggle__help">{copy('leadership_response.policy.toggle_help')}</p>
+      <p className="pulse-policy-toggle__help" id={helpId}>{copy('leadership_response.policy.toggle_help')}</p>
     </div>
   );
 }
