@@ -1935,6 +1935,26 @@ export interface components {
             readonly course: components["schemas"]["StreamReport"];
         };
         /**
+         * StudentParticipation
+         * @description The student's own latest accepted participation score, exactly as it was posted.
+         *
+         *     Both strings are the characters sent to the platform (SPEC §3.4, ADR 0125);
+         *     nothing here is recomputed. It is the student's own record and not an
+         *     aggregate of the week, so it does not follow the week's hold.
+         */
+        readonly StudentParticipation: {
+            /**
+             * Score Text
+             * @description The score as it was sent to the gradebook.
+             */
+            readonly score_text: string;
+            /**
+             * Ledger Text
+             * @description The per-week ledger sent beside the score.
+             */
+            readonly ledger_text: string;
+        };
+        /**
          * StudentResponse
          * @description The response a student reads for one week, and who wrote it (SPEC §5.3).
          *
@@ -2012,6 +2032,8 @@ export interface components {
              * @description The section's course weeks whose report has opened, ascending: the weeks the page may page through.
              */
             readonly published_weeks: readonly number[];
+            /** @description The student's latest accepted participation score; absent before any score has been posted. Shown in every state. */
+            readonly participation?: components["schemas"]["StudentParticipation"] | null;
         };
         /**
          * SubmissionAccepted

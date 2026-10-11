@@ -135,7 +135,8 @@ RESPONSE = "response"
 # The amendment before review, A1: the section's course weeks whose report has
 # opened at `now`, ascending, in every state (E7-06's page pages through them).
 PUBLISHED_WEEKS = "published_weeks"
-PAYLOAD_MEMBERS = frozenset({STATE, RESPONSE, PUBLISHED_WEEKS})
+PARTICIPATION = "participation"
+PAYLOAD_MEMBERS = frozenset({STATE, RESPONSE, PUBLISHED_WEEKS, PARTICIPATION})
 TEXT = "text"
 AUTHOR_NAME = "author_name"
 AUTHOR_ROLE = "author_role"

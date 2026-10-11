@@ -2912,6 +2912,28 @@
         "title": "StreamsView",
         "description": "The two groups \u00a75.1 heads separately, never pooled into one."
       },
+      "StudentParticipation": {
+        "properties": {
+          "score_text": {
+            "type": "string",
+            "title": "Score Text",
+            "description": "The score as it was sent to the gradebook."
+          },
+          "ledger_text": {
+            "type": "string",
+            "title": "Ledger Text",
+            "description": "The per-week ledger sent beside the score."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "score_text",
+          "ledger_text"
+        ],
+        "title": "StudentParticipation",
+        "description": "The student's own latest accepted participation score, exactly as it was posted.\n\nBoth strings are the characters sent to the platform (SPEC \u00a73.4, ADR 0125);\nnothing here is recomputed. It is the student's own record and not an\naggregate of the week, so it does not follow the week's hold."
+      },
       "StudentResponse": {
         "properties": {
           "text": {
@@ -3002,6 +3024,17 @@
             "type": "array",
             "title": "Published Weeks",
             "description": "The section's course weeks whose report has opened, ascending: the weeks the page may page through."
+          },
+          "participation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudentParticipation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The student's latest accepted participation score; absent before any score has been posted. Shown in every state."
           }
         },
         "additionalProperties": false,

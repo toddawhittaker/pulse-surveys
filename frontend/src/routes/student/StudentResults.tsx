@@ -17,8 +17,9 @@ import { copy, fillCopy } from '../../copy/studentResults';
  * SPEC §7.6's `StudentResults` — the shell: one section's reply for one
  * published week, and the way back through the published weeks (SPEC §5.4).
  *
- * **The response leads the page.** Aggregates, comments and the small-group
- * notice are a later ticket's; this page leaves room for them and shows none.
+ * **The response leads the page.** The student's own posted score follows it,
+ * in every state. Aggregates, comments and the small-group notice are not yet
+ * here; this page leaves room for them.
  *
  * **The page asks and draws.** Which weeks exist, which state the week is in and
  * who wrote the reply are the API's answers; a week the API refuses is the same
@@ -207,6 +208,7 @@ function Body({
         </div>
       )}
       <Reply results={results} timeZone={timeZone} />
+      <Participation participation={results.participation ?? null} />
     </>
   );
 }
@@ -232,6 +234,28 @@ function Reply({
       publishedAt={results.response.published_at}
       timeZone={timeZone}
     />
+  );
+}
+
+/**
+ * The student's own posted score and ledger, character for character, with the one
+ * sentence about re-checking. It is their own record and not an aggregate, so it
+ * shows in every state, `awaiting` included. Before any score has been posted
+ * there is nothing: no zero and no placeholder (SPEC §3.4).
+ */
+function Participation({
+  participation,
+}: {
+  readonly participation: StudentWeekResults['participation'] | null;
+}): JSX.Element | null {
+  if (participation === null || participation === undefined) return null;
+  return (
+    <section className="pulse-results-participation" aria-labelledby="pulse-participation-heading">
+      <h2 id="pulse-participation-heading">{copy('student_results.participation_heading')}</h2>
+      <p>{fillCopy('student_results.participation_score', { score: participation.score_text })}</p>
+      <p className="pulse-results-ledger">{participation.ledger_text}</p>
+      <p>{copy('student_results.participation_note')}</p>
+    </section>
   );
 }
 
