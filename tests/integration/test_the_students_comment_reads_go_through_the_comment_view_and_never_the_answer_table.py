@@ -1,0 +1,244 @@
+"""The student's comment reads use `report_comment` and never `answer` — E8-01, done-when 4.
+
+> The read goes through v004, and no student read queries `answer` itself.
+
+`report_comment` v004 is the view that shows a comment only once it holds a
+moderation verdict and never a Care-class one (ADR 0187); `answer` is the table
+it is built over, which holds every comment ever written, flagged, excluded and
+Care-class alike. A student read that touched `answer` beside the view would be a
+second statement of what a student may see, and the one that does not know about
+verdicts.
+
+**Watched on the wire**, with `tests/fixtures/statements.py`'s recorder (every
+statement any engine sends while the block runs), around a direct call of each
+read on `pulse_app`'s connection. Each read is required, in the same call, to
+return the comments the world holds and to send a statement naming the view, so
+"no statement named `answer`" is said of a read that read something (entry 3).
+
+**The matcher is run both ways before it is believed**: a `FROM answer` and a
+`JOIN public.answer` are caught, and `answer_id`, `report_comment` and prose
+naming the table are spared. The week read may name `answer` in its two gates
+only, matched by shape (the ruling on dispute E8-01-02); the gate shapes are run
+both ways too.
+
+**Which failure a red is, before E8-01 lands:** `student_week.student_read` fails
+naming `student_comments` or `student_released_comments`.
+"""
+
+import re
+
+import pytest
+from fixtures.report_api import FULL_WEEK_COMMENTS, HELD_COMMENTS
+from fixtures.report_views import INSTRUCTOR_STREAM
+from fixtures.statements import Statement, statements_recorded
+from fixtures.student_week import (
+    ONE_SECOND,
+    STUDENT_COMMENTS,
+    STUDENT_RELEASED_COMMENTS,
+    a_batch,
+    answer_id_of,
+    call_student_read,
+    text_of,
+)
+from fixtures.the_hold import HoldWorld, report_opens
+
+pytestmark = [pytest.mark.integration, pytest.mark.invariant]
+
+LATEST = 4
+
+# The table, referenced as a relation: after `FROM` or `JOIN`, optionally
+# schema-qualified and quoted, and not followed by another identifier character —
+# so `answer_id` and `answer_view` are not it.
+READS_THE_ANSWER_TABLE = re.compile(
+    r'\b(?:FROM|JOIN)\s+(?:"?public"?\s*\.\s*)?"?answer"?(?![\w"])', re.IGNORECASE
+)
+READS_THE_COMMENT_VIEW = re.compile(
+    r'\b(?:FROM|JOIN)\s+(?:"?public"?\s*\.\s*)?"?report_comment"?(?![\w"])', re.IGNORECASE
+)
+
+MUST_CATCH = (
+    "SELECT answer.comment_text FROM answer WHERE answer.id = %(id)s",
+    'SELECT a.id FROM public.report_comment AS c JOIN public."answer" AS a ON a.id = c.answer_id',
+    "SELECT 1 FROM\n    answer AS a",
+)
+MUST_SPARE = (
+    "SELECT report_comment.answer_id, report_comment.comment_text FROM report_comment",
+    "SELECT m.answer_id FROM release_batch_member AS m JOIN release_batch AS b ON b.id = 1",
+    "SELECT 1 FROM answer_view",
+)
+
+
+# **The two gates `visible_cards` applies before it reads any text**, which have
+# to name `answer` (the ruling on dispute E8-01-02): the whole-week moderation
+# rule (ADR 0187), which looks for comments holding no verdict — exactly the ones
+# v004 leaves out — through a `NOT EXISTS`; and SPEC §4.1 item 3's threshold,
+# counted in distinct people, which reaches `response.user_id` through `answer`
+# because v004 carries no person. Each is matched by its distinctive shape.
+GATE_SHAPES = {
+    # `NOT EXISTS (SELECT classification…`, or SQLAlchemy's `~exists()` rendering,
+    # `NOT (EXISTS (SELECT classification…`. Anchored to the classification it
+    # checks, because the commenter count carries a `NOT (EXISTS (SELECT
+    # release_batch_member…` of its own (ADR 0182; the ruling on dispute E8-01-03).
+    "the moderation gate": re.compile(
+        r'\bNOT\s*\(?\s*EXISTS\s*\(\s*SELECT\s+(?:"?public"?\s*\.\s*)?"?classification\b',
+        re.IGNORECASE,
+    ),
+    "the commenter count": re.compile(
+        r'\bcount\s*\(\s*DISTINCT\s+(?:"?\w+"?\s*\.\s*)?"?user_id"?', re.IGNORECASE
+    ),
+}
+
+GATE_SAMPLES = {
+    "the moderation gate": (
+        "SELECT response.section_id, answer.comment_text FROM answer JOIN response ON "
+        "response.id = answer.response_id WHERE NOT (EXISTS (SELECT classification.answer_id "
+        "FROM classification WHERE classification.answer_id = answer.id))"
+    ),
+    # The shape the code sends, release-batch exclusion included (dispute E8-01-03).
+    "the commenter count": (
+        "SELECT anon_1.commenters FROM (SELECT count(DISTINCT response.user_id) AS commenters "
+        "FROM public.report_comment JOIN answer ON answer.id = public.report_comment.answer_id "
+        "JOIN response ON response.id = answer.response_id WHERE NOT (EXISTS (SELECT "
+        "release_batch_member.answer_id FROM release_batch_member WHERE "
+        "release_batch_member.answer_id = public.report_comment.answer_id))) AS anon_1"
+    ),
+}
+NOT_A_GATE = "SELECT answer.comment_text FROM answer JOIN response ON response.id = 1"
+
+
+def answer_reads(recorded: list[Statement]) -> list[str]:
+    return [found.sql for found in recorded if READS_THE_ANSWER_TABLE.search(found.sql)]
+
+
+def gate_of(sql: str) -> str | None:
+    """Which gate a statement naming `answer` is, by shape, or `None` if it is neither or both."""
+    matched = [name for name, shape in GATE_SHAPES.items() if shape.search(sql)]
+    return matched[0] if len(matched) == 1 else None
+
+
+def view_reads(recorded: list[Statement]) -> list[str]:
+    return [found.sql for found in recorded if READS_THE_COMMENT_VIEW.search(found.sql)]
+
+
+def test_the_matchers_catch_a_read_of_the_table_and_spare_the_view_and_the_column() -> None:
+    """The instrument, both directions. **A red here means this module is broken, not the code.**
+
+    **The mutation this kills:** a matcher that searches for the bare word
+    `answer`, which every view read carries as `answer_id`, or one that cannot
+    see a schema-qualified, quoted relation.
+    """
+    for sample in MUST_CATCH:
+        assert READS_THE_ANSWER_TABLE.search(sample), f"The matcher missed {sample!r}."
+    for sample in MUST_SPARE:
+        assert not READS_THE_ANSWER_TABLE.search(sample), f"The matcher took {sample!r}."
+    assert READS_THE_COMMENT_VIEW.search(MUST_SPARE[0]), "The view matcher missed the view."
+    assert not READS_THE_COMMENT_VIEW.search(MUST_CATCH[0]), "The view matcher took `answer`."
+    for name, sample in GATE_SAMPLES.items():
+        assert READS_THE_ANSWER_TABLE.search(sample), f"{name}'s sample does not name `answer`."
+        assert gate_of(sample) == name, f"The gate shapes read {sample!r} as {gate_of(sample)!r}."
+    assert not GATE_SHAPES["the moderation gate"].search(
+        GATE_SAMPLES["the commenter count"]
+    ), "The moderation shape took the commenter count's release-batch exclusion (E8-01-03)."
+    assert not GATE_SHAPES["the commenter count"].search(GATE_SAMPLES["the moderation gate"])
+    assert gate_of(NOT_A_GATE) is None, "The gate shapes took a plain text read of `answer`."
+    assert all(gate_of(sample) is None for sample in MUST_CATCH), "A gate shape took a text read."
+
+
+def test_the_students_week_read_returns_the_weeks_comments_through_the_view_alone(
+    hold: HoldWorld,
+) -> None:
+    """`student_comments` for course week 1's instructor stream, on the wire.
+
+    It returns the five comments, at least one statement it sent names
+    `report_comment`, and the statements naming `answer` are exactly the two gates
+    `visible_cards` applies (the ruling on dispute E8-01-02): the moderation
+    gate's `NOT EXISTS` and the commenter count's `count(DISTINCT … user_id)`.
+    Done-when 4 forbids reading comment text from `answer`, not those two.
+
+    **The mutations this kills:** the read written against `answer` joined to
+    `response` and `moderation_state` (a second copy of v004's rule that misses
+    the Care exclusion), or the view read and then `answer` read again "for the
+    text" — either is a third statement naming `answer`, matching neither gate;
+    and either gate dropped from the student read (a stream below the threshold,
+    or a week not wholly moderated, returned to any caller). **The near misses:**
+    the view read, which must be there, and the two gates, which are spared by
+    shape — a third statement naming `answer` beside them still goes red.
+    """
+    world = hold
+    with statements_recorded() as recorded:
+        returned = call_student_read(
+            world,
+            STUDENT_COMMENTS,
+            section_id=world.taught,
+            week_id=world.week_id(1),
+            stream=INSTRUCTOR_STREAM,
+        )
+
+    assert sorted(text_of(item) for item in returned) == sorted(FULL_WEEK_COMMENTS), (
+        f"`{STUDENT_COMMENTS}` returned {[text_of(item) for item in returned]} for a shown stream "
+        "holding the five canonical comments."
+    )
+    assert view_reads(recorded), (
+        f"`{STUDENT_COMMENTS}` sent {len(recorded)} statements and none names `report_comment`. "
+        "Done-when 4: the read goes through v004."
+    )
+    naming_answer = answer_reads(recorded)
+    not_a_gate = [sql for sql in naming_answer if gate_of(sql) is None]
+    assert not_a_gate == [], (
+        f"`{STUDENT_COMMENTS}` read `answer` outside the two gates: {not_a_gate}. Done-when 4: no "
+        "student read takes comment text from `answer`."
+    )
+    gates = sorted(str(gate_of(sql)) for sql in naming_answer)
+    assert gates == sorted(GATE_SHAPES), (
+        f"The statements naming `answer` are the gates {gates}; the ruling on dispute E8-01-02: "
+        f"exactly {sorted(GATE_SHAPES)}, once each, so the threshold and the whole-week "
+        "moderation rule stay inside the student read."
+    )
+
+
+def test_the_students_released_read_returns_batches_cut_before_the_instant_through_the_view_alone(
+    hold: HoldWorld,
+) -> None:
+    """`student_released_comments` as of week 4's opening, with a batch either side of it.
+
+    It returns the batch cut one second before and not the one cut one second
+    after, at least one statement names `report_comment`, and none names
+    `answer`.
+
+    **The mutations this kills:** `as_of` accepted and ignored (the late batch
+    returned); the instant compared one batch too far (the early batch dropped);
+    and the release walked through `answer` rather than through the view. **The
+    near miss:** the early batch, which must be returned. Decision 2's exact edge
+    — a cut at the opening itself — is not asserted: one second either side is
+    the ticket's test, and the route-level module drives it too.
+    """
+    world = hold
+    opening = report_opens(LATEST)
+    early = list(HELD_COMMENTS[3])
+    late = list(HELD_COMMENTS[4])
+    a_batch(world, cut_at=opening - ONE_SECOND, answer_ids=[answer_id_of(world, t) for t in early])
+    a_batch(world, cut_at=opening + ONE_SECOND, answer_ids=[answer_id_of(world, t) for t in late])
+
+    with statements_recorded() as recorded:
+        returned = call_student_read(
+            world,
+            STUDENT_RELEASED_COMMENTS,
+            section_id=world.taught,
+            term_id=world.term_id(),
+            stream=INSTRUCTOR_STREAM,
+            as_of=opening,
+        )
+
+    texts = sorted(text_of(item) for item in returned)
+    assert texts == sorted(early), (
+        f"`{STUDENT_RELEASED_COMMENTS}` as of {opening.isoformat()} returned {texts}. Decision 2: "
+        f"the batch cut a second before that instant ({sorted(early)}), and not the one cut a "
+        f"second after it ({sorted(late)})."
+    )
+    assert view_reads(recorded), (
+        f"`{STUDENT_RELEASED_COMMENTS}` sent {len(recorded)} statements and none names "
+        "`report_comment`. Done-when 4: the read goes through v004."
+    )
+    assert (
+        answer_reads(recorded) == []
+    ), f"`{STUDENT_RELEASED_COMMENTS}` read `answer` itself: {answer_reads(recorded)}."

@@ -1,6 +1,6 @@
 """The response loop (SPEC §5.3): who a section's staff are, by name, for a reader of it.
 
-E7-01 builds the first piece: the one Python door to the staff-name definer,
+The first piece is the one Python door to the staff-name definer,
 `public.section_staff_names` (`views_sql/section_staff_names_v001.sql`, ADR 0191).
 SPEC §5.3 posts a response under its author's name, and the survey page names the
 section's professor, so a student has to be able to read a member of staff's
@@ -17,9 +17,9 @@ second caller would be a second place that could get it wrong.
 
 **A refusal is an empty list**, the same answer a section with no instructor
 gives, and nothing here logs what it was asked or what it answered: no refusal
-may carry a staff name (E7-01, done-when 4), and a log line of an answer is one.
+may carry a staff name (ADR 0191), and a log line of an answer is one.
 
-## The hold (E7-02, ADR 0193)
+## The hold (ADR 0193)
 
 SPEC §5.3's required mode "holds the student-facing aggregate until a response is
 published". The functions below are the gate every later reader calls rather than
@@ -36,12 +36,18 @@ copies:
   - **`week_state`**: the four states, from those three answers alone.
   - **`publish_response`** and **`record_policy`**: the two writers. Each appends
     rows and nothing else. Neither decides who may write: the doors in front of
-    them do (E7-03), and the table's guard trigger refuses a row whose author or
+    them do (ADR 0194), and the table's guard trigger refuses a row whose author or
     setter does not hold the role it names.
   - **`student_week_results`**: the student results route's read, through the
-    student's live enrollment, as the survey read reaches a section.
+    student's live enrollment, as the survey read reaches a section. While the
+    week is `awaiting` it serves the course label and the state and nothing
+    about the week; otherwise the streams, the workload median and, on the
+    latest published week while nothing is held, the release group (ADR 0197).
+    The comments come through `report_comments.student_comments` and
+    `student_released_comments`, the only names this module takes from that
+    module.
 
-## The doors (E7-03, ADR 0194)
+## The doors (ADR 0194)
 
 Every door here decides who may write or read, then calls the writers above.
 
@@ -62,7 +68,7 @@ Every door here decides who may write or read, then calls the writers above.
 """
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
@@ -77,6 +83,7 @@ from app.config import Settings
 from app.models.grades import GradeSyncOutcome, latest_grade_sync
 from app.models.loop import InstructorResponse, PolicyMode, PolicyRole, ResponsePolicy, ResponseRole
 from app.models.org import Course, Prefix, Section
+from app.models.survey import REPORT_STREAMS
 from app.models.term import SurveyWindow, Term, Week
 from app.schemas.response_loop import (
     OnBehalfWeek,
@@ -86,6 +93,7 @@ from app.schemas.response_loop import (
     PolicyPrefix,
     ResponseWrite,
     StudentParticipation,
+    StudentReleasedComment,
     StudentResponse,
     StudentWeekResults,
     WeekResponseView,
@@ -97,6 +105,7 @@ from app.services.authz import (
     lead_review_courses,
     taught_or_once_taught_section_ids,
 )
+from app.services.report_comments import student_comments, student_released_comments
 from app.services.reporting import SectionUnavailableError
 from app.services.section_codes import course_label, course_week_of, week_of_the_term
 
@@ -182,7 +191,7 @@ def section_staff_names(
 
 
 # ---------------------------------------------------------------------------
-# The hold (E7-02, ADR 0193).
+# The hold (ADR 0193).
 # ---------------------------------------------------------------------------
 
 # The two roles a response is written on the instructor's behalf under (SPEC §5.3,
@@ -196,8 +205,7 @@ class ResultsUnavailableError(Exception):
     **One exception for every refusal, and it carries nothing.** A section the
     student is not enrolled in, an enrollment that has ended, a week whose report
     has not opened, and a section or a week that does not exist all leave by it,
-    so the route answers them with one status and one sentence (E7-02, decision
-    5). Telling them apart would tell a student that a section they are not in
+    so the route answers them with one status and one sentence (ADR 0193). Telling them apart would tell a student that a section they are not in
     exists, or how long their own section runs.
     """
 
@@ -210,16 +218,26 @@ def policy_of_record(session: Session, *, course_id: UUID, report_opens_at: date
     `set_at`, decides "latest" (ADR 0187's reasoning, ADR 0192); `set_at` decides
     only which rows were in force at the opening (ruling 6).
     """
-    mode = session.execute(
-        select(ResponsePolicy.mode)
-        .where(
-            ResponsePolicy.course_id == course_id,
-            ResponsePolicy.set_at <= report_opens_at,
-        )
-        .order_by(ResponsePolicy.sequence.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    return PolicyMode.ENCOURAGED if mode is None else PolicyMode(mode)
+    rows = session.execute(
+        select(ResponsePolicy.set_at, ResponsePolicy.mode)
+        .where(ResponsePolicy.course_id == course_id)
+        .order_by(ResponsePolicy.sequence)
+    ).tuples()
+    return _mode_in_force(rows, report_opens_at=report_opens_at)
+
+
+def _mode_in_force(
+    rows: Iterable[tuple[datetime, str]], *, report_opens_at: datetime
+) -> PolicyMode:
+    """The policy rule, written once: the last of a course's rows set at or before the opening.
+
+    `rows` are one course's `(set_at, mode)` pairs in `sequence` order. With none
+    set at or before `report_opens_at`, the week is encouraged. `policy_of_record`
+    asks it about one course and `_week_clocks` about many, over rows each read
+    in its own shape (ADR 0193, ADR 0197).
+    """
+    in_force = [mode for set_at, mode in rows if set_at <= report_opens_at]
+    return PolicyMode(in_force[-1]) if in_force else PolicyMode.ENCOURAGED
 
 
 def first_response(
@@ -270,7 +288,7 @@ def publish_response(
 ) -> InstructorResponse:
     """Append one response row for a section's course week, and do nothing else.
 
-    **It decides nothing about who may publish.** E7-03's doors check the reader,
+    **It decides nothing about who may publish.** The doors check the reader,
     the week and the clock first; the table's guard trigger refuses a row whose
     author does not hold `role` for the section, or a second author for the
     section-week. So this refuses only what the table refuses, by letting the
@@ -321,7 +339,7 @@ def record_policy(
     All the rows carry one `set_at`, the application clock's. It flushes and does
     not commit, so the caller's one transaction holds every row or none. A setter
     who answers for no course in the prefix under `role` gets no rows: whether
-    they may set a policy at all is the door's question (E7-03), and the table's
+    they may set a policy at all is the door's question (ADR 0194), and the table's
     guard trigger refuses any row whose setter does not hold the role for its
     course.
     """
@@ -409,6 +427,8 @@ def student_week_results(
         raise ResultsUnavailableError
     published_weeks = [opened.course_week for opened in published]
 
+    label = reporting._course_label(session, section)
+
     state, response = _state_and_response(
         session,
         section=section,
@@ -417,11 +437,77 @@ def student_week_results(
         settings=settings,
         reader_user_id=user_id,
     )
+    participation = _own_participation(session, user_id=user_id, section_id=section.id)
+    if state == "awaiting":
+        # The hold (SPEC §5.3): nothing about the week, read or served, until a
+        # response releases it. Decided before any figure or comment is read.
+        return StudentWeekResults(
+            course_label=label,
+            state=state,
+            response=response,
+            published_weeks=published_weeks,
+            streams=None,
+            workload_median=None,
+            released=None,
+            participation=participation,
+        )
+
+    held_week_ids = {
+        clock_.week_id
+        for clock_ in _week_clocks(session, sections=[section], settings=settings)
+        if clock_.required and not clock_.answered
+    }
+    readable = [opened for opened in published if opened.week_id not in held_week_ids]
+    streams = reporting.student_streams(
+        session,
+        section_id=section.id,
+        week_id=week.week_id,
+        trend=[
+            (opened.course_week, opened.week_id)
+            for opened in readable
+            if opened.course_week <= week.course_week
+        ],
+        comments={
+            token: [
+                comment.text
+                for comment in student_comments(
+                    session, section_id=section.id, week_id=week.week_id, stream=token
+                )
+            ]
+            for token in REPORT_STREAMS
+        },
+    )
+    workload_median = reporting.student_workload_median(
+        session, section_id=section.id, week_id=week.week_id
+    )
+    # Ruling 1 (ADR 0197): the release group only on the latest published week's
+    # page, only while no published week is held, and only the batches cut
+    # before this week's report opened.
+    released = None
+    if week.course_week == published[-1].course_week and len(readable) == len(published):
+        as_of = reporting.report_opens_at(
+            week.closes_at, zone=ZoneInfo(settings.institution_timezone)
+        )
+        released = [
+            StudentReleasedComment(text=comment.text, stream=comment.stream.lower())
+            for token in REPORT_STREAMS
+            for comment in student_released_comments(
+                session,
+                section_id=section.id,
+                term_id=section.term_id,
+                stream=token,
+                as_of=as_of,
+            )
+        ]
     return StudentWeekResults(
+        course_label=label,
         state=state,
         response=response,
         published_weeks=published_weeks,
-        participation=_own_participation(session, user_id=user_id, section_id=section.id),
+        streams=streams,
+        workload_median=workload_median,
+        released=released,
+        participation=participation,
     )
 
 
@@ -513,7 +599,7 @@ def _week_id_of(session: Session, *, section: Section, course_week: int) -> UUID
 
 
 # ---------------------------------------------------------------------------
-# The doors (E7-03, ADR 0194).
+# The doors (ADR 0194).
 # ---------------------------------------------------------------------------
 
 # SPEC §5.3 and ruling 2: owed from report open + 48 hours (§5.6 rule 4), and
@@ -539,7 +625,7 @@ class NoPolicyToSetError(Exception):
 
 
 class OnBehalfUnavailableError(Exception):
-    """Every refusal of every on-behalf door, carrying nothing (E7-03, decision 5).
+    """Every refusal of every on-behalf door, carrying nothing (ADR 0194).
 
     A course outside the reader's own, a section they teach or taught, a week
     not published, not required, already answered or not yet 96 hours past its
@@ -717,7 +803,7 @@ def _view(
 
 
 def policy_overview(session: Session, *, person_id: UUID | None) -> PolicyOverview:
-    """Every course whose policy this reader sets or reads, by prefix (E7-03, decision 2).
+    """Every course whose policy this reader sets or reads, by prefix (ADR 0194).
 
     The courses `lead_review_courses` gives the reader, which they set, and for a
     chair the department's courses that have a lead, which they read and cannot
@@ -869,10 +955,8 @@ def _week_clocks(
 
     **Set-based**: one read of the windows, one of the policy rows of the
     sections' courses, one of which section-weeks have a response, however many
-    sections are asked about. The policy of record is `policy_of_record`'s rule
-    applied to the rows read once: the latest by `sequence` among the course's
-    rows set at or before the week's report opening, and encouraged with none
-    (ADR 0193). The opening is `reporting.report_opens_at` over the stored close,
+    sections are asked about. The policy of record is `_mode_in_force`, the rule
+    `policy_of_record` applies too, over the rows read once (ADR 0193). The opening is `reporting.report_opens_at` over the stored close,
     as the report computes it (ADR 0184).
     """
     if not sections:
@@ -909,7 +993,7 @@ def _week_clocks(
     for section_id, week_id, number, closes_at, term_start in windows:
         section = by_id[section_id]
         opens_at = reporting.report_opens_at(closes_at, zone=zone)
-        in_force = [mode for set_at, mode in policies[section.course_id] if set_at <= opens_at]
+        policy = _mode_in_force(policies[section.course_id], report_opens_at=opens_at)
         clocks.append(
             _WeekClock(
                 section=section,
@@ -918,7 +1002,7 @@ def _week_clocks(
                     number, section_start=section.start_date, term_start=term_start
                 ),
                 opens_at=opens_at,
-                required=bool(in_force) and in_force[-1] == PolicyMode.REQUIRED.value,
+                required=policy is PolicyMode.REQUIRED,
                 answered=(section_id, week_id) in answered,
             )
         )
@@ -994,7 +1078,7 @@ def _on_behalf_door(
       3. the course week's report has opened;
       4. to act: the week is open on behalf now (required, unanswered, 96 hours
          past its opening). To edit: the reader first published its response.
-         To read: either of those (E7-10 done-when 5), so the first publisher
+         To read: either of those (ADR 0194, as amended), so the first publisher
          can come back to an answered week and nobody else can.
 
     So a refusal for a course outside the reader's own never reads the week, and
@@ -1052,7 +1136,7 @@ def on_behalf_week(
     No comment text, at any threshold, and no summary written before the week's
     latest removal (`reporting.on_behalf_streams`). `response` is null while the
     week is unanswered; once it is answered the door admits only its first
-    publisher, who reads the response to edit it (E7-10 done-when 5).
+    publisher, who reads the response to edit it (ADR 0194, as amended).
     """
     door = _on_behalf_door(
         session,

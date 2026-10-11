@@ -1539,7 +1539,7 @@ export interface components {
         };
         /**
          * PolicyCourse
-         * @description One course's response policy as one reader reads it (E7-03, decision 2).
+         * @description One course's response policy as one reader reads it (ADR 0194).
          *
          *     `mode` is the course's latest policy row now, or `ENCOURAGED` with none.
          *     `set_by_role` says which role set it, and only on a course the reader cannot
@@ -1935,6 +1935,17 @@ export interface components {
             readonly course: components["schemas"]["StreamReport"];
         };
         /**
+         * StudentComment
+         * @description One published or kept comment under its stream: its words and nothing else.
+         *
+         *     No key, status, time or week: SPEC §4 never shows a time with a comment, and
+         *     any handle would let a reader line it up with something else.
+         */
+        readonly StudentComment: {
+            /** Text */
+            readonly text: string;
+        };
+        /**
          * StudentParticipation
          * @description The student's own latest accepted participation score, exactly as it was posted.
          *
@@ -1953,6 +1964,19 @@ export interface components {
              * @description The per-week ledger sent beside the score.
              */
             readonly ledger_text: string;
+        };
+        /**
+         * StudentReleasedComment
+         * @description One comment from a release batch: its words and its stream, and never its week (ADR 0153).
+         */
+        readonly StudentReleasedComment: {
+            /** Text */
+            readonly text: string;
+            /**
+             * Stream
+             * @enum {string}
+             */
+            readonly stream: "instructor" | "course";
         };
         /**
          * StudentResponse
@@ -1982,6 +2006,44 @@ export interface components {
              * @description When the text now shown was published.
              */
             readonly published_at: string;
+        };
+        /**
+         * StudentStream
+         * @description One of a released week's two streams, as a student of the section reads it (SPEC §5.4).
+         *
+         *     `small_n` is true when the stream's comments are withheld (SPEC §4.1 item 3),
+         *     and then `comments` is empty. The ratings are shares, never counts, and are
+         *     withheld when too few students rated (ruling 8). No count of anybody, here or
+         *     anywhere on the payload (SPEC §5.4).
+         */
+        readonly StudentStream: {
+            /**
+             * Stream
+             * @enum {string}
+             */
+            readonly stream: "instructor" | "course";
+            /**
+             * Trend
+             * @description One point per readable week up to this one; a held week has none.
+             */
+            readonly trend: readonly components["schemas"]["StudentTrendPoint"][];
+            /**
+             * Shares
+             * @description Each rating's whole-number percentage, keyed 1 to 5, summing to 100; null when too few students rated.
+             */
+            readonly shares: {
+                readonly [key: string]: number;
+            } | null;
+            /**
+             * Small N
+             * @description Whether this stream's comments are withheld this week.
+             */
+            readonly small_n: boolean;
+            /**
+             * Comments
+             * @description The published and kept comments, in a random order; empty when small_n.
+             */
+            readonly comments: readonly components["schemas"]["StudentComment"][];
         };
         /**
          * StudentSurveyView
@@ -2014,11 +2076,37 @@ export interface components {
             readonly institution_timezone: string;
         };
         /**
+         * StudentTrendPoint
+         * @description One week's rating mean in one stream, for a week a student may read (SPEC §5.4's trend).
+         *
+         *     A week fewer than the threshold of students rated has a point with no mean
+         *     (ruling 8). A held week has no point at all (ADR 0197).
+         */
+        readonly StudentTrendPoint: {
+            /** Course Week */
+            readonly course_week: number;
+            /**
+             * Mean
+             * @description The mean of the week's ratings; null if too few students rated.
+             */
+            readonly mean: number | null;
+        };
+        /**
          * StudentWeekResults
-         * @description One week's state for one of the student's own sections, its response if any, and the
-         *     course weeks a student may page through (SPEC §5.4: published weeks only).
+         * @description One week of one of the student's own sections, under the hold (SPEC §5.3, §5.4).
+         *
+         *     In every state: the course label, the state, the response if any, and the
+         *     course weeks a student may page through (published weeks only). While the
+         *     week is `awaiting`, `streams`, `workload_median` and `released` are null:
+         *     nothing about the week is served until a response releases it (ADR 0193,
+         *     ADR 0197).
          */
         readonly StudentWeekResults: {
+            /**
+             * Course Label
+             * @description The course's label, with its section code and term.
+             */
+            readonly course_label: string;
             /**
              * State
              * @description Whether the week is held, answered, or neither.
@@ -2032,6 +2120,21 @@ export interface components {
              * @description The section's course weeks whose report has opened, ascending: the weeks the page may page through.
              */
             readonly published_weeks: readonly number[];
+            /**
+             * Streams
+             * @description The instructor stream, then the course stream; null while awaiting.
+             */
+            readonly streams: readonly components["schemas"]["StudentStream"][] | null;
+            /**
+             * Workload Median
+             * @description The median of the week's workload answers; null while awaiting or if too few.
+             */
+            readonly workload_median: number | null;
+            /**
+             * Released
+             * @description Comments released from earlier weeks, with no week named. Present on the latest published week only, and only while no published week is awaiting.
+             */
+            readonly released: readonly components["schemas"]["StudentReleasedComment"][] | null;
             /** @description The student's latest accepted participation score; absent before any score has been posted. Shown in every state. */
             readonly participation?: components["schemas"]["StudentParticipation"] | null;
         };

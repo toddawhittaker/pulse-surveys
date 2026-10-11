@@ -137,6 +137,14 @@ RESPONSE = "response"
 PUBLISHED_WEEKS = "published_weeks"
 PARTICIPATION = "participation"
 PAYLOAD_MEMBERS = frozenset({STATE, RESPONSE, PUBLISHED_WEEKS, PARTICIPATION})
+# E8-01 adds four members, on every state: the course label, the two streams,
+# the workload median and the release group (each of the last three `None` on a
+# held week). They are **admitted** here by name and required by nothing in this
+# file, so an E7 test goes red only for an E7 reason: E8-01's tests require their
+# members through `tests/fixtures/student_week.py::read` (`docs/MISTAKES.md`
+# entry 22: a new member reaches every fixture).
+E8_01_MEMBERS = frozenset({"course_label", "streams", "workload_median", "released"})
+MEMBERS_LATER_TICKETS_ADD = E8_01_MEMBERS
 TEXT = "text"
 AUTHOR_NAME = "author_name"
 AUTHOR_ROLE = "author_role"
@@ -339,9 +347,11 @@ def payload_of(answered: Any, what: str) -> dict[str, Any]:
 
     The status is required here because a body decoded off a refusal is a body
     every later assertion is vacuously true of (`docs/MISTAKES.md` entry 3). The
-    members are decision 4's exactly: a third top-level member, or a fifth on the
-    response, is a member nobody settled — and for a held week the likeliest one is
-    a count, which done-when 1 forbids.
+    members are decision 4's, all required, and E8-01's and E8-03's admitted
+    beside them by name: any other top-level member, or a fifth on the response,
+    is a member nobody settled — and for a held week the likeliest one is a count,
+    which done-when 1 forbids. (E8-01 changed this check from an equality, because
+    its new members reach every payload; `docs/MISTAKES.md` entry 22.)
     """
     if answered.status_code != 200:
         pytest.fail(
@@ -349,10 +359,13 @@ def payload_of(answered: Any, what: str) -> dict[str, Any]:
             f"{answered.text[:400]!r}.\n\n{ROUTE_IS_OWED}"
         )
     body = decoded(answered, what)
-    if not isinstance(body, dict) or set(body) != PAYLOAD_MEMBERS:
+    members = set(body) if isinstance(body, dict) else set()
+    unsettled = members - PAYLOAD_MEMBERS - MEMBERS_LATER_TICKETS_ADD
+    if not isinstance(body, dict) or not members >= PAYLOAD_MEMBERS or unsettled:
         pytest.fail(
             f"{what} answered {str(body)[:400]!r}. Decision 4 settles `StudentWeekResults` as "
-            f"exactly {sorted(PAYLOAD_MEMBERS)}."
+            f"{sorted(PAYLOAD_MEMBERS)}, and E8's tickets add only "
+            f"{sorted(MEMBERS_LATER_TICKETS_ADD)} beside them."
         )
     response = body[RESPONSE]
     well_formed = isinstance(response, dict) and set(response) == RESPONSE_MEMBERS

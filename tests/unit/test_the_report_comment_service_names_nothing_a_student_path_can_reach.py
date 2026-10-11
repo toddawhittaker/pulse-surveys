@@ -20,14 +20,28 @@ only what §4 and §5.2 permit — a rule this service does not implement, becau
 is written for the instructor's report.
 
 **What the sweep can and cannot see**, stated so nothing here is cited as more
-than it is (`docs/MISTAKES.md` entry 14). It reads import statements out of the
-syntax tree of four named modules. It does not follow a call into a helper in a
-fifth module, it cannot see a `__import__` built from a string, and its list of
-student-facing modules is a list somebody maintains rather than a structure the
-guarded set cannot shrink. The proof-shaped assertion for student visibility is
-E8's own, when a student-facing comment surface exists to assert it about; this
-is a tripwire on the obvious way to write the wrong thing, at the moment the
-service that would be misused is created.
+than it is (`docs/MISTAKES.md` entry 14). It reads **direct** import statements
+out of the syntax tree of the named modules, absolute and relative alike. It does
+not follow a call into a helper in another module, it cannot see a `__import__`
+built from a string, and its list of student-facing modules is a list somebody
+maintains rather than a structure the guarded set cannot shrink (entry 53's
+disclosed limit). It is a tripwire on the obvious way to write the wrong thing.
+**The proof-shaped assertions for student visibility are behavioural, and are
+E8-01's**: what a student's page carries under the hold, by status, below the
+threshold, in a batch and across the sequence of pages —
+`tests/integration/test_a_held_week_serves_nothing_about_the_week_and_reaches_no_other_page.py`,
+`test_only_published_and_kept_comments_reach_a_student.py`,
+`test_a_students_stream_below_the_threshold_carries_its_small_n_state_and_no_comment_text.py`,
+`test_the_release_group_shows_on_the_latest_week_only_and_only_what_was_cut_before_it_opened.py`
+and `test_the_students_comment_reads_go_through_the_comment_view_and_never_the_answer_table.py`.
+
+**Since E8-01 there is one student path that reads comments, and it is named.**
+`app/services/response_loop.py` serves the student's week (SPEC §5.4), and it
+reaches the comment service for exactly the two reads written for students —
+`student_comments` and `student_released_comments`, which filter the
+instructor's reads to `published` and `kept` and return text and stream only —
+and nothing else from that module, and nothing from `app.services.moderation`.
+The four modules above it keep the stricter rule: no import of either at all.
 
 **Read out of the syntax tree, not out of the file text**, for the reason
 `tests/unit/test_no_service_reads_an_identity_table_directly.py` gives: a correct
@@ -46,6 +60,7 @@ comment path's alone.
 """
 
 import ast
+import importlib
 import inspect
 from pathlib import Path
 from typing import Any
@@ -150,6 +165,57 @@ MODERATION_IMPORTS_MUST_ALLOW = (
     '"""Students never reach app.services.moderation; this page shows published text only."""',
 )
 
+# **E8-01's one named caller** (done-when 8), its package, and what it may take
+# from the comment service: the two reads written for students, and nothing else.
+STUDENT_COMMENT_CALLER = "app/services/response_loop.py"
+SERVICES_PACKAGE = "app.services"
+ALLOWED_FROM_THE_COMMENT_SERVICE = frozenset({"student_comments", "student_released_comments"})
+
+# What the allowance reader reports for an import of the whole module, which
+# reaches every function in it and so is never inside an allowance of names.
+THE_WHOLE_MODULE = "<the whole module>"
+
+# The planted imports into `response_loop`, each a breach. The instructor's two
+# card reads by name (done-when 8's own plants), one beside an allowed name, one
+# hiding under an allowed name's alias, a star, the module by both spellings, and
+# the relative spellings a module inside `app/services/` is likeliest to use.
+CALLER_IMPORTS_MUST_REFUSE = (
+    "from app.services.report_comments import visible_cards",
+    "from app.services.report_comments import released_cards",
+    "from app.services.report_comments import student_comments, visible_cards",
+    "from app.services.report_comments import released_cards as student_released_comments",
+    "from app.services.report_comments import *",
+    "from app.services import report_comments",
+    "import app.services.report_comments",
+    "from .report_comments import visible_cards",
+    "from . import report_comments",
+    "from app.services import moderation",
+    "from app.services.moderation import route_verdict",
+    "from .moderation import route_verdict",
+    "import app.services.moderation",
+)
+
+# The near misses: the two allowed reads, together, alone, aliased, relative, and
+# prose naming everything the plants import.
+CALLER_IMPORTS_MUST_ALLOW = (
+    "from app.services.report_comments import student_comments, student_released_comments",
+    "from app.services.report_comments import student_comments",
+    "from .report_comments import student_released_comments",
+    "from app.services.report_comments import student_comments as read_the_week",
+    "from app.services import reporting, survey_read",
+    "from app.services.moderation_rules import something",
+    '"""Never visible_cards from app.services.report_comments, nor app.services.moderation."""',
+)
+
+# The two student reads' signatures. The ticket: "a section, a week or term, a
+# stream and, for the released read, an as-of instant"; the work order (decision
+# 3) names the instant `as_of`; the rest are spelled as the two reads they filter
+# already spell them (`SETTLED_SIGNATURES` above).
+STUDENT_READ_SIGNATURES = {
+    "student_comments": ("session", "section_id", "week_id", "stream"),
+    "student_released_comments": ("session", "section_id", "term_id", "stream", "as_of"),
+}
+
 
 @pytest.fixture(autouse=True)
 def _a_stated_environment(configured_env: dict[str, str]) -> None:
@@ -164,7 +230,46 @@ def _a_stated_environment(configured_env: dict[str, str]) -> None:
     """
 
 
-def imports_of(source: str, path: str = "<sample>") -> set[str]:
+def parsed(source: str, path: str) -> ast.Module:
+    """A source's syntax tree, or a failure of the sweep.
+
+    A file that does not parse is a failure of the sweep rather than a file to
+    skip: it would drop silently out of the walk, and silence is what this module
+    exists to stop being mistaken for compliance.
+    """
+    try:
+        return ast.parse(source, filename=path)
+    except SyntaxError as failure:  # pragma: no cover - a broken source tree
+        pytest.fail(
+            f"{path} does not parse ({failure}), so this sweep cannot read its imports and would "
+            "report it clean having read nothing."
+        )
+
+
+def package_of(name: str) -> str:
+    """The dotted package a backend file sits in: `app/services/x.py` is in `app.services`."""
+    return ".".join(Path(name).with_suffix("").parts[:-1])
+
+
+def module_named_by(node: ast.ImportFrom, package: str | None) -> str | None:
+    """The absolute module a `from … import` names, resolving a relative one against `package`.
+
+    **Since E8-01**: `from .report_comments import visible_cards` is the spelling a
+    module inside `app/services/` is likeliest to use, and a reader that skipped
+    every relative import read it as nothing (the enclosure one level out,
+    `docs/MISTAKES.md` entry 53). With no package — a sample — a relative import
+    is left unresolved, which the samples that need one supply.
+    """
+    if node.level == 0:
+        return node.module
+    if package is None:
+        return None
+    parts = package.split(".")
+    base = parts[: len(parts) - (node.level - 1)]
+    return ".".join([*base, node.module] if node.module else base)
+
+
+def imports_of(source: str, path: str = "<sample>", package: str | None = None) -> set[str]:
     """Every module name a source imports, from its syntax tree.
 
     Both statement forms are read and reduced to a dotted module name:
@@ -172,42 +277,79 @@ def imports_of(source: str, path: str = "<sample>") -> set[str]:
     `from app.services import report_comments` answers
     `app.services.report_comments` — which is the spelling somebody actually
     writes, and the one a reader looking only at `node.module` would miss.
-
-    A file that does not parse is a failure of the sweep rather than a file to
-    skip: it would drop silently out of the walk, and silence is what this module
-    exists to stop being mistaken for compliance.
+    Relative imports are resolved against `package` (see `module_named_by`).
     """
-    try:
-        tree = ast.parse(source, filename=path)
-    except SyntaxError as failure:  # pragma: no cover - a broken source tree
-        pytest.fail(
-            f"{path} does not parse ({failure}), so this sweep cannot read its imports and would "
-            "report it clean having read nothing."
-        )
-
     found: set[str] = set()
-    for node in ast.walk(tree):
+    for node in ast.walk(parsed(source, path)):
         if isinstance(node, ast.Import):
             found.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module is not None:
-            found.add(node.module)
-            found.update(f"{node.module}.{alias.name}" for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = module_named_by(node, package)
+            if module is not None:
+                found.add(module)
+                found.update(f"{module}.{alias.name}" for alias in node.names)
     return found
 
 
-def reaches(source: str, module: str, path: str = "<sample>") -> bool:
+def reaches(source: str, module: str, path: str = "<sample>", package: str | None = None) -> bool:
     """Whether a source imports `module` (or anything under it), by either statement form."""
-    return any(name == module or name.startswith(f"{module}.") for name in imports_of(source, path))
+    return any(
+        name == module or name.startswith(f"{module}.")
+        for name in imports_of(source, path, package)
+    )
 
 
-def reaches_the_comment_service(source: str, path: str = "<sample>") -> bool:
+def taken_from(
+    source: str, module: str, path: str = "<sample>", package: str | None = None
+) -> set[str]:
+    """The names a source takes from `module`, or `THE_WHOLE_MODULE` for an import of all of it.
+
+    `from module import a, b` takes `a` and `b` — the names *imported*, not the
+    aliases they are bound to, so `released_cards as student_released_comments`
+    takes `released_cards`. Every other way of reaching the module (`import
+    module`, `from parent import module`, a star) takes the whole of it.
+    """
+    taken: set[str] = set()
+    for node in ast.walk(parsed(source, path)):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == module or alias.name.startswith(f"{module}."):
+                    taken.add(THE_WHOLE_MODULE)
+        elif isinstance(node, ast.ImportFrom):
+            named = module_named_by(node, package)
+            if named is None:
+                continue
+            for alias in node.names:
+                if named == module:
+                    taken.add(THE_WHOLE_MODULE if alias.name == "*" else alias.name)
+                elif named.startswith(f"{module}.") or f"{named}.{alias.name}" == module:
+                    taken.add(THE_WHOLE_MODULE)
+    return taken
+
+
+def caller_breaches(
+    source: str, path: str = "<sample>", package: str = SERVICES_PACKAGE
+) -> list[str]:
+    """What the named caller takes beyond its allowance: comment-service names, or moderation."""
+    taken = taken_from(source, COMMENT_SERVICE_MODULE, path, package)
+    breaches = sorted(name for name in taken if name not in ALLOWED_FROM_THE_COMMENT_SERVICE)
+    if reaches(source, MODERATION_SERVICE_MODULE, path, package):
+        breaches.append(MODERATION_SERVICE_MODULE)
+    return breaches
+
+
+def reaches_the_comment_service(
+    source: str, path: str = "<sample>", package: str | None = None
+) -> bool:
     """Whether a source imports the comment service, by either statement form."""
-    return reaches(source, COMMENT_SERVICE_MODULE, path)
+    return reaches(source, COMMENT_SERVICE_MODULE, path, package)
 
 
-def reaches_the_moderation_service(source: str, path: str = "<sample>") -> bool:
+def reaches_the_moderation_service(
+    source: str, path: str = "<sample>", package: str | None = None
+) -> bool:
     """Whether a source imports the moderation service, by either statement form."""
-    return reaches(source, MODERATION_SERVICE_MODULE, path)
+    return reaches(source, MODERATION_SERVICE_MODULE, path, package)
 
 
 def test_the_import_reader_catches_what_it_claims_to_and_spares_what_it_must() -> None:
@@ -285,7 +427,9 @@ def test_no_student_facing_module_imports_the_report_comment_service() -> None:
         name
         for name in STUDENT_FACING_MODULES
         if reaches_the_comment_service(
-            (BACKEND_ROOT / name).read_text(encoding="utf-8"), str(BACKEND_ROOT / name)
+            (BACKEND_ROOT / name).read_text(encoding="utf-8"),
+            str(BACKEND_ROOT / name),
+            package_of(name),
         )
     )
     assert not offenders, (
@@ -347,7 +491,9 @@ def test_no_student_facing_module_imports_the_moderation_service() -> None:
         name
         for name in STUDENT_FACING_MODULES
         if reaches_the_moderation_service(
-            (BACKEND_ROOT / name).read_text(encoding="utf-8"), str(BACKEND_ROOT / name)
+            (BACKEND_ROOT / name).read_text(encoding="utf-8"),
+            str(BACKEND_ROOT / name),
+            package_of(name),
         )
     )
     assert not offenders, (
@@ -411,4 +557,137 @@ def test_the_comment_path_takes_no_parameter_that_could_name_a_person(
             "launching student's own claim, the query narrows to one author, and a path built to "
             "conceal becomes one that discloses on request. A parameter that does not exist cannot "
             "be filled, which is why the signature is the assertion rather than a comment."
+        )
+
+
+# ---------------------------------------------------------------------------
+# E8-01, done-when 8: the one named caller, and the two student reads.
+# ---------------------------------------------------------------------------
+
+
+def test_the_import_reader_resolves_a_relative_import_inside_the_services_package() -> None:
+    """The reader one level out: `from .report_comments import …` inside `app/services/`.
+
+    **The mutation this kills:** the reader's original shape, which read
+    `node.module` only when it was absolute and so read every relative import as
+    nothing — the spelling a module beside the service is likeliest to write.
+    **The near misses:** a relative import of a sibling (`.reporting`), and a
+    relative import read with no package, which stays unresolved.
+    """
+    sample = "from .report_comments import visible_cards"
+    assert reaches_the_comment_service(
+        sample, package=SERVICES_PACKAGE
+    ), f"The reader did not resolve {sample!r} inside `{SERVICES_PACKAGE}` to the comment service."
+    assert reaches_the_moderation_service("from . import moderation", package=SERVICES_PACKAGE)
+    assert not reaches_the_comment_service("from .reporting import x", package=SERVICES_PACKAGE)
+    assert not reaches_the_comment_service(sample), "A relative import resolved with no package."
+    assert package_of(STUDENT_COMMENT_CALLER) == SERVICES_PACKAGE
+
+
+def test_the_allowance_reader_refuses_every_plant_and_spares_the_two_reads() -> None:
+    """Done-when 8's plants, read by the instrument before the caller is judged with it.
+
+    Every planted import into `response_loop` is a breach — `visible_cards`,
+    `released_cards`, a star, the module whole, `moderation` by every spelling —
+    and the two allowed reads, together, alone, aliased or relative, are not.
+
+    **The mutations this kills:** an allowance read off the alias (so
+    `released_cards as student_released_comments` passes); `import
+    app.services.report_comments` counted as no name rather than as every name;
+    and a reader blind to relative imports. **The near misses:** the allowed
+    imports, which every correct caller writes one of.
+    """
+    for sample in CALLER_IMPORTS_MUST_REFUSE:
+        assert caller_breaches(
+            sample
+        ), f"The allowance reader found no breach in {sample!r}, which done-when 8 plants as one."
+    for sample in CALLER_IMPORTS_MUST_ALLOW:
+        assert caller_breaches(sample) == [], (
+            f"The allowance reader found {caller_breaches(sample)} in {sample!r}, which is inside "
+            f"the caller's allowance ({sorted(ALLOWED_FROM_THE_COMMENT_SERVICE)})."
+        )
+    both = CALLER_IMPORTS_MUST_ALLOW[0]
+    assert taken_from(both, COMMENT_SERVICE_MODULE) == ALLOWED_FROM_THE_COMMENT_SERVICE
+
+
+def test_the_one_student_caller_takes_the_two_student_reads_and_nothing_else() -> None:
+    """Done-when 8: `services/response_loop.py` is in the sweep, with its allowance.
+
+    It takes exactly `student_comments` and `student_released_comments` from the
+    comment service — both, because it is the one module that reaches the
+    student's comment read (the ticket's "Comments a student may read") — and
+    nothing else from it, and nothing from `app.services.moderation`. **Direct
+    imports only** (entry 53's disclosed limit): a helper elsewhere that reached
+    `visible_cards` for it is invisible here, and the behavioural modules named
+    in this file's docstring are the proof.
+
+    **The mutations this kills:** `from app.services.report_comments import
+    visible_cards` added to `response_loop` to build the week from the
+    instructor's cards; the moderation service imported there; and the student
+    read reached through another module — `reporting.student_streams`, which no
+    sweep watches — rather than through the named caller. **The near miss:** the
+    two allowed imports.
+    """
+    path = BACKEND_ROOT / STUDENT_COMMENT_CALLER
+    assert path.is_file(), f"{STUDENT_COMMENT_CALLER} is not in the backend; the sweep names it."
+    source = path.read_text(encoding="utf-8")
+    package = package_of(STUDENT_COMMENT_CALLER)
+
+    breaches = caller_breaches(source, str(path), package)
+    assert breaches == [], (
+        f"{STUDENT_COMMENT_CALLER} takes {breaches} beyond its allowance. Done-when 8: exactly "
+        f"{sorted(ALLOWED_FROM_THE_COMMENT_SERVICE)} from `{COMMENT_SERVICE_MODULE}`, and nothing "
+        f"from `{MODERATION_SERVICE_MODULE}`."
+    )
+    taken = taken_from(source, COMMENT_SERVICE_MODULE, str(path), package)
+    assert taken == ALLOWED_FROM_THE_COMMENT_SERVICE, (
+        f"{STUDENT_COMMENT_CALLER} takes {sorted(taken)} from `{COMMENT_SERVICE_MODULE}`. E8-01: "
+        "it is the one module that reaches the student's comment read, through both student reads."
+    )
+
+
+def test_a_signature_comparison_refuses_a_read_widened_by_a_person_parameter() -> None:
+    """The signature equality's instrument. **A red here means this module is broken.**
+
+    **The mutation this kills:** a comparison written as "the settled names are
+    present", which a read widened by one optional `user_id` satisfies.
+    """
+
+    def settled(session: Any, *, section_id: Any, week_id: Any, stream: Any) -> None: ...
+
+    def widened(
+        session: Any, *, section_id: Any, week_id: Any, stream: Any, user_id: Any = None
+    ) -> None: ...
+
+    expected = STUDENT_READ_SIGNATURES["student_comments"]
+    assert tuple(inspect.signature(settled).parameters) == expected
+    assert tuple(inspect.signature(widened).parameters) != expected
+
+
+def test_the_two_student_reads_take_no_parameter_that_could_name_a_person() -> None:
+    """Done-when 8: the signature equality covers both student reads.
+
+    `student_comments(session, *, section_id, week_id, stream)` and
+    `student_released_comments(session, *, section_id, term_id, stream, as_of)`:
+    a section, a week or a term, a stream and an instant, and no position a person
+    could go in. `as_of` is allowed by name (the ticket), and it is an instant.
+
+    **The mutations this kills:** a `user_id`, `viewer` or `student` added "so the
+    page can mark the reader's own comment" — which turns a read built to conceal
+    into one that discloses on request; and `as_of` dropped or renamed, which
+    leaves the release unbounded. **What this cannot see:** a `**kwargs`, which
+    declares no parameter; the behavioural modules call each read by keyword.
+    """
+    module = importlib.import_module(COMMENT_SERVICE_MODULE)
+    for name, expected in STUDENT_READ_SIGNATURES.items():
+        function = getattr(module, name, None)
+        assert callable(function), (
+            f"`{COMMENT_SERVICE_MODULE}` exposes no `{name}`. E8-01's ticket adds it, filtering the "
+            "instructor's read to `published` and `kept` and returning text and stream only."
+        )
+        taken = tuple(inspect.signature(function).parameters)
+        assert taken == expected, (
+            f"`{COMMENT_SERVICE_MODULE}.{name}` takes {list(taken)}; E8-01 settles "
+            f"{list(expected)}. SPEC §4.1 item 6: a parameter naming a person is how a view widens "
+            "a student's visibility."
         )

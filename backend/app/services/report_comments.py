@@ -18,7 +18,7 @@ a query, a serializer and a template:
 >
 > Comment display order is randomized; timestamps are never shown with comments.
 
-Four callables and one payload:
+Four callables and one payload for the instructor's report:
 
 * `stream_is_suppressed` — whether one stream of one section-week is below the
   threshold of distinct commenters; the one definition every reader of the rule
@@ -33,6 +33,11 @@ Four callables and one payload:
   02:40;
 * `ReportComment` — what a caller may be told about one comment: its text, its
   moderation status, and which of §5.1's two groups it belongs to. Nothing else.
+
+And the student's two reads (SPEC §5.4, ADR 0197): `student_comments` and
+`student_released_comments`, each the instructor's read above kept to the
+`published` and `kept` statuses and answered as text and stream only, the
+second only from batches cut before the instant it is given.
 
 ## The release gate is three conditions, not §4's one
 
@@ -66,13 +71,15 @@ posts into the gradebook (ADR 0125), narrows the author to the students who
 completed that week's comment item — and in a four-response week that
 intersection can be one person.
 
-**No student-facing parameter.** Neither read takes a viewer, a subject or a
+**No student-facing parameter.** No read here takes a viewer, a subject or a
 user; there is no argument position a launching student's own claim could be
-filled into (SPEC §4.1 item 6). §5.4 gives students a different rule over the
-same rows — their own section, published comments only, and a notice in place of
-comments below the threshold — and E8 writes it in its own module.
+filled into (SPEC §4.1 item 6). §5.4 gives students a narrower rule over the
+same rows — their own section, published and kept comments only, and a notice in
+place of comments below the threshold — and the two student reads apply it as a
+filter over the instructor's, so every rule of those holds for students too.
 `tests/unit/test_the_report_comment_service_names_nothing_a_student_path_can_reach.py`
-sweeps the four student-facing modules for an import of this one.
+sweeps the four student-facing modules for an import of this one, and allows
+`app.services.response_loop` the two student reads and nothing else.
 
 **No moderation write.** The status a comment carries is read from the record
 E4-02 shipped; a moderation verdict and its route are written only by the
@@ -284,6 +291,25 @@ class ReportComment:
     status: str
     # Which of SPEC §5.1's two groups this comment belongs to, read from
     # `question.stream` and never from a question's ordinal.
+    stream: str
+
+
+# The two statuses a student reads (SPEC §5.2, §5.4): a comment nobody acted on,
+# and one a person kept for students after a flag. Taken off the model's own
+# vocabulary through `REPORTED_STATUS`, so a renamed token moves this with it.
+STATUSES_A_STUDENT_READS = frozenset({REPORTED_STATUS["PUBLISHED"], REPORTED_STATUS["KEPT"]})
+
+
+@dataclass(frozen=True)
+class StudentReadComment:
+    """One comment as a student may read it: its words and its stream, and nothing else.
+
+    No status (a student reads only published and kept comments, so a status
+    would say which), no answer key, no time and no week (ADR 0197, ADR 0153).
+    Frozen, for the reason `ReportComment` gives.
+    """
+
+    text: str
     stream: str
 
 
@@ -604,7 +630,72 @@ def released_cards(
     stream: str,
 ) -> tuple[CommentCard, ...]:
     """`released_comments`'s read, answering each comment as a `CommentCard` (E6-03)."""
-    asked = (
+    asked = _released_cards_asked(section_id=section_id, term_id=term_id, stream=stream)
+    return _shuffled(session.execute(asked).all())
+
+
+def student_comments(
+    session: Session,
+    *,
+    section_id: UUID,
+    week_id: UUID,
+    stream: str,
+) -> tuple[StudentReadComment, ...]:
+    """The comments a student of the section may read for one week and stream (SPEC §5.4).
+
+    `visible_cards`, so every rule of the week read holds unchanged: nothing
+    below the threshold or before the week is fully moderated, nothing in a
+    release batch, nothing `report_comment` v004 leaves out (a Care-class
+    comment, a comment with no verdict). Then only the statuses a student
+    reads: `published` and `kept` (SPEC §5.2's "Keep for students"). A flagged
+    or excluded comment, which the instructor sees muted or collapsed, never
+    reaches a student. The order is the instructor read's shuffle, kept.
+
+    Text and stream only: no answer key, status, time or week (ADR 0197). No
+    parameter could name a person, and this module's import sweep allows
+    `app.services.response_loop` these two student reads and nothing else.
+    """
+    return _for_students(
+        visible_cards(session, section_id=section_id, week_id=week_id, stream=stream)
+    )
+
+
+def student_released_comments(
+    session: Session,
+    *,
+    section_id: UUID,
+    term_id: UUID,
+    stream: str,
+    as_of: datetime,
+) -> tuple[StudentReadComment, ...]:
+    """The released comments a student may read, from batches cut strictly before `as_of`.
+
+    `released_cards`' read, narrowed to the batches whose `cut_at` is before
+    `as_of`, then to the `published` and `kept` statuses, as `student_comments`.
+    The caller passes the report opening of the section's latest published week,
+    so a batch cut after that opening waits for the next week's page (ADR 0197,
+    SPEC §5.4). Text and stream only, and never a week (ADR 0153).
+    """
+    asked = _released_cards_asked(section_id=section_id, term_id=term_id, stream=stream).where(
+        ReleaseBatch.cut_at < as_of
+    )
+    return _for_students(_shuffled(session.execute(asked).all()))
+
+
+def _for_students(cards: Sequence[CommentCard]) -> tuple[StudentReadComment, ...]:
+    """The cards a student may read, as text and stream, in the order given."""
+    return tuple(
+        StudentReadComment(text=card.comment.text, stream=card.comment.stream)
+        for card in cards
+        if card.comment.status in STATUSES_A_STUDENT_READS
+    )
+
+
+def _released_cards_asked(
+    *, section_id: UUID, term_id: UUID, stream: str
+) -> Select[tuple[UUID, str, str, str, str | None, UUID | None]]:
+    """The release read's statement, written once for the instructor's read and the student's."""
+    return (
         _cards_with_their_status()
         .join_from(
             ReleaseBatchMember,
@@ -623,7 +714,6 @@ def released_cards(
             COMMENT_VIEW.c.stream == stream,
         )
     )
-    return _shuffled(session.execute(asked).all())
 
 
 def cut_due_release_batches(session: Session) -> int:
