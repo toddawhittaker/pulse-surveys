@@ -3,42 +3,68 @@
 "The term-axis view yields one row per start cohort per term week, and a cohort
 with no data yields no fabricated zeros."
 
-SPEC §2.2, the two-axes bullet, whole:
+SPEC §2.2, the two-axes bullet:
 
-> **Two week axes.** Course-level pages (instructor report, student results)
-> plot **course week** ("WK 01…") with a quiet term-week sub-label ("TERM 04…")
-> from the section's start offset. Aggregate pages plot the **term axis** (TERM
-> 01-18) with one line per start cohort and a cohort selector (e.g., "U sections
-> · started 8/17") — averaging week-3-of-course across cohorts that began five
-> weeks apart would be meaningless.
+> Aggregate pages plot the **term axis** (TERM 01-18) with one line per start
+> cohort and a cohort selector (e.g., "U sections · started 8/17") — averaging
+> week-3-of-course across cohorts that began five weeks apart would be
+> meaningless.
 
-The course-week views are that sentence's first half; these two are its second.
-The cohort is identified by its **start date** rather than by its letter, which
-the ruling settles and the breakdown's decision 7 explains: a start letter is
-per-term admin data (§2.2's map is "admin-configured data" seeded per term), so
-a key on the letter would compare two different cohorts across two terms
-whenever an administrator reused it. A date is the same cohort in any term that
-has one.
+**Re-pointed by E9-12** (the file keeps its E5-03 name). The two term-axis views
+this module read are retired by E9-12 (README decision 10); E9 draws the term
+axis from the set functions, per start cohort, in `benchmarks.named_set_series`
+(E9-05) and in the roll-up service (E9-07). The rules move with it and are
+asserted on `named_set_series`, the term-axis read a test can drive at the
+service:
 
-**Nothing in E5 renders these rows** (decision 7: "proven by test, rendered by
-E9, nothing in E5 draws it"). That is exactly why they are asserted here rather
-than left for the epic that draws them: a read nobody has exercised is a read
-that gets built inside a ⚠ epic under time pressure.
+  - **one line per start cohort**, keyed by its start date: two cohorts that meet
+    at one term week are two lines, each carrying its own figure;
+  - **a cohort is a line, not a section**: two sections of one cohort are one
+    line, and its figure is over both;
+  - **no fabricated zeros**: a week the cohort runs and nobody answered carries
+    no number at all (the series answers every week of a published cohort,
+    shown or suppressed — E9-05's interface — so the rule is now "no number",
+    not "no row");
+  - **the streams are separate**: the instructor and course means of one week
+    are each their own stream's.
+
+**The world** is E9-05's `PurviewWorld` (`tests/fixtures/named_set_figures.py`):
+level `UGGR`, two twelve-week cohorts of §2.2's Fall seed — `U`, started 8/17,
+and `R`, started 9/7 — three sections each (the section minimum), each cohort
+answered by the respondent minimum, so every figure the series computes is
+shown unless the rule under test withholds it. A twelve-week named set holds both
+courses, and the reader chairs the department holding everything, so the seal
+subtracts nothing (SPEC §5.1). Every expected number is written here.
 """
 
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
 import pytest
-from fixtures.benchmark_views import (
-    COHORT_RATING_TERM_AXIS_VIEW,
-    COHORT_TERM_AXIS_VIEW,
-    COURSE_STREAM,
-    INSTRUCTOR_STREAM,
-    TERM_AXIS_VIEWS,
-    UG,
-    BenchmarkWorld,
-    require_benchmark_view,
+from fixtures.benchmark_views import serialized_figure
+from fixtures.comparison_sets import (
+    COMPARISON_SET_TABLE,
+    LENGTH_COLUMN,
+    LEVEL_COLUMN,
+    member_of,
+    membership_table,
+)
+from fixtures.named_set_figures import (
+    COURSE_FIGURE,
+    INSTRUCTOR_FIGURE,
+    LEVEL,
+    NAMED_SET_SERIES,
+    WEEK_TERM_WEEK_MEMBER,
+    WORKLOAD_MEAN,
+    PurviewWorld,
+    benchmarks_symbol,
+    carries_value,
+    is_shown,
+    member,
+    start_dates,
+    the_week,
+    week_figures,
 )
 
 pytestmark = pytest.mark.integration
@@ -46,274 +72,188 @@ pytestmark = pytest.mark.integration
 TWELVE_WEEKS = 12
 
 # §2.2's Fall 2026 seed: "12-week U/R/Q starting 8/17, 9/7, 9/28". Written out
-# because these dates are what the assertions claim, and the transcription in
-# `tests/fixtures/survey_windows.py` is what the calendar control checks.
+# because these dates are what the assertions claim.
 EARLY_COHORT = "U"
 EARLY_START = date(2026, 8, 17)
 LATE_COHORT = "R"
 LATE_START = date(2026, 9, 7)
 
-# Term week 5 is where the two cohorts meet on this axis and part on the other:
-# it is the early cohort's fifth course week and the late cohort's second.
+# Term week 5 is where the two cohorts meet on this axis: the early cohort's fifth
+# course week and the late cohort's second.
 THE_TERM_WEEK = 5
-AN_UNANSWERED_TERM_WEEK = 6
+EARLY_COURSE_WEEK = 5
+LATE_COURSE_WEEK = 2
+# A week the early cohort runs and nobody answers: its sixth (term week 6).
+AN_UNANSWERED_EARLY_COURSE_WEEK = 6
 
-# One figure per section. Two sections of the early cohort so the "one row per
-# cohort" half has something to fold correctly, and one of the late cohort so
-# the "not one row for both cohorts" half has something to keep apart.
-EARLY_FIRST_HOURS = Decimal("2.0")
-EARLY_SECOND_HOURS = Decimal("4.0")
+EARLY_HOURS = Decimal("3.0")
 LATE_HOURS = Decimal("9.0")
+# Equal numbers of people on each side, so a fold is the plain average.
+MEAN_IF_THE_COHORTS_ARE_FOLDED = Decimal("6.0")
 
-EARLY_MEAN = Decimal("3.0")
-LATE_MEAN = Decimal("9.0")
-MEAN_IF_THE_COHORTS_ARE_FOLDED = Decimal("5.0")
-
-# The ratings, for the rating half of the axis. Each cohort answers both streams
-# with a value of its own, so a view that dropped `stream` from the key averages
-# a section's instructor rating against its course rating.
-EARLY_INSTRUCTOR_RATING = Decimal("2")
-EARLY_COURSE_RATING = Decimal("4")
+INSTRUCTOR_RATING = Decimal("2")
+COURSE_RATING = Decimal("4")
 MEAN_IF_THE_STREAMS_ARE_FOLDED = Decimal("3")
 
+READER = "the reader"
 
-def two_start_cohorts_at_one_term_week(world: BenchmarkWorld) -> BenchmarkWorld:
-    """Two 8/17 sections and one 9/7 section, all answering in term week 5."""
+
+def two_start_cohorts(world: PurviewWorld) -> Any:
+    """Three 8/17 sections and three 9/7 sections, both answered at term week 5; the set's key."""
     world.build()
-    world.plant_section("early-first", cohort=EARLY_COHORT, level=UG)
-    world.plant_section("early-second", cohort=EARLY_COHORT, level=UG)
-    world.plant_section("late", cohort=LATE_COHORT, level=UG)
+    sections, respondents = world.sections_minimum, world.respondents_minimum
+    world.course("early", department="home")
+    world.course("late", department="home")
+    early = [f"early-{index}" for index in range(sections)]
+    late = [f"late-{index}" for index in range(sections)]
+    for label in early:
+        world.section(label, course="early", cohort=EARLY_COHORT)
+    for label in late:
+        world.section(label, course="late", cohort=LATE_COHORT)
+    world.chair(READER, "home")
 
-    # Term week 5 is course week 5 for the 8/17 cohort and course week 2 for the
-    # 9/7 one; `respond` takes the course week, so the term week the three rows
-    # share is stated here through two different course weeks on purpose.
-    world.respond(
-        "early-first",
-        course_week=5,
-        subject="e5-03-axis-early-first",
-        workload=EARLY_FIRST_HOURS,
-        instructor_rating=EARLY_INSTRUCTOR_RATING,
-        course_rating=EARLY_COURSE_RATING,
+    world.answer(
+        early,
+        respondents=respondents,
+        prefix="e9-12-axis-early",
+        rating=INSTRUCTOR_RATING,
+        course_rating=COURSE_RATING,
+        hours=EARLY_HOURS,
+        course_week=EARLY_COURSE_WEEK,
     )
-    world.respond(
-        "early-second",
-        course_week=5,
-        subject="e5-03-axis-early-second",
-        workload=EARLY_SECOND_HOURS,
-        instructor_rating=EARLY_INSTRUCTOR_RATING,
-        course_rating=EARLY_COURSE_RATING,
+    world.answer(
+        late,
+        respondents=respondents,
+        prefix="e9-12-axis-late",
+        rating=INSTRUCTOR_RATING,
+        course_rating=COURSE_RATING,
+        hours=LATE_HOURS,
+        course_week=LATE_COURSE_WEEK,
     )
-    world.respond(
-        "late",
-        course_week=2,
-        subject="e5-03-axis-late",
-        workload=LATE_HOURS,
-        instructor_rating=EARLY_INSTRUCTOR_RATING,
-        course_rating=EARLY_COURSE_RATING,
+
+    stored = world.world.seed(
+        COMPARISON_SET_TABLE, {}, **{LENGTH_COLUMN: TWELVE_WEEKS, LEVEL_COLUMN: LEVEL}
     )
-    return world
+    for course in ("early", "late"):
+        member_of(
+            world.world.seed, membership_table(world.world.tables), stored, world.course_row(course)
+        )
+    world.session.flush()
+    return stored[world.key_of(COMPARISON_SET_TABLE)]
 
 
-def test_two_start_cohorts_at_one_term_week_are_two_rows(
-    benchmark_world: BenchmarkWorld,
-) -> None:
-    """Criterion 6's first half: one row per start cohort, keyed by its start date.
+def the_series(world: PurviewWorld, set_id: Any) -> Any:
+    world.session.flush()
+    read = benchmarks_symbol(NAMED_SET_SERIES)
+    return read(
+        world.session,
+        set_id=set_id,
+        scope=world.scope(READER),
+        term_id=world.world.term_id(),
+        settings=world.settings,
+    )
 
-    Three sections answer in term week 5. Two of them started 8/17 and one
-    started 9/7, so the axis carries two lines at that week — §2.2's "one line
-    per start cohort" — and the 9/7 line is the section that is two weeks into
-    its course while the others are five.
 
-    **Both rows are asserted, not just the count.** "Two rows" is satisfied by a
-    view keyed on the section id that happened to produce two of three, so each
-    row's own section count and mean are checked: the early line is two sections
-    averaging 3.0 and the late line is one section at 9.0.
+def test_two_start_cohorts_at_one_term_week_are_two_lines(purview_world: PurviewWorld) -> None:
+    """One line per start cohort, keyed by its start date, each with its own figure at term week 5.
 
-    **The mutation it exists to survive**: `section_start_date` dropped from the
-    key, which produces one row at 5.0 — the figure §2.2 calls meaningless in as
-    many words. A key on the start *letter* instead of the date is the same
-    mutation in the shape the breakdown warns about: it passes here and fails
-    the moment two terms are in the world, because the letter map is
-    per-term admin data.
+    **Both lines are asserted, with their figures**: the early line's term-week-5
+    point carries 3.0 hours and the late line's 9.0; both points sit at term
+    week 5.
+
+    **The mutation it exists to survive**: the cohort dropped from the series'
+    key (one line at 6.0 — the figure §2.2 calls meaningless), or cohorts keyed by
+    start letter rather than start date.
     """
-    world = two_start_cohorts_at_one_term_week(benchmark_world)
+    world = purview_world
+    series = the_series(world, two_start_cohorts(world))
 
-    early = world.term_axis(
-        length_weeks=TWELVE_WEEKS,
-        level=UG,
-        term_week=THE_TERM_WEEK,
-        section_start_date=EARLY_START,
+    assert sorted(start_dates(series)) == [EARLY_START, LATE_START], (
+        f"The series' cohorts start on {start_dates(series)}; the set's sections start on "
+        f"{EARLY_START} and {LATE_START}, and §2.2 draws one line per start cohort."
     )
-    assert early is not None, (
-        f"`{COHORT_TERM_AXIS_VIEW}` has no row at term week {THE_TERM_WEEK} for the cohort that "
-        f"started {EARLY_START}, in which two sections answered. §2.2 puts one line per start "
-        "cohort on the aggregate axis, and an absent row makes everything below vacuous."
-    )
-    assert early["section_count"] == 2 and early["workload_mean"] == EARLY_MEAN, (
-        f"The {EARLY_START} line at term week {THE_TERM_WEEK} is {early}. Its two sections "
-        f"submitted {EARLY_FIRST_HOURS} and {EARLY_SECOND_HOURS} hours, a mean of {EARLY_MEAN}. A "
-        f"mean of {MEAN_IF_THE_COHORTS_ARE_FOLDED} is the {LATE_START} cohort folded in, and a "
-        "section count of 3 says the same thing in the other currency."
-    )
-
-    late = world.term_axis(
-        length_weeks=TWELVE_WEEKS,
-        level=UG,
-        term_week=THE_TERM_WEEK,
-        section_start_date=LATE_START,
-    )
-    assert late is not None, (
-        f"`{COHORT_TERM_AXIS_VIEW}` has no row at term week {THE_TERM_WEEK} for the cohort that "
-        f"started {LATE_START}, whose one section answered its second course week — the same "
-        "calendar week the other two answered their fifth. That is the second line §2.2's cohort "
-        "selector selects between; without it the axis has one line and the sentence has no "
-        "subject."
-    )
-    assert late["section_count"] == 1 and late["workload_mean"] == LATE_MEAN, (
-        f"The {LATE_START} line at term week {THE_TERM_WEEK} is {late}; its one section submitted "
-        f"{LATE_HOURS} hours."
+    early = the_week(series, start=EARLY_START, course_week=EARLY_COURSE_WEEK)
+    late = the_week(series, start=LATE_START, course_week=LATE_COURSE_WEEK)
+    for what, week in (("early", early), ("late", late)):
+        assert member(week, WEEK_TERM_WEEK_MEMBER, "A week") == THE_TERM_WEEK, (
+            f"The {what} cohort's point is at term week "
+            f"{member(week, WEEK_TERM_WEEK_MEMBER, 'A week')}, not {THE_TERM_WEEK}."
+        )
+    early_mean = week_figures(early)[WORKLOAD_MEAN]
+    late_mean = week_figures(late)[WORKLOAD_MEAN]
+    assert carries_value(early_mean, EARLY_HOURS) and carries_value(late_mean, LATE_HOURS), (
+        f"At term week {THE_TERM_WEEK} the early line's workload mean is "
+        f"{serialized_figure(early_mean)} and the late line's {serialized_figure(late_mean)}; "
+        f"they answered {EARLY_HOURS} and {LATE_HOURS}. {MEAN_IF_THE_COHORTS_ARE_FOLDED} is the "
+        "two cohorts folded into one line."
     )
 
 
-def test_two_sections_of_one_start_cohort_are_one_row(
-    benchmark_world: BenchmarkWorld,
-) -> None:
-    """The other side of the same key: a cohort is a line, not a section.
+def test_two_sections_of_one_start_cohort_are_one_line(purview_world: PurviewWorld) -> None:
+    """A cohort is a line, not a section: the three 8/17 sections are one cohort entry.
 
-    The two 8/17 sections are one row, which is what "one line per start cohort"
-    means and what makes the axis an aggregate rather than a per-section chart.
-    Without this, the test above is satisfied by a view keyed on the section id,
-    which produces a row per section — three lines where §2.2 asks for two, each
-    of them a single section's figures, and §4.1 item 7's minimum applied to
-    rows that are already about one section.
-
-    **The mutation it exists to survive**: `section_id` left in the term-axis
-    view's `GROUP BY` — the shape that arrives when the view is written by
-    copying the per-section report view and widening its key.
+    **The mutation it exists to survive**: the section left in the series' key —
+    a cohort per section, each a single section's figures.
     """
-    world = two_start_cohorts_at_one_term_week(benchmark_world)
-    require_benchmark_view(world.session, COHORT_TERM_AXIS_VIEW)
-
-    rows = world.rows(
-        COHORT_TERM_AXIS_VIEW,
-        length_weeks=TWELVE_WEEKS,
-        level=UG,
-        term_id=world.term_id(),
-        term_week=THE_TERM_WEEK,
-        section_start_date=EARLY_START,
+    world = purview_world
+    series = the_series(world, two_start_cohorts(world))
+    starts = start_dates(series)
+    assert starts.count(EARLY_START) == 1, (
+        f"The series carries {starts.count(EARLY_START)} cohorts starting {EARLY_START}: {starts}. "
+        "The set's three sections of that cohort are one line on §2.2's axis."
     )
-    assert len(rows) == 1, (
-        f"`{COHORT_TERM_AXIS_VIEW}` returns {len(rows)} rows for one start cohort at one term "
-        f"week: {rows}. Two sections of the {EARLY_START} cohort answered term week "
-        f"{THE_TERM_WEEK}, and §2.2 draws them as one line. A row per section is the per-section "
-        "view widened rather than an aggregate."
-    )
-    assert rows[0]["respondent_count"] == 2, (
-        f"The {EARLY_START} line's `respondent_count` is {rows[0]['respondent_count']!r}; two "
-        "students answered, one in each of the cohort's two sections."
+    figure = week_figures(the_week(series, start=EARLY_START, course_week=EARLY_COURSE_WEEK))
+    assert is_shown(figure[WORKLOAD_MEAN]), (
+        f"The 8/17 line's point at term week {THE_TERM_WEEK} is {serialized_figure(figure[WORKLOAD_MEAN])}; "
+        "its three sections and the respondent minimum meet both minimums, so it is shown only if "
+        "the line is over all three."
     )
 
 
-@pytest.mark.parametrize("view", sorted(TERM_AXIS_VIEWS), ids=sorted(TERM_AXIS_VIEWS))
-def test_the_term_axis_fabricates_no_row_for_a_week_nobody_answered(
-    benchmark_world: BenchmarkWorld, view: str
-) -> None:
-    """Criterion 6's second half: "a cohort with no data yields no fabricated zeros".
+def test_a_week_nobody_answered_carries_no_fabricated_zero(purview_world: PurviewWorld) -> None:
+    """No number for a week the cohort runs and nobody answered; the answered week has one.
 
-    Term week 6 is a week both cohorts run and neither answered. It has no row —
-    not a zero mean, not a null one, not a respondent count of nought.
+    **The answered week is asserted first** (`docs/MISTAKES.md` entry 3).
 
-    **The answered week is asserted first**, in the same test, because "no row
-    for term week 6" is equally true of a view that returns nothing at all
-    (`docs/MISTAKES.md` entry 3).
-
-    **The mutation it exists to survive**: a `LEFT JOIN` from `week`, or a cross
-    join of the term's weeks against the start-letter map, which emits a row per
-    cohort per term week whether or not anybody answered. On this axis that
-    shape is especially tempting, because a chart wants eighteen points per line
-    — and it is E9's job to draw the gap, not this view's job to invent a zero.
-    A fabricated row also carries a respondent count of nought into E5-04, where
-    it fails the minimum and reports a suppression for a cohort that has no data
-    rather than no permission.
+    **The mutation it exists to survive**: a zero-filled week (`coalesce(...,
+    0)`), which draws a line to zero and says something no student said.
     """
-    world = two_start_cohorts_at_one_term_week(benchmark_world)
-
-    answered = world.rows(
-        view,
-        length_weeks=TWELVE_WEEKS,
-        level=UG,
-        term_id=world.term_id(),
-        term_week=THE_TERM_WEEK,
-        section_start_date=EARLY_START,
+    world = purview_world
+    series = the_series(world, two_start_cohorts(world))
+    answered = week_figures(the_week(series, start=EARLY_START, course_week=EARLY_COURSE_WEEK))
+    assert all(
+        is_shown(figure) for figure in answered.values()
+    ), f"The answered week's figures are {[serialized_figure(f) for f in answered.values()]}."
+    empty = week_figures(
+        the_week(series, start=EARLY_START, course_week=AN_UNANSWERED_EARLY_COURSE_WEEK)
     )
-    assert answered, (
-        f"`public.{view}` has no row at term week {THE_TERM_WEEK} for the {EARLY_START} cohort, "
-        "which two sections answered. The absence asserted below would be true of a view that "
-        "returns nothing at all."
-    )
-
-    empty = world.rows(
-        view,
-        length_weeks=TWELVE_WEEKS,
-        level=UG,
-        term_id=world.term_id(),
-        term_week=AN_UNANSWERED_TERM_WEEK,
-        section_start_date=EARLY_START,
-    )
-    assert empty == [], (
-        f"`public.{view}` returns {empty} at term week {AN_UNANSWERED_TERM_WEEK}, which both "
-        "cohorts run and neither answered. These views return what was answered; a zero-filled "
-        "week is E9's to draw as a gap and E5-04's to tell apart from a suppression, and neither "
-        "can do it once the view has invented the row."
+    carried = {
+        name: serialized_figure(figure)
+        for name, figure in empty.items()
+        if serialized_figure(figure).get("figure") is not None
+    }
+    assert not carried, (
+        f"Course week {AN_UNANSWERED_EARLY_COURSE_WEEK} of the 8/17 cohort, which nobody answered, "
+        f"carries {carried}. A week with no data has no figure, never a zero."
     )
 
 
-def test_the_term_axis_rating_view_keys_by_stream_as_well_as_by_cohort(
-    benchmark_world: BenchmarkWorld,
+def test_the_instructor_and_course_lines_are_each_their_own_streams(
+    purview_world: PurviewWorld,
 ) -> None:
-    """The rating half of the axis: `stream` is a key column here too.
+    """The streams are separate: the instructor mean is 2 and the course mean 4, never 3.
 
-    Every section in this world rated the instructor 2 and the course 4, so the
-    two streams are two rows with two means. A view that dropped `stream` from
-    its key averages the two into 3 — a number that is about neither question,
-    on the axis a dean reads.
-
-    SPEC §5.1 puts the two streams in separate panels ("instructor stream above,
-    course stream below"), and E4-02's `question.stream` is the column that says
-    which is which. The ruling gives both rating views a `stream` key for that
-    reason.
-
-    **The mutation it exists to survive**: `stream` dropped from the term-axis
-    rating view's key while the course-week one keeps it — the closed-set defeat
-    (`docs/MISTAKES.md` entry 53's class) applied to a pair of views built from
-    one template, where fixing the half somebody tested leaves the other half
-    wrong.
+    **The mutation it exists to survive**: the stream dropped from the term-axis
+    rating read, which averages the two questions into 3.
     """
-    world = two_start_cohorts_at_one_term_week(benchmark_world)
-    require_benchmark_view(world.session, COHORT_RATING_TERM_AXIS_VIEW)
-
-    rows = world.rows(
-        COHORT_RATING_TERM_AXIS_VIEW,
-        length_weeks=TWELVE_WEEKS,
-        level=UG,
-        term_id=world.term_id(),
-        term_week=THE_TERM_WEEK,
-        section_start_date=EARLY_START,
+    world = purview_world
+    series = the_series(world, two_start_cohorts(world))
+    figures = week_figures(the_week(series, start=EARLY_START, course_week=EARLY_COURSE_WEEK))
+    assert carries_value(figures[INSTRUCTOR_FIGURE], INSTRUCTOR_RATING), (
+        f"The instructor line is {serialized_figure(figures[INSTRUCTOR_FIGURE])}; everyone rated "
+        f"the instructor {INSTRUCTOR_RATING}. {MEAN_IF_THE_STREAMS_ARE_FOLDED} is the streams folded."
     )
-    by_stream = {str(row["stream"]): row for row in rows}
-    assert sorted(by_stream) == sorted((INSTRUCTOR_STREAM, COURSE_STREAM)), (
-        f"The {EARLY_START} cohort's rating rows at term week {THE_TERM_WEEK} carry the streams "
-        f"{sorted(by_stream)}; SPEC §3.2 has two, and the ruling makes `stream` a key column on "
-        f"this view. The rows are {rows}. One row means the streams were folded together; none "
-        "means the view has no rows here at all, which the workload tests in this module diagnose."
-    )
-    assert by_stream[INSTRUCTOR_STREAM]["rating_mean"] == EARLY_INSTRUCTOR_RATING, (
-        f"The instructor line's `rating_mean` is "
-        f"{by_stream[INSTRUCTOR_STREAM]['rating_mean']!r}; both sections of this cohort rated the "
-        f"instructor {EARLY_INSTRUCTOR_RATING}. A mean of {MEAN_IF_THE_STREAMS_ARE_FOLDED} is the "
-        "course ratings averaged in with them."
-    )
-    assert by_stream[COURSE_STREAM]["rating_mean"] == EARLY_COURSE_RATING, (
-        f"The course line's `rating_mean` is {by_stream[COURSE_STREAM]['rating_mean']!r}; both "
-        f"sections rated the course {EARLY_COURSE_RATING}."
+    assert carries_value(figures[COURSE_FIGURE], COURSE_RATING), (
+        f"The course line is {serialized_figure(figures[COURSE_FIGURE])}; everyone rated the "
+        f"course {COURSE_RATING}."
     )

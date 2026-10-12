@@ -1,14 +1,19 @@
-"""E5-03 — the cohorts the benchmark views aggregate, and how a test reads one.
+"""E5-03 — the cohorts the benchmark arithmetic aggregates, and how a test reads one.
 
-Seven test modules need the same things: sections that differ in exactly one of
+Several test modules need the same things: sections that differ in exactly one of
 length, level, start cohort and term; students who answered the values the test
-chose; and one way of reading a row out of one of four views or out of one of
-two functions. A copy of any of them in each module is `docs/MISTAKES.md` entry
-13, so they all live here.
+chose; and one way of reading a row out of one of the two set functions. A copy
+of any of them in each module is `docs/MISTAKES.md` entry 13, so they all live
+here.
 
-**What this file decides, and what it refuses to.** Every view name, every
-column list and both function signatures below are transcribed from the ruling
-on `docs/disputes/E5-03-01.md`, quoted on the constants that carry them. That
+**E9-12 retired the four cohort views** this file was first written for (README
+decision 10), and deleted their names, column lists and readers from it; every
+sentence below about "the views" is E5-03's history, and the arithmetic they
+described is the two set functions'.
+
+**What this file decides, and what it refuses to.** Both function signatures
+below are transcribed from the ruling on `docs/disputes/E5-03-01.md` (and E5-14's
+freeze-at-close ruling), quoted on the constants that carry them. That
 ruling exists because they were settled nowhere: the ticket asks for a column
 list asserted "against an expected set" and named no columns, and a test author
 who filled that gap would have made the design decision under cover of writing
@@ -29,9 +34,9 @@ Two independent routes to the same fact, and
 control that keeps the transcription honest.
 
 **Nothing raises from a fixture.** `benchmark_world` hands back an *unbuilt*
-world, and every guard — the view is absent, the function is absent, a column
-the suite reads is missing — is a `pytest.fail` reached from a test body
-through `require_benchmark_view` or `require_benchmark_function`. On a tree
+world, and every guard — the function is absent or takes other arguments — is
+a `pytest.fail` reached from a test body through `require_benchmark_function`.
+On a tree
 where E5-03 is unbuilt each module is therefore a **failed** test naming the
 missing deliverable rather than an error in somebody's setup, which is
 `docs/MISTAKES.md` entry 44's rule and the difference between a red suite and a
@@ -41,7 +46,7 @@ broken one.
 take no `now`, so no test here moves the development clock and no answer
 depends on the date CI runs on. A view that filtered to "the current term"
 would have to read a clock, and
-`test_a_prior_term_section_has_its_own_row_at_the_same_course_week` is where
+`test_a_prior_term_section_is_in_the_current_sections_population` is where
 that shows up.
 
 **Window instants *are* read since E5-14, by the set functions.** The owner's
@@ -147,106 +152,15 @@ from fixtures.survey_windows import (
 )
 
 # ---------------------------------------------------------------------------
-# The four views and the two functions, as the ruling on E5-03-01 settles them.
-# ---------------------------------------------------------------------------
-
-# The object names follow the file names the ruling spells, through
-# [ADR 0041](../../docs/adr/0041-a-read-view-ships-as-an-immutable-versioned-sql-file.md),
-# which puts a view's SQL in `backend/app/views_sql/<object>_v<NNN>.sql`. That is
-# the one rule in this repository mapping a file to a relation, and it is how
-# `report_workload_v001.sql` names `report_workload`.
-COHORT_RATING_WEEK_VIEW = "benchmark_cohort_rating_week"
-COHORT_WEEK_VIEW = "benchmark_cohort_week"
-COHORT_RATING_TERM_AXIS_VIEW = "benchmark_cohort_rating_term_axis"
-COHORT_TERM_AXIS_VIEW = "benchmark_cohort_term_axis"
-
-# What each view returns, and the whole of it. Quoted from the ruling: "Views,
-# column lists as equality sets, in this order; `stream` is a key column, one row
-# per stream, the `report_rating_distribution_v001` shape".
+# The two functions, as the ruling on E5-03-01 settles them.
 #
-# **These are equalities rather than floors**, which is criterion 1 in as many
-# words: "a test asserts each view's column list against an expected set". Every
-# column one of these views returns is a column an instructor's connection may
-# read, and a column that arrives without a decision is the failure §4.1 exists
-# to prevent. The order is the ruling's and is recorded because the ruling gave
-# one; the assertion compares sets, because nothing here promises an order to a
-# payload that reads by name.
-BENCHMARK_VIEWS: dict[str, tuple[str, ...]] = {
-    COHORT_RATING_WEEK_VIEW: (
-        "length_weeks",
-        "level",
-        "term_id",
-        "course_week",
-        "stream",
-        "rating_mean",
-        "rating_count",
-    ),
-    COHORT_WEEK_VIEW: (
-        "length_weeks",
-        "level",
-        "term_id",
-        "course_week",
-        "workload_mean",
-        "workload_median",
-        "response_count",
-        "respondent_count",
-        "section_count",
-    ),
-    COHORT_RATING_TERM_AXIS_VIEW: (
-        "length_weeks",
-        "level",
-        "term_id",
-        "section_start_date",
-        "term_week",
-        "stream",
-        "rating_mean",
-        "rating_count",
-    ),
-    # The last two entries below are E5-04's and are **not** part of the E5-03
-    # ruling the rest of this dictionary is transcribed from; they are admitted
-    # on the ruling appended to `docs/disputes/E5-04-01.md`. That ticket's
-    # security round found the workload mean and median sealed against counts of
-    # everyone who answered anything, while the two figures are computed only
-    # over the responses that carry hours — ADR 0165 keeps a cohort week's row
-    # when nobody reports any — so hours from two students could be shown as a
-    # figure over fifteen people. That is `docs/MISTAKES.md` entry 50's class,
-    # and the `_v002` body answers the contributor counts each figure is actually
-    # about.
-    #
-    # **Admitted rather than added quietly.** Every column here is a column
-    # `pulse_app` may read, which is why this dictionary is compared as an
-    # equality in both directions: a widened view is a red test and a decision
-    # somebody argued, never a diff nobody noticed. Both new columns are
-    # aggregate counts of the class this view already carries — distinct students
-    # and distinct sections, over a cohort row with no id, no section key and no
-    # person in it — and neither is new reach, since the whole-relation grant
-    # already exposes `respondent_count` and `section_count` beside them. The
-    # same pair is admitted in `SANCTIONED_VIEW_COLUMNS` in
-    # `tests/integration/test_identity_grants.py` with the same sentence.
-    COHORT_TERM_AXIS_VIEW: (
-        "length_weeks",
-        "level",
-        "term_id",
-        "section_start_date",
-        "term_week",
-        "workload_mean",
-        "workload_median",
-        "response_count",
-        "respondent_count",
-        "section_count",
-        "workload_respondent_count",
-        "workload_section_count",
-    ),
-}
-
-# The course-week pair and the term-axis pair, for the tests that make the same
-# assertion of both axes. Named rather than derived from the dict above, because
-# a rule stated over "the views whose name contains term_axis" would follow a
-# rename into saying nothing.
-COURSE_WEEK_VIEWS = (COHORT_RATING_WEEK_VIEW, COHORT_WEEK_VIEW)
-TERM_AXIS_VIEWS = (COHORT_RATING_TERM_AXIS_VIEW, COHORT_TERM_AXIS_VIEW)
-RATING_VIEWS = (COHORT_RATING_WEEK_VIEW, COHORT_RATING_TERM_AXIS_VIEW)
-WORKLOAD_VIEWS = (COHORT_WEEK_VIEW, COHORT_TERM_AXIS_VIEW)
+# **The four cohort views that ruling also settled are retired by E9-12** (README
+# decision 10: E9-05 deleted their last reader). Their names, column lists and
+# readers were deleted from this file with them, and the tests that read them
+# were re-pointed at the two functions below and the service's resolvers; the
+# views' absence is asserted by `tests/integration/test_the_four_cohort_views_are_
+# retired.py`, which carries the column lists the downgrade restores.
+# ---------------------------------------------------------------------------
 
 # The two `SECURITY DEFINER` functions the ruling puts in place of the withdrawn
 # person-keyed view, quoted: "`benchmark_set_rating_week_v001.sql` defining
@@ -482,25 +396,8 @@ COURSE_RATING_POSITION = 3
 WORKLOAD_POSITION = 5
 
 # ---------------------------------------------------------------------------
-# Reading a view, a function, and the catalog.
+# Reading a function, and the catalog.
 # ---------------------------------------------------------------------------
-
-# Every column of one relation in `public`, from `pg_catalog` rather than from
-# `information_schema`. The difference matters for one caller: the information
-# schema shows a role only the relations it holds a privilege on, so a column
-# list read there as `pulse_app` comes back empty for a view nobody granted —
-# a missing grant reported as a missing view. Copied in shape from
-# `tests/fixtures/report_views.py`, whose docstring carries the measurement.
-RELATION_COLUMNS = """
-    SELECT a.attname
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
-    WHERE n.nspname = 'public'
-      AND c.relname = :relation
-      AND c.relkind IN ('v', 'm')
-    ORDER BY a.attnum
-"""
 
 # One function in `public` by name, with what a caller and a security review both
 # need to know about it: whether it is `SECURITY DEFINER`, what it takes and what
@@ -522,43 +419,6 @@ FUNCTION_SHAPE = """
 """
 
 
-def benchmark_view_columns(connection: Any, view: str) -> tuple[str, ...]:
-    """Every column `public.<view>` returns, in order, or an empty tuple if it is absent."""
-    rows = connection.execute(text(RELATION_COLUMNS), {"relation": view})
-    return tuple(str(row[0]) for row in rows)
-
-
-def require_benchmark_view(connection: Any, view: str) -> tuple[str, ...]:
-    """`view`'s columns, or a failure naming the deliverable that is missing.
-
-    Called as the first statement of a test body rather than from a fixture, so
-    that on a tree where E5-03 is unbuilt these modules are **failed** tests
-    naming the view rather than errors raised inside somebody's setup
-    (`docs/MISTAKES.md` entry 44). The second half — the columns this suite
-    reads — is checked here too, because a `SELECT` naming a column the view
-    does not have raises `UndefinedColumn` from the driver, which is the same
-    broken red in a different coat.
-    """
-    expected = BENCHMARK_VIEWS[view]
-    present = benchmark_view_columns(connection, view)
-    if not present:
-        pytest.fail(
-            f"There is no view `public.{view}` in the migrated database. E5-03 ships it from "
-            f"`backend/app/views_sql/{view}_v001.sql`, executed by that ticket's migration the way "
-            "the report views are executed (ADR 0041: the SQL lives in a versioned file and the "
-            "revision runs it by name). The ruling on `docs/disputes/E5-03-01.md` settles its rows "
-            f"as {list(expected)}."
-        )
-    missing = [column for column in expected if column not in present]
-    if missing:
-        pytest.fail(
-            f"`public.{view}` does not return {missing}; it returns {list(present)}. The ruling on "
-            f"`docs/disputes/E5-03-01.md` settles this view's rows as {list(expected)}, and every "
-            "test in this suite reads them by those names."
-        )
-    return present
-
-
 def function_shape(connection: Any, name: str) -> list[dict[str, Any]]:
     """Every function called `name` in `public`, as the catalog describes it."""
     return [
@@ -569,7 +429,7 @@ def function_shape(connection: Any, name: str) -> list[dict[str, Any]]:
 def require_benchmark_function(connection: Any, name: str) -> dict[str, Any]:
     """One benchmark set function, or a failure naming the file that should define it.
 
-    In a test body, never a fixture, for `require_benchmark_view`'s reason. The
+    In a test body, never a fixture (`docs/MISTAKES.md` entry 44). The
     argument list is checked here as well as the name, because a function of the
     right name taking other arguments fails the call with `UndefinedFunction`,
     which reads as "the function is missing" and is not. Since E5-14 the list is
@@ -604,51 +464,6 @@ def require_benchmark_function(connection: Any, name: str) -> dict[str, Any]:
             f"and one cutoff per week. Its signature is {shape['signature']}."
         )
     return shape
-
-
-def benchmark_rows(connection: Any, view: str, **filters: Any) -> list[dict[str, Any]]:
-    """Every row `view` holds, narrowed by whichever key columns the caller named.
-
-    The column list is the contract constant rather than `SELECT *`, so a view
-    that grew a column is caught by the column-list test with a message about
-    the widening instead of appearing quietly in every other assertion here.
-    A filter naming a column the view does not have is a failure here rather
-    than an `UndefinedColumn` from the driver.
-    """
-    require_benchmark_view(connection, view)
-    contract = BENCHMARK_VIEWS[view]
-    unknown = sorted(name for name in filters if name not in contract)
-    if unknown:
-        pytest.fail(
-            f"This suite asked `{view}` for rows narrowed by {unknown}, which it does not return; "
-            f"it returns {list(contract)}."
-        )
-    selected = ", ".join(contract)
-    clauses = " AND ".join(f"{name} = :{name}" for name in sorted(filters))
-    where = f" WHERE {clauses}" if clauses else ""
-    # The relation and every column name are module constants, never a caller's
-    # string; the values are bound.
-    statement = text(f"SELECT {selected} FROM public.{view}{where}")  # noqa: S608
-    return [dict(row) for row in connection.execute(statement, filters).mappings()]
-
-
-def one_benchmark_row(connection: Any, view: str, **filters: Any) -> dict[str, Any] | None:
-    """The single row `view` holds for one whole key, or `None`.
-
-    More than one row for one key is a failure of the view's own grouping, so it
-    is reported here rather than being silently indexed away — the shape a
-    `GROUP BY` missing a column produces, and the shape that makes a mean look
-    right because only the first of two rows was ever read.
-    """
-    rows = benchmark_rows(connection, view, **filters)
-    if len(rows) > 1:
-        pytest.fail(
-            f"`{view}` returned {len(rows)} rows for one key ({filters}): {rows}. The ruling on "
-            f"`docs/disputes/E5-03-01.md` settles this view as {list(BENCHMARK_VIEWS[view])}, "
-            "whose key columns the caller has just named in full, so a second row for one key is "
-            "a grouping defect rather than a value this suite can read."
-        )
-    return rows[0] if rows else None
 
 
 def cutoffs_after_every_window(
@@ -1535,65 +1350,6 @@ class BenchmarkWorld:
 
     # -- reading back ----------------------------------------------------------
 
-    def rows(self, view: str, **filters: Any) -> list[dict[str, Any]]:
-        """Every row `view` holds under the given key columns, flushed first."""
-        self.session.flush()
-        return benchmark_rows(self.session, view, **filters)
-
-    def row(self, view: str, **filters: Any) -> dict[str, Any] | None:
-        self.session.flush()
-        return one_benchmark_row(self.session, view, **filters)
-
-    def cohort_week(
-        self, *, length_weeks: int, level: str, course_week: int, term: str = CURRENT_TERM
-    ) -> dict[str, Any] | None:
-        """The one workload-and-counts row for a whole course-week cohort key."""
-        return self.row(
-            COHORT_WEEK_VIEW,
-            length_weeks=length_weeks,
-            level=level,
-            term_id=self.term_id(term),
-            course_week=course_week,
-        )
-
-    def cohort_rating_week(
-        self,
-        *,
-        length_weeks: int,
-        level: str,
-        course_week: int,
-        stream: str,
-        term: str = CURRENT_TERM,
-    ) -> dict[str, Any] | None:
-        """The one rating row for a whole course-week cohort key and one stream."""
-        return self.row(
-            COHORT_RATING_WEEK_VIEW,
-            length_weeks=length_weeks,
-            level=level,
-            term_id=self.term_id(term),
-            course_week=course_week,
-            stream=stream,
-        )
-
-    def term_axis(
-        self,
-        *,
-        length_weeks: int,
-        level: str,
-        term_week: int,
-        section_start_date: date,
-        term: str = CURRENT_TERM,
-    ) -> dict[str, Any] | None:
-        """The one term-axis row for one start cohort at one term week."""
-        return self.row(
-            COHORT_TERM_AXIS_VIEW,
-            length_weeks=length_weeks,
-            level=level,
-            term_id=self.term_id(term),
-            term_week=term_week,
-            section_start_date=section_start_date,
-        )
-
     def set_week(
         self, *labels: str, cutoffs: Mapping[int, datetime] | None = None
     ) -> list[dict[str, Any]]:
@@ -1658,10 +1414,10 @@ def pinned_benchmark_clock(clock_overrides: Any) -> Any:
 
 @pytest.fixture
 def benchmark_world(configured_env: dict[str, str], report_world: ReportWorld) -> BenchmarkWorld:
-    """The world E5-03's views are measured over, **unbuilt**.
+    """The world E5-03's benchmark arithmetic is measured over, **unbuilt**.
 
     Unbuilt for `docs/MISTAKES.md` entry 44's reason: every guard this world
-    raises — a missing view, a missing function, a missing `question.stream` —
+    raises — a missing function, a missing `question.stream` —
     has to fire inside a test body so the red is a failure rather than an error
     in setup.
 
@@ -1684,9 +1440,8 @@ def committed_benchmark_world(
     """The same world, committed, so a second connection can read it.
 
     The application role connects for itself (ADR 0001: the pool is bound to the
-    service), so a test that reads a benchmark view **as `pulse_app`** over real
-    rows needs them committed or it is reading an empty view and calling it a
-    pass. `committed_rows` removes whatever appeared when the test ends.
+    service), so a test that calls a benchmark set function **as `pulse_app`** over real
+    rows needs them committed or it is reading nothing and calling it a pass. `committed_rows` removes whatever appeared when the test ends.
 
     The session states its environment for the reason
     `committed_report_world` states it: Batch C's registration-address rules
@@ -1707,16 +1462,10 @@ __all__ = [
     "BENCHMARK_POINT",
     "BENCHMARK_SERVICE_NAMES",
     "BENCHMARK_TREND",
-    "BENCHMARK_VIEWS",
     "BENCHMARK_WORKLOAD",
-    "COHORT_RATING_TERM_AXIS_VIEW",
-    "COHORT_RATING_WEEK_VIEW",
-    "COHORT_TERM_AXIS_VIEW",
-    "COHORT_WEEK_VIEW",
     "COMPARISON_FIGURE_TYPE",
     "COURSE_RATING_POSITION",
     "COURSE_STREAM",
-    "COURSE_WEEK_VIEWS",
     "CURRENT_TERM",
     "CUTOFFS_PARAMETER",
     "DEFAULT_SET_POPULATION",
@@ -1734,7 +1483,6 @@ __all__ = [
     "PRIOR_TERM_WEEKS",
     "PRIOR_WINDOWS_BY_TERM_WEEK",
     "PROVENANCE_CHECK",
-    "RATING_VIEWS",
     "REPORTING_MODULE",
     "RESOLVE_DEFAULT_SET",
     "RESOLVE_NAMED_SET",
@@ -1744,18 +1492,14 @@ __all__ = [
     "SET_FUNCTION_RESULT_COLUMNS",
     "SET_FUNCTION_SIGNATURE",
     "SET_RATING_FUNCTION",
-    "TERM_AXIS_VIEWS",
     "UG",
     "UGGR",
     "UNIVERSITY_POPULATION",
     "WORKLOAD_COMPARISON",
     "WORKLOAD_POSITION",
-    "WORKLOAD_VIEWS",
     "BenchmarkWorld",
     "PlantedSection",
     "a_population",
-    "benchmark_rows",
-    "benchmark_view_columns",
     "benchmarks_api",
     "benchmarks_module",
     "carries",
@@ -1765,11 +1509,9 @@ __all__ = [
     "function_shape",
     "mean_and_median",
     "numbers_in",
-    "one_benchmark_row",
     "points_by_week",
     "reporting_symbol",
     "require_benchmark_function",
-    "require_benchmark_view",
     "serialized_figure",
     "set_function_rows",
     "spread",
