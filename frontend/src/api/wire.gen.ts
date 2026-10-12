@@ -246,6 +246,85 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/session/landings": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The views this session may switch to
+         * @description The session's own view and every view its person holds at its door, read now.
+         *
+         *     SPEC §2.1's door rules come from `app.services.authz.resolve_landings`, over
+         *     the assignments' own door columns: a web session is never offered the
+         *     instructor or student view, and a launch session never Care or Admin.
+         */
+        readonly get: operations["read_session_landings_session_landings_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/session/switch": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Switch to another view this session's person holds
+         * @description A new session in the asked view, the old one revoked; or a 403 that changes nothing.
+         *
+         *     `app.services.session.switch_session` re-reads the person's views at this
+         *     door and decides. On success the new token is answered in the body, for the
+         *     SPA's Bearer carrier, and set as the session cookie beside a fresh CSRF
+         *     token bound to it. A refusal sets no cookie and leaves the old session live.
+         */
+        readonly post: operations["switch_session_session_switch_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/session/logout": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * End this session
+         * @description Revoke this session and clear both cookies: 204, whatever was presented.
+         *
+         *     The session is read by `app.api.deps.ending_session`, which checks the
+         *     signature and expiry but not revocation, so a second logout with the same
+         *     token answers exactly as the first did; the revocation is an insert that
+         *     does nothing on conflict. That read also applies the double-submit check
+         *     when the session rides the cookie, and a refusal there is a 403 that ends
+         *     nothing. With no valid session at all, the cookies are still cleared, so a
+         *     browser holding a cookie the server no longer accepts is not stranded.
+         *
+         *     Back-channel logout from the identity provider is E13's (ruling 8).
+         */
+        readonly post: operations["log_out_session_logout_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/student/survey": {
         readonly parameters: {
             readonly query?: never;
@@ -1756,6 +1835,50 @@ export interface components {
             readonly length_weeks: number;
         };
         /**
+         * SessionLandings
+         * @description `GET /session/landings`: the session's own view, and every view held at its door.
+         *
+         *     `landings` is in `LANDING_PRECEDENCE` order with the student view last, and
+         *     includes `current`.
+         */
+        readonly SessionLandings: {
+            /**
+             * Current
+             * @enum {string}
+             */
+            readonly current: "student" | "instructor" | "leadership" | "care" | "admin";
+            /** Landings */
+            readonly landings: readonly ("student" | "instructor" | "leadership" | "care" | "admin")[];
+        };
+        /**
+         * SessionSwitch
+         * @description `POST /session/switch`: the one view to switch to.
+         */
+        readonly SessionSwitch: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            readonly role: "student" | "instructor" | "leadership" | "care" | "admin";
+        };
+        /**
+         * SessionSwitched
+         * @description What a switch answers with: the role of the new session, and the session itself.
+         *
+         *     The token is also set as the session cookie, beside a fresh CSRF token. It is
+         *     in the body for the SPA's Bearer carrier, which is how the session travels
+         *     inside the LMS's iframe (ADR 0089).
+         */
+        readonly SessionSwitched: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            readonly role: "student" | "instructor" | "leadership" | "care" | "admin";
+            /** Session */
+            readonly session: string;
+        };
+        /**
          * SetDetail
          * @description One set on its own: the summary, its membership, and when it was written.
          *
@@ -2616,6 +2739,77 @@ export interface operations {
                 content: {
                     readonly "application/json": unknown;
                 };
+            };
+        };
+    };
+    readonly read_session_landings_session_landings_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["SessionLandings"];
+                };
+            };
+        };
+    };
+    readonly switch_session_session_switch_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["SessionSwitch"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["SessionSwitched"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly log_out_session_logout_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
