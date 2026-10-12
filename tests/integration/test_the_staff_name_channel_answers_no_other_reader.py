@@ -19,7 +19,9 @@ entry 3: an empty answer is also what a channel that answers nobody gives).
 — a launched student has no `person` (ADR 0028) — and a member of staff by person
 key. So a student is asked at the definer only (the service's keywords are
 decision 3's, which name a person key), and a member of staff at both the service
-and the definer. Two pairs pin the key rule itself: both keys null and both keys
+and the definer, except a chair: since E9-03 a chair's door answer is ruled by the
+purview (ruling 3), so the two chair tests hold v001 alone to its chair rule (see
+`chair_answer`). Two pairs pin the key rule itself: both keys null and both keys
 set answer nothing beside each key alone answering; and each check runs on its
 own key only (a student's person key and a teacher's user key reach nothing).
 
@@ -189,50 +191,66 @@ def test_a_lead_of_a_sibling_course_is_answered_nothing(staff_names: StaffNameWo
     )
 
 
+def chair_answer(world: StaffNameWorld, section_id: Any, reader: Person) -> list[str]:
+    """A chair, by person key, at v001 only.
+
+    **Why not the service as well, since E9-03.** Ruling 3 (narrowed by README
+    decision 16) moves a chair's door answer to the purview: the set-based
+    definer answers chair and above for any section passed, and the door passes
+    a leadership reader only the sections in their scope. So "a chair asking
+    through the door with no scope is answered nothing" is no longer the rule,
+    and the chair's door refusal is asserted with a scope in
+    `test_the_staff_name_channel_answers_a_set_of_sections.py` (done-when 5).
+    v001 stays (E9-03's settlement) and keeps its own chair rule, which these
+    two tests go on holding it to.
+    """
+    return ask_the_definer(
+        world.application_session, section_id=section_id, reader_person_id=reader.person_id
+    ).names
+
+
 def test_a_chair_of_another_department_is_answered_nothing(staff_names: StaffNameWorld) -> None:
-    """Chairs a second department: nothing for the unmapped course; its own chair is answered.
+    """Chairs a second department: v001 answers nothing for the unmapped course; its chair, names.
 
     **The mutation this kills:** "holds `CHAIR` somewhere", or `CHAIR` at college
-    grain (both departments share a college here).
+    grain (both departments share a college here), in v001.
     """
     world = staff_names
     prepared(world)
     assert world.chair is not None and world.other_chair is not None
 
-    twin = staff_answers(world, world.unmapped_section, world.chair)
-    assert twin == ([UNMAPPED_TEACHER_NAME], [UNMAPPED_TEACHER_NAME]), (
-        f"The twin: the department's chair asking about its unmapped course's section was "
+    twin = chair_answer(world, world.unmapped_section, world.chair)
+    assert twin == [UNMAPPED_TEACHER_NAME], (
+        f"The twin: the department's chair asking v001 about its unmapped course's section was "
         f"answered {twin}."
     )
-    service, definer = staff_answers(world, world.unmapped_section, world.other_chair)
-    assert service == [] and definer == [], staff_refused(
-        world.other_chair, "the unmapped course's section, in another department", service, definer
+    definer = chair_answer(world, world.unmapped_section, world.other_chair)
+    assert definer == [], student_refused(
+        world.other_chair, "the unmapped course's section, in another department", definer
     )
 
 
 def test_the_departments_chair_is_answered_nothing_for_a_course_that_has_a_lead(
     staff_names: StaffNameWorld,
 ) -> None:
-    """The chair, one level out: answered for the unmapped course, nothing for the led one.
+    """The chair, one level out, at v001: answered for the unmapped course, nothing for the led one.
 
     Work order decision 1 (c) is `lead_review_courses`' rule: the chair is
-    responsible for a course in their department **with no lead**.
+    responsible for a course in their department **with no lead**. v001 keeps it;
+    the door no longer does (see `chair_answer`).
 
-    **The mutation this kills:** the chair branch over the whole department.
+    **The mutation this kills:** v001's chair branch over the whole department.
     """
     world = staff_names
     prepared(world)
     assert world.chair is not None
 
-    twin = staff_answers(world, world.unmapped_section, world.chair)
-    assert twin == (
-        [UNMAPPED_TEACHER_NAME],
-        [UNMAPPED_TEACHER_NAME],
-    ), f"The twin: the chair asking about the unmapped course's section was answered {twin}."
-    service, definer = staff_answers(world, world.taught, world.chair)
-    assert service == [] and definer == [], staff_refused(
-        world.chair, "F1WW, whose course has a lead", service, definer
-    )
+    twin = chair_answer(world, world.unmapped_section, world.chair)
+    assert twin == [
+        UNMAPPED_TEACHER_NAME
+    ], f"The twin: the chair asking v001 about the unmapped course's section was answered {twin}."
+    definer = chair_answer(world, world.taught, world.chair)
+    assert definer == [], student_refused(world.chair, "F1WW, whose course has a lead", definer)
 
 
 def test_an_instructor_whose_teaching_grant_the_roster_ended_is_answered_nothing(

@@ -1,19 +1,25 @@
 """The response loop (SPEC §5.3): who a section's staff are, by name, for a reader of it.
 
 The first piece is the one Python door to the staff-name definer,
-`public.section_staff_names` (`views_sql/section_staff_names_v001.sql`, ADR 0191).
-SPEC §5.3 posts a response under its author's name, and the survey page names the
-section's professor, so a student has to be able to read a member of staff's
-name, and `pulse_app` holds no privilege on `person`. The definer answers one
-section's live teaching instructors and anyone who has published a response to
-it, and only to a reader of that section. Every reader check is inside it.
+`public.section_staff_names` (the set-based overload in
+`views_sql/section_staff_names_v002.sql`, ADR 0201, which supersedes ADR 0191 in
+part). SPEC §5.3 posts a response under its author's name, the survey page names
+the section's professor, and E9's leadership pages name each section's lead,
+chair and dean, so a reader has to be able to read a member of staff's name, and
+`pulse_app` holds no privilege on `person`. The definer answers, for each section
+passed that the reader may read, its live teaching instructors, anyone who has
+published a response to it, its course's lead, its department's chair and its
+college's dean, each as a row of its own role. Every reader check is inside it.
 
 **This module is the only one under `backend/app/` that names the definer**
 (`tests/unit/test_only_the_response_loop_service_names_the_staff_name_definer.py`).
-The definer trusts the reader key it is handed, so the one thing a caller must
-get right is to pass the reader of its own session — the student's `user` key
-or the member of staff's `person` key — and never a key taken from a request. A
-second caller would be a second place that could get it wrong.
+The definer trusts the reader key and the reader's date it is handed, and it
+answers chair and above for any section passed. So a caller must get three things
+right: pass the reader of its own session — the student's `user` key or the
+member of staff's `person` key — and never a key taken from a request; let the
+door compute the date; and, for a leadership reader, pass the scope resolved for
+that reader, so the door sends only purview sections. A second caller would be a
+second place that could get them wrong.
 
 **A refusal is an empty list**, the same answer a section with no instructor
 gives, and nothing here logs what it was asked or what it answered: no refusal
@@ -71,6 +77,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -101,6 +108,7 @@ from app.schemas.response_loop import (
 )
 from app.services import clock, reporting, survey_read
 from app.services.authz import (
+    ActorScope,
     chaired_courses_with_a_lead,
     lead_review_courses,
     taught_or_once_taught_section_ids,
@@ -116,6 +124,7 @@ __all__ = [
     "ResponseAlreadyPublishedError",
     "ResultsUnavailableError",
     "StaffName",
+    "StaffNameRole",
     "edit_as_instructor",
     "edit_on_behalf",
     "first_response",
@@ -141,18 +150,34 @@ __all__ = [
 
 # The parameters are cast rather than written with `::`, because SQLAlchemy's
 # `text()` stops reading a bind parameter at a colon, and an uncast null is
-# untyped.
+# untyped. The ids travel as one array, so a page's sections are one call.
 _SECTION_STAFF_NAMES = text(
-    "SELECT person_id, display_name FROM public.section_staff_names("
-    "CAST(:section_id AS uuid), CAST(:reader_user_id AS uuid), "
-    "CAST(:reader_person_id AS uuid))"
+    "SELECT section_id, role, person_id, display_name FROM public.section_staff_names("
+    "CAST(:section_ids AS uuid[]), CAST(:reader_user_id AS uuid), "
+    "CAST(:reader_person_id AS uuid), CAST(:reader_date AS date))"
 )
+
+
+class StaffNameRole(StrEnum):
+    """What a named member of staff is to the section the row names (ADR 0201)."""
+
+    INSTRUCTOR = "INSTRUCTOR"
+    AUTHOR = "AUTHOR"
+    LEAD_FACULTY = "LEAD_FACULTY"
+    CHAIR = "CHAIR"
+    DEAN = "DEAN"
 
 
 @dataclass(frozen=True)
 class StaffName:
-    """One member of staff the definer answered: their `person` key and their name."""
+    """One row the definer answered: a section, a role there, a `person` key and a name.
 
+    One person can be several rows: a teacher who also published is an
+    `INSTRUCTOR` row and an `AUTHOR` row of the same section.
+    """
+
+    section_id: UUID
+    role: StaffNameRole
     person_id: UUID
     display_name: str
 
@@ -160,11 +185,13 @@ class StaffName:
 def section_staff_names(
     session: Session,
     *,
-    section_id: UUID,
+    section_ids: Sequence[UUID],
     reader_user_id: UUID | None = None,
     reader_person_id: UUID | None = None,
+    scope: ActorScope | None,
+    settings: Settings | None = None,
 ) -> list[StaffName]:
-    """The staff names one reader may read for one section; empty for any other reader.
+    """The staff names one reader may read for a set of sections, in one definer call.
 
     Name the reader by exactly one key: a student by `reader_user_id` (a
     launched student has no `person`, ADR 0028), a member of staff by
@@ -172,22 +199,60 @@ def section_staff_names(
     `ValueError` here, rather than reaching the definer, which would answer it
     with nothing.
 
-    Answered in the definer's order, by name and then by key.
+    **`scope` is required, and a leadership caller must pass the reader's
+    resolved `ActorScope`.** It has no default, so every caller states its
+    choice: `scope=None` is an explicit opt-out, written at the call site. The
+    definer answers a reader holding `CHAIR`,
+    `ASSISTANT_DEAN`, `DEAN` or `VP_ACADEMICS` for any section it is handed
+    (ADR 0201), so the purview is applied here: given a scope, only the
+    sections in `scope.purview.section_ids` reach the definer. A scope resolved
+    for someone other than `reader_person_id`, or given with a user key, raises
+    `ValueError`, before any statement is sent. With `scope=None` every id is
+    passed, which is right for a student, an instructor or a lead, whom the
+    definer checks per section, and wrong for chair and above.
+
+    **The reader's date is the application clock's** (`clock.today`, in the
+    institution's timezone, development override included), so the definer's
+    live-enrollment check agrees with the survey read's. `settings` is the
+    configuration the caller already holds; without one it is read here.
+
+    Answered in the definer's order: by section, role, name and key. A list of
+    ids that leaves nothing to ask answers an empty list without a call.
     """
     if (reader_user_id is None) == (reader_person_id is None):
         raise ValueError(
             "section_staff_names takes exactly one reader key: reader_user_id for a student, "
             "reader_person_id for a member of staff."
         )
+    asked = list(dict.fromkeys(section_ids))
+    if scope is not None:
+        if scope.person_id != reader_person_id:
+            raise ValueError(
+                "section_staff_names was given a scope resolved for another reader than "
+                "reader_person_id; a scope belongs to the member of staff it was resolved for."
+            )
+        asked = [section_id for section_id in asked if section_id in scope.purview.section_ids]
+    if not asked:
+        return []
+    reader_date = clock.today(session, settings=Settings() if settings is None else settings)
     rows = session.execute(
         _SECTION_STAFF_NAMES,
         {
-            "section_id": str(section_id),
+            "section_ids": [str(section_id) for section_id in asked],
             "reader_user_id": None if reader_user_id is None else str(reader_user_id),
             "reader_person_id": None if reader_person_id is None else str(reader_person_id),
+            "reader_date": reader_date,
         },
     ).all()
-    return [StaffName(person_id=row.person_id, display_name=row.display_name) for row in rows]
+    return [
+        StaffName(
+            section_id=row.section_id,
+            role=StaffNameRole(row.role),
+            person_id=row.person_id,
+            display_name=row.display_name,
+        )
+        for row in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -539,10 +604,10 @@ def _state_and_response(
 
     The caller has already decided the reader may read this week. The author's
     name comes through the staff-name definer, asked as that reader (exactly one
-    of the two keys, as `section_staff_names` requires). The definer answers
-    anyone who has published to the section, so a response whose author it does
-    not answer is a broken invariant, and raises rather than serving the response
-    unattributed.
+    of the two keys, as `section_staff_names` requires) about this one section.
+    The definer answers anyone who has published to the section as an `AUTHOR`
+    row, so a response whose author it does not answer is a broken invariant, and
+    raises rather than serving the response unattributed.
     """
     opens_at = reporting.report_opens_at(closes_at, zone=ZoneInfo(settings.institution_timezone))
     policy = policy_of_record(session, course_id=section.course_id, report_opens_at=opens_at)
@@ -558,10 +623,13 @@ def _state_and_response(
         staff.person_id: staff.display_name
         for staff in section_staff_names(
             session,
-            section_id=section.id,
+            section_ids=[section.id],
             reader_user_id=reader_user_id,
             reader_person_id=reader_person_id,
+            scope=None,
+            settings=settings,
         )
+        if staff.role is StaffNameRole.AUTHOR
     }
     if first.author_person_id not in names:
         raise RuntimeError(
