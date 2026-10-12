@@ -81,7 +81,11 @@ refusals make it seven:
     to it. **Since E8-01 it carries item 5's line** (its done-when 10): the page
     now shows what classmates wrote and how they rated the week, so it says once
     what happens to a student's identity, as the survey and the report do. The
-    line is `student_results.confidentiality`, in `studentResults.ts`.
+    line is `student_results.confidentiality`, in `studentResults.ts`;
+  - `admin_people`, E9-02's: the named refusals the admin's people-graph writes
+    answer with, registered in `app/copy/admin_people.py`, to which E9-06's
+    routes and E9-10's editor screens add their sentences. Staff records only,
+    so it owes item 5 no line (E9 README decision 15).
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
@@ -223,6 +227,31 @@ ENTRY = "entry"
 LEADERSHIP_MODERATION = "leadership_moderation"
 LEADERSHIP_RESPONSE = "leadership_response"
 STUDENT_RESULTS = "student_results"
+ADMIN_PEOPLE = "admin_people"
+
+# E9-02's settled interface (§3): the people-graph definers' thirteen named
+# refusals and the admin gate's two sentences, every one in
+# `app/copy/admin_people.py`. Keys only, never the words (`docs/MISTAKES.md`
+# entry 19).
+ADMIN_PEOPLE_SETTLED_KEYS = frozenset(
+    {
+        "admin_people.actor_not_an_admin",
+        "admin_people.no_such_person",
+        "admin_people.no_such_assignment",
+        "admin_people.instructor_is_lms_owned",
+        "admin_people.scope_is_not_the_roles_node",
+        "admin_people.assignment_has_reports",
+        "admin_people.edge_does_not_climb",
+        "admin_people.no_such_course",
+        "admin_people.course_already_led",
+        "admin_people.course_not_led",
+        "admin_people.subject_linked_to_another",
+        "admin_people.person_already_linked",
+        "admin_people.person_not_linked",
+        "admin_people.not_an_admin_session",
+        "admin_people.not_your_role",
+    }
+)
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
@@ -315,6 +344,18 @@ GOVERNED_SURFACES = {
     # sentence added to the results page would read as the survey's second line —
     # or the survey's own line, moved there, as satisfying both.
     "student_results": STUDENT_RESULTS,
+    # E9-02's People & reporting editor and Lead Faculty mapping table (SPEC
+    # §6.3): the admin definers' named refusals, registered in
+    # `app/copy/admin_people.py` (README decision 15). E9-06 adds the routes'
+    # sentences and E9-10 the screens' copy under the same prefix, so it is one
+    # surface from both sources, as `leadership_comparison_sets` is.
+    #
+    # **The mutation this row kills** is the refusals filed under an existing
+    # prefix to turn the totality rule green, which would count the admin's
+    # screens toward a surface a student or a leader reads. With this row, a
+    # module that registers nothing under `admin_people.` is red in
+    # `test_every_governed_surface_collects_at_least_one_string`.
+    "admin_people": ADMIN_PEOPLE,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -398,6 +439,14 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
         "E6-05-02 placement for backend refusals alone: whether E7-07's policy, owed and "
         "on-behalf pages owe item 5 a line is that ticket's question, and the on-behalf "
         "composer shows stored summaries, so it is asked again there (MISTAKES entry 22)."
+    ),
+    ADMIN_PEOPLE: (
+        "SPEC §6.3's People & reporting editor and Lead Faculty mapping table, and the named "
+        "refusals the admin's people-graph writes answer with. Everything on them is a staff "
+        "record: a person's name and category, their role assignments, who each reports to, "
+        "which courses each leads, and whether a web login is linked. No student, no response, "
+        "comment or rating of anybody's is shown, so item 5's sentence would have no subject "
+        "(E9 README decision 15)."
     ),
 }
 
@@ -3174,6 +3223,77 @@ def test_the_entry_surface_owes_no_line_and_collects_from_the_registry() -> None
         f"The {ENTRY} surface owes item 5 no line and carries {carrying}.\n"
         "\n"
         f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[ENTRY]}"
+    )
+
+
+@pytest.mark.invariant
+def test_the_admin_people_surface_owes_no_line_and_collects_its_refusals_from_the_registry() -> (
+    None
+):
+    """SPEC §4.1 item 5's answer for E9-02's `admin_people` surface, asserted as a named fact.
+
+    E9-02's done-when 11: "The copy inventory places `admin_people` in
+    `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason, and collects the
+    refusal sentences under it." The people pages show staff records and no
+    student's data (README decision 15), so item 5's sentence would have no
+    subject. The general rule above holds every no-line surface to zero; this is
+    here because zero is satisfied perfectly by a surface that collects nothing
+    (`docs/MISTAKES.md` entry 3), and E9-02 ships this surface's backend half
+    only — the definers' refusals in `app/copy/admin_people.py` — so that half is
+    required to collect before the zero is believed. E9-10's screen copy joins
+    the prefix later and changes nothing here.
+
+    **The mutations it kills:** the surface moved into
+    `CONFIDENTIALITY_KEY_OF_SURFACE`; the row's reason emptied; the refusals
+    written inline in SQL or filed under another prefix, so nothing is collected
+    under `admin_people.`; a reassuring identity sentence added to an admin
+    refusal. **Expected red before E9-02 lands:** a FAILED on the collection
+    assertion — no module registers anything under the prefix yet.
+    """
+    assert ADMIN_PEOPLE in SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
+        f"The {ADMIN_PEOPLE} surface is not recorded as owing item 5 no line. That answer is a "
+        "row in `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason written out."
+    )
+    assert SURFACES_WITH_NO_CONFIDENTIALITY_LINE[ADMIN_PEOPLE].strip(), (
+        f"The {ADMIN_PEOPLE} row records no reason. A row with no argument in it is an omission "
+        "that reads like a decision (ADR 0158)."
+    )
+    assert ADMIN_PEOPLE not in CONFIDENTIALITY_KEY_OF_SURFACE, (
+        f"The {ADMIN_PEOPLE} surface is in both line maps: one demands exactly one "
+        "confidentiality string and the other forbids any."
+    )
+    prefixes = sorted(
+        prefix for prefix, surface in GOVERNED_SURFACES.items() if surface == ADMIN_PEOPLE
+    )
+    assert prefixes == [ADMIN_PEOPLE], (
+        f"The {ADMIN_PEOPLE} surface is governed under {prefixes}; E9-02 places it under the one "
+        f"prefix `{ADMIN_PEOPLE}.`."
+    )
+
+    backend = [
+        string.key for string in collect_backend_copy() if prefix_of(string.key) == ADMIN_PEOPLE
+    ]
+    assert backend, (
+        f"No string under `{ADMIN_PEOPLE}.` is collected from `{COPY_PACKAGE}`. E9-02's 'Owns': "
+        "`backend/app/copy/admin_people.py` holds the definers' named refusals as governed "
+        "sentences, and a zero counted over a surface that collects nothing is not an answer to "
+        "item 5."
+    )
+    missing = sorted(ADMIN_PEOPLE_SETTLED_KEYS - set(backend))
+    assert not missing, (
+        f"These settled `{ADMIN_PEOPLE}.` keys are not collected from `{COPY_PACKAGE}`: {missing}. "
+        "E9-02's settled interface names thirteen definer refusals and the gate's two sentences, "
+        "all in `app/copy/admin_people.py`; a refusal the inventory cannot see is one item 4's "
+        "sweep never reads."
+    )
+
+    inventory = collect_shipped_copy()
+    assert inventory, "The inventory is empty, so this rule passed over nothing."
+    carrying = sorted(string.key for string in confidentiality_strings(inventory, ADMIN_PEOPLE))
+    assert not carrying, (
+        f"The {ADMIN_PEOPLE} surface owes item 5 no line and carries {carrying}.\n"
+        "\n"
+        f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[ADMIN_PEOPLE]}"
     )
 
 
