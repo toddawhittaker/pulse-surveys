@@ -144,7 +144,11 @@ describe('AppShell', () => {
     expect(await screen.findByTestId(SIGNED_OUT_TESTID)).toBeTruthy();
     const heading = screen.getByRole('heading', { level: 1 });
     expect(heading.textContent).toBe('You are signed out');
-    expect(document.activeElement).toBe(heading);
+    // The focus is moved by an effect, which can run a little after the state
+    // that drew the heading is on screen.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(heading);
+    });
     expect(screen.queryByText('The page')).toBeNull();
     expect(sessionToken()).toBeNull();
     const sent = asked.find((ask) => ask.method === 'POST');
