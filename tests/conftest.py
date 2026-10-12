@@ -155,14 +155,14 @@ boundary: `metadata_tables` is asked for by both.
     neither the creation order nor the code order, and the two sessions criterion
     3 is about — a person holding no grant, and a session naming no person —
     which no launch can issue and which are therefore minted.
-  - `fixtures/benchmark_views.py` — E5-03: the four benchmark views' column
-    contracts and the two `SECURITY DEFINER` set functions' signatures, both
-    transcribed from the ruling on `docs/disputes/E5-03-01.md` because neither
-    was settled anywhere else; a world of two terms whose sections differ in one
-    thing at a time — length, level, start cohort or term — so every membership
-    rule can be asserted from both sides; and one reader for a row of each view
-    and each function, on `db_session` and on a committed world the application
-    role can reach. Every guard it raises is a `pytest.fail` a test body reaches,
+  - `fixtures/benchmark_views.py` — E5-03: the two `SECURITY DEFINER` set
+    functions' signatures (the four cohort views it also described were retired
+    by E9-12, with their readers here), transcribed from the ruling on
+    `docs/disputes/E5-03-01.md` because they were settled nowhere else; a world
+    of two terms whose sections differ in one thing at a time — length, level,
+    start cohort or term — so every membership rule can be asserted from both
+    sides; and one reader for each function's rows, on `db_session` and on a
+    committed world the application role can reach. Every guard it raises is a `pytest.fail` a test body reaches,
     never a fixture, so an unbuilt E5-03 is a wall of FAILEDs naming deliverables
     rather than of setup errors (`docs/MISTAKES.md` entry 44). E5-04 added the
     three things its service is resolved over — a lead-faculty mapping, a named
