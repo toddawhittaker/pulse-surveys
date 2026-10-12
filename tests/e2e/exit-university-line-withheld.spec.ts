@@ -2,7 +2,9 @@
 // line alone is withheld (SPEC §5.1, §4.1 item 7; ADR 0179 and ADR 0203).
 //
 // **The reader.** The mock world's lead faculty is given a LEAD_FACULTY seat over
-// BIOL 310 for the run, so every BIOL 310 section, in either term, is in their
+// BIOL 310 for the run, and BIOL 310's lead-faculty mapping is moved to them: a
+// lead's grant is the courses mapped to them, never the assignment's own course
+// (`authz.py`, ADR 0046). So every BIOL 310 section, in either term, is in their
 // purview and is something they can subtract. `BIOL-310-R7FF`'s default
 // comparison set is BIOL 310's lead's courses at its length and level, which
 // is the prior term's BIOL 310 sections: all inside the purview, so nothing is
@@ -16,7 +18,8 @@
 // prior term stood up and answered, `BIOL-310-R7FF` launched at its own start
 // and given its demo story. Every instant comes from the seeded calendar: the
 // reports are read an hour after `R7FF`'s sixth week's report opens, derived
-// from that week's window. The seat is removed and the clock cleared afterwards;
+// from that week's window. The mapping goes back to its lead, the seat is
+// removed and the clock cleared afterwards;
 // the world's rows are the seeders', which a second run rewrites in place.
 //
 // The payload is read and asserted first, then the page.
@@ -82,6 +85,7 @@ interface ReportPayload {
 
 let sectionId = '';
 let leadSeat = '';
+let formerLead = '';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -133,6 +137,21 @@ test.beforeAll(async ({ browser }) => {
         `select ${LEAD_PERSON}, 'LEAD_FACULTY', ${THE_COURSE} returning id;`,
     );
     expect(leadSeat, 'The lead seat over BIOL 310 was not written.').toMatch(/^[0-9a-f-]{36}$/);
+
+    // The assignment first and the mapping after it, so a rule that a mapping
+    // needs a live LEAD_FACULTY assignment is met.
+    const former = databaseStatement(
+      `select person_id from lead_faculty_mapping where course_id = ${THE_COURSE};`,
+    );
+    expect(former, 'BIOL 310 has no lead-faculty mapping to move.').toMatch(/^[0-9a-f-]{36}$/);
+    expect(
+      databaseStatement(`select ${LEAD_PERSON} = '${former}';`),
+      'BIOL 310 is already mapped to the mock lead: an earlier run did not restore it.',
+    ).toBe('f');
+    formerLead = former;
+    databaseStatement(
+      `update lead_faculty_mapping set person_id = ${LEAD_PERSON} where course_id = ${THE_COURSE};`,
+    );
   } finally {
     await context.close();
   }
@@ -142,6 +161,12 @@ test.afterAll(async ({ browser }) => {
   const context = await browser.newContext();
   try {
     try {
+      if (formerLead !== '') {
+        databaseStatement(
+          `update lead_faculty_mapping set person_id = '${formerLead}' ` +
+            `where course_id = ${THE_COURSE};`,
+        );
+      }
       if (leadSeat !== '') {
         databaseStatement(`delete from role_assignment where id = '${leadSeat}';`);
       }
