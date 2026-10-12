@@ -188,7 +188,7 @@ def section_staff_names(
     section_ids: Sequence[UUID],
     reader_user_id: UUID | None = None,
     reader_person_id: UUID | None = None,
-    scope: ActorScope | None = None,
+    scope: ActorScope | None,
     settings: Settings | None = None,
 ) -> list[StaffName]:
     """The staff names one reader may read for a set of sections, in one definer call.
@@ -199,15 +199,17 @@ def section_staff_names(
     `ValueError` here, rather than reaching the definer, which would answer it
     with nothing.
 
-    **`scope` is the reader's resolved `ActorScope`, and a leadership caller
-    must pass it.** The definer answers a reader holding `CHAIR`,
+    **`scope` is required, and a leadership caller must pass the reader's
+    resolved `ActorScope`.** It has no default, so every caller states its
+    choice: `scope=None` is an explicit opt-out, written at the call site. The
+    definer answers a reader holding `CHAIR`,
     `ASSISTANT_DEAN`, `DEAN` or `VP_ACADEMICS` for any section it is handed
     (ADR 0201), so the purview is applied here: given a scope, only the
     sections in `scope.purview.section_ids` reach the definer. A scope resolved
     for someone other than `reader_person_id`, or given with a user key, raises
-    `ValueError`. Without a scope every id is passed, which is right for a
-    student, an instructor or a lead, whom the definer checks per section, and
-    wrong for chair and above.
+    `ValueError`, before any statement is sent. With `scope=None` every id is
+    passed, which is right for a student, an instructor or a lead, whom the
+    definer checks per section, and wrong for chair and above.
 
     **The reader's date is the application clock's** (`clock.today`, in the
     institution's timezone, development override included), so the definer's
@@ -624,6 +626,7 @@ def _state_and_response(
             section_ids=[section.id],
             reader_user_id=reader_user_id,
             reader_person_id=reader_person_id,
+            scope=None,
             settings=settings,
         )
         if staff.role is StaffNameRole.AUTHOR
