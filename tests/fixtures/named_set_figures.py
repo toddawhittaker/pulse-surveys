@@ -129,8 +129,8 @@ THE_SERVICE_IS_OWED = (
     "E9-05's interface settles `named_set_series(session, *, set_id, scope, term_id, settings) -> "
     "list[NamedSetCohort]` in `app.services.benchmarks`, with `NamedSetCohort(section_start_date, "
     "weeks)` and `NamedSetWeek(course_week, term_week, ratings, workload)`, `ratings` keyed by "
-    "`INSTRUCTOR` and `COURSE`; and `section_benchmarks(…, scope=None)` taking the reader's scope "
-    "into the seal."
+    "`INSTRUCTOR` and `COURSE`; and `section_benchmarks(…, scope)` taking the reader's scope into "
+    "the seal, keyword-only and required (`scope=None` for an instructor's own report)."
 )
 
 # ---------------------------------------------------------------------------
@@ -660,32 +660,32 @@ class PurviewWorld:
     def section_benchmarks(self, label: str, *, reader: str | None = None) -> Any:
         """`section_benchmarks` for one section's course week 2, with or without a reader.
 
-        Without a reader no `scope` is passed at all, which is the call every
-        report makes today; so the instructor-only controls run on a tree where
-        E9-05 is unbuilt, and only the reads that name a reader fail there — on a
-        named failure, not a `TypeError`.
+        Without a reader `scope=None` is passed explicitly, which is the call every
+        instructor report makes once the parameter has no default (E9-05's fix
+        round, P2: a caller that forgets the reader must not be sealed against
+        the instructors alone by default). A `section_benchmarks` with no `scope`
+        parameter at all is a named failure, not a `TypeError`.
         """
         import inspect
 
         self.session.flush()
         read = benchmarks_symbol(SECTION_BENCHMARKS)
-        arguments: dict[str, Any] = {
-            "section_id": self.section_id(label),
-            "course_week": THE_COURSE_WEEK,
-            "streams": STREAMS,
-            "cutoffs": SECTION_CUTOFFS,
-        }
-        if reader is not None:
-            if "scope" not in inspect.signature(read).parameters:
-                pytest.fail(
-                    "`section_benchmarks` takes no `scope`. E9-05's interface: "
-                    "`section_benchmarks(session, *, section_id, course_week, streams, cutoffs, "
-                    "scope: ActorScope | None = None)`, the reader entering the seal as one more "
-                    "person whose known sections are her purview and the sections she teaches "
-                    "(SPEC §5.1)."
-                )
-            arguments["scope"] = self.scope(reader)
-        return read(self.session, **arguments)
+        if "scope" not in inspect.signature(read).parameters:
+            pytest.fail(
+                "`section_benchmarks` takes no `scope`. E9-05's interface: "
+                "`section_benchmarks(session, *, section_id, course_week, streams, cutoffs, "
+                "scope: ActorScope | None)`, keyword-only and required, the reader entering the "
+                "seal as one more person whose known sections are her purview and the sections "
+                "she teaches (SPEC §5.1); every instructor caller writes `scope=None`."
+            )
+        return read(
+            self.session,
+            section_id=self.section_id(label),
+            course_week=THE_COURSE_WEEK,
+            streams=STREAMS,
+            cutoffs=SECTION_CUTOFFS,
+            scope=None if reader is None else self.scope(reader),
+        )
 
 
 # ---------------------------------------------------------------------------
