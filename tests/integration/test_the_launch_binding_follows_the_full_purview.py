@@ -17,6 +17,13 @@ department S whose chair reports to the assistant dean, and an unsupervised
 department U whose chair reports to the dean, holding the course the assistant
 dean leads and one more course they do not.
 
+**A second world, from the E9-01 privacy review**, puts a lead under a chair
+where the two differ: the lead leads a course in another department, and an
+instructor on a sibling lead's course in that department reports to the lead.
+Its pair goes red for a predicate built on the chair's own grant (the led course
+refused) and for one built on the lead's purview unclamped (the sibling section
+admitted).
+
 **The call is bound by signature**, by `covers` copied from the existing module
 for the reason that module gives: no record settles the parameter names, so the
 grains are filled by name and a parameter this cannot fill fails naming it.
@@ -227,4 +234,164 @@ def test_the_assistant_deans_launch_into_an_unsupervised_department_beside_their
         f"`{PREDICATE}` admitted the assistant dean into a course of the unsupervised department "
         f"at {admitted} (it answered {asked}). They lead one course there and supervise nobody "
         "in it; SPEC §2.1 gives them 'own led courses union every supervised chair's department'."
+    )
+
+
+def a_lead_under_a_chair_leading_elsewhere(rows: Any) -> dict[str, Any]:
+    """A chair of department D1, and a lead reporting to them who leads course K in department D2.
+
+    The lead's clamped purview (K and its section) and the chair's own grant
+    (D1's subtree) are disjoint, so the chair holds K only through the walk. In
+    D2, under K's own prefix, sits a sibling course K2 mapped to another lead,
+    and an `INSTRUCTOR` on K2's section reports to the chair's lead: the edge the
+    clamp exists for. K2's section is outside the chair's own grant, and reaches
+    the chair only if the lead's purview is passed up unclamped.
+    """
+    graph = rows.graph
+    key = graph.assignment_key
+    graph.scope("section")
+    chaired = graph.new_branch("institution", "college", "term")
+    rows.seed("section", chaired)
+    elsewhere = graph.new_branch("institution", "college", "term")
+    rows.seed("section", elsewhere)
+    sibling = {name: row for name, row in elsewhere.items() if name in ABOVE_A_COURSE}
+    rows.seed("section", sibling)
+
+    chair_person, lead_person, sibling_person = graph.person(), graph.person(), graph.person()
+    led_course = node_id(rows, elsewhere, "course")
+    sibling_course = node_id(rows, sibling, "course")
+    chair = written(
+        graph,
+        lambda: graph.assign(
+            "CHAIR",
+            scope=node_id(rows, chaired, "department"),
+            person=chair_person,
+            reports_to=None,
+        ),
+        "The chair of D1",
+    )
+    written(
+        graph,
+        lambda: graph.lead_mapping(person=lead_person, course=led_course),
+        "The mapping of K to the chair's lead",
+    )
+    written(
+        graph,
+        lambda: graph.lead_mapping(person=sibling_person, course=sibling_course),
+        "The mapping of K2 to the sibling lead",
+    )
+    lead = written(
+        graph,
+        lambda: graph.assign(
+            "LEAD_FACULTY", scope=led_course, person=lead_person, reports_to=chair[key]
+        ),
+        "The lead of K, in D2, reporting to the chair of D1",
+    )
+    written(
+        graph,
+        lambda: graph.assign(
+            "LEAD_FACULTY", scope=sibling_course, person=sibling_person, reports_to=None
+        ),
+        "The sibling lead of K2",
+    )
+    written(
+        graph,
+        lambda: graph.assign(
+            "INSTRUCTOR", scope=node_id(rows, sibling, "section"), reports_to=lead[key]
+        ),
+        "The instructor on K2's section, reporting to the lead of K",
+    )
+    rows.commit()
+    return {
+        "chair_person": chair_person,
+        "chaired": chaired,
+        "elsewhere": elsewhere,
+        "sibling": sibling,
+    }
+
+
+def test_a_chairs_launch_into_the_course_their_lead_leads_in_another_department_is_covered(
+    authz: Any, committed_rows: Any, application_session: Any
+) -> None:
+    """The chair is covered for K, which lies outside their own grant and inside their lead's.
+
+    SPEC §2.1: the chair's purview is their own grant union the purviews of
+    everything reporting to them, and the lead's purview is K. So K's course and
+    section are covered for the chair, though D1's subtree holds neither.
+
+    **The mutation this kills:** coverage computed on the parent's own grant
+    instead of the walked purview — the chair's own grant is D1's subtree, which
+    does not hold K, so it answers no. **The near miss it spares:** coverage on
+    the walked, clamped purview, which holds K.
+    """
+    rows = committed_rows
+    world = a_lead_under_a_chair_leading_elsewhere(rows)
+    person = world["chair_person"]
+    led = world["elsewhere"]
+    assert node_id(rows, led, "department") != node_id(rows, world["chaired"], "department"), (
+        "The led course sits in the chair's own department, so the chair's own grant would cover "
+        "it and this test could not tell the walk from the own grant."
+    )
+    asked = {
+        "section": covers(
+            authz, application_session, person=person, section=node_id(rows, led, "section")
+        ),
+        "course": covers(
+            authz, application_session, person=person, course=node_id(rows, led, "course")
+        ),
+    }
+    refused = sorted(grain for grain, answer in asked.items() if not answer)
+    assert not refused, (
+        f"`{PREDICATE}` refused the chair's launch into the course their own lead leads, at "
+        f"{refused} (it answered {asked}). The course is outside the chair's own department and "
+        "inside their lead's purview; SPEC §2.1 unions the lead's purview into the chair's."
+    )
+
+
+def test_a_chairs_launch_into_a_sibling_section_reached_only_through_the_leads_instructor_is_refused(
+    authz: Any, committed_rows: Any, application_session: Any
+) -> None:
+    """The pair: K2's section, reached only through an instructor reporting to the lead, answers no.
+
+    The control first: the same chair is covered for a section of their own
+    department, so the refusals below are not about a person the predicate
+    admits nowhere (`docs/MISTAKES.md` entry 3).
+
+    **The mutations this kills:** coverage computed on the lead's purview
+    unclamped — the instructor's section of K2 passes up through the lead into
+    the chair, and the section grain answers yes; the lead's grant widened to its
+    prefix or department (K2 sits under K's own prefix). **The near miss it
+    spares:** the walked, clamped purview, which holds K and not K2.
+    """
+    rows = committed_rows
+    world = a_lead_under_a_chair_leading_elsewhere(rows)
+    person = world["chair_person"]
+    sibling = world["sibling"]
+
+    assert covers(
+        authz,
+        application_session,
+        person=person,
+        section=node_id(rows, world["chaired"], "section"),
+    ), (
+        f"`{PREDICATE}` refused the chair a section of their own department, so the refusals "
+        "below are about a person the predicate admits nowhere."
+    )
+    assert node_id(rows, sibling, "prefix") == node_id(
+        rows, world["elsewhere"], "prefix"
+    ), "K and K2 are not under one prefix; the world is broken."
+    asked = {
+        "section": covers(
+            authz, application_session, person=person, section=node_id(rows, sibling, "section")
+        ),
+        "course": covers(
+            authz, application_session, person=person, course=node_id(rows, sibling, "course")
+        ),
+    }
+    admitted = sorted(grain for grain, answer in asked.items() if answer)
+    assert not admitted, (
+        f"`{PREDICATE}` admitted the chair into the sibling lead's course K2 at {admitted} (it "
+        f"answered {asked}). K2 is outside the chair's own department and reaches them only "
+        "through an instructor reporting to their lead; E9-01's clamp: a lead's purview is its own "
+        "grant only, so that instructor adds nothing to the lead nor to anyone above it."
     )

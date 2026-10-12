@@ -107,3 +107,4 @@ encouraged. `policy_of_record` now reads the course's rows and applies it, and
 - The student trend point is `StudentTrendPoint`, not `TrendPoint`: two schema
   classes with one name make FastAPI name both OpenAPI components by module,
   which would rename the instructor report's `TrendPoint` under its frontend.
+- SPEC §5.4 now records the shares-at-small-n ruling (E9 ruling 9, 2026-10-12).

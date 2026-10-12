@@ -40,7 +40,12 @@ const COURSE_WEEK_UNAVAILABLE = 'There is no report for that week of this sectio
 
 /** A minimal report body: the one member the cast is bounded by, and a section. */
 const A_REPORT_BODY = {
-  section: { code: 'R3WW', course_label: 'BIOL 215 R3WW — Cell Biology, Fall 2026', length_weeks: 12 },
+  section: {
+    code: 'R3WW',
+    course_label: 'BIOL 215 R3WW — Cell Biology, Fall 2026',
+    length_weeks: 12,
+    lead_name: null,
+  },
   streams: { instructor: {}, course: {} },
 };
 

@@ -71,9 +71,10 @@ the ways a privilege can be held misses the way the design actually uses:
      currency 1 could not see a same-origin check written into a route class
      even when it was there.
 
-**What the ledger may hold, and what an entry costs.** Two entries, the two legs
-of the LTI door, each a path mapped to one sentence saying why that route cannot
-carry the check. An entry costs the sentence and both directions of assertion
+**What the ledger may hold, and what an entry costs.** Three entries: the two
+legs of the LTI door, and since E9-04 the logout route, whose check lives in its
+endpoint because it must read a revoked token. Each is a path mapped to one
+sentence saying why that route cannot carry a `csrf_verified_*` dependency. An entry costs the sentence and both directions of assertion
 below: the path must still be a mutating route this application serves, and the
 route must carry **neither** currency, so an exemption that has quietly become
 unnecessary is red and the ledger shrinks. `/dev/passback` is deliberately not on
@@ -167,7 +168,18 @@ CSRF_DEPENDENCY = "csrf_verified_student"
 # which drives each member over HTTP on the carrier the check exists for. The
 # discovery is shared with it (`docs/MISTAKES.md` entry 13), so the two sweeps
 # cannot come to disagree about who is in the family.
-REQUIRED_CSRF_DEPENDENCIES = ("csrf_verified_student", "csrf_verified_leadership")
+#
+# **E9-04 adds `csrf_verified_session`** (its settled interface): any role, the
+# same double-submit check, gating the role switch. Required by name for the
+# reason the other two are.
+REQUIRED_CSRF_DEPENDENCIES = (
+    "csrf_verified_student",
+    "csrf_verified_leadership",
+    "csrf_verified_session",
+)
+
+# E9-04's logout route, from its settled interface.
+LOGOUT_PATH = "/session/logout"
 
 # The paths this module names. Each is settled somewhere outside this file:
 # `/lti/login` and `/lti/launch` by the two mocks' own configuration
@@ -196,9 +208,9 @@ SHORTEST_LEDGER_SENTENCE = 60
 
 # ---------------------------------------------------------------------------
 # The exemption ledger: a path, and one sentence saying why that route cannot
-# carry the check. Two entries, and both are asserted in both directions below.
+# carry the check. Three entries, and each is asserted in both directions below.
 # The clock pair's two entries left in E5.1-03, when the pair became
-# `DevControlRoute`s; the module docstring records why.
+# `DevControlRoute`s; the module docstring records why. E9-04's logout joined.
 # ---------------------------------------------------------------------------
 
 EXEMPTIONS: dict[str, str] = {
@@ -212,6 +224,14 @@ EXEMPTIONS: dict[str, str] = {
         "another origin, so a same-origin or double-submit rule would refuse every real launch. "
         "The `id_token`'s signature, its `nonce` and the stored `state` are the defence, and the "
         "route mints the session rather than riding one."
+    ),
+    LOGOUT_PATH: (
+        "Logout must answer a token that is already revoked, so it reads the token with "
+        "`verified_session` (signature and expiry only) rather than through a `csrf_verified_*` "
+        "dependency, whose read refuses a revoked id. Its double-submit check runs in the "
+        "endpoint when the session rides the cookie (E9-04's settled interface), and "
+        "`tests/integration/test_a_switched_or_logged_out_session_is_refused_like_an_expired_one.py` "
+        "drives that check over HTTP in both directions."
     ),
 }
 

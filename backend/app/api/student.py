@@ -94,8 +94,8 @@ from app.db import get_session
 from app.schemas.response_loop import StudentWeekResults
 from app.schemas.student import StudentSurveyView
 from app.schemas.survey import SubmissionAccepted, SubmissionRequest
-from app.services.response_loop import ResultsUnavailableError, student_week_results
 from app.services.session import SessionClaims
+from app.services.student_results import ResultsUnavailableError, student_week_results
 from app.services.submissions import (
     RefusalReason,
     SubmissionBouncedError,
@@ -289,7 +289,7 @@ def student_week_results_read(
     week of one course, so it has to be named. The section is then looked for
     among the session's own live enrollments, never read by its key, so a
     section the student is not in is not found, exactly as one that does not
-    exist is not (`app.services.response_loop.student_week_results`).
+    exist is not (`app.services.student_results.student_week_results`).
 
     **Every refusal is one 404 with one sentence**, byte-identical: not enrolled,
     an ended enrollment, a week whose report has not opened, and a week or a
