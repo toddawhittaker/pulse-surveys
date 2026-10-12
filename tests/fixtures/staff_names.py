@@ -12,9 +12,11 @@ the two rulings appended to it after the first pass, on B1 and B2):
     text)`, owned by the NOLOGIN role `pulse_staff_name_definer`. Exactly one
     reader key is non-null, else zero rows; a student is asked about by user key
     (a launched student has no `person`, ADR 0028), a member of staff by person key;
-  - the one Python door `app.services.response_loop.section_staff_names(session,
-    *, section_id, reader_person_id) -> list[StaffName]`, asked here about staff
-    readers only (the B1 ruling does not say how it takes a user key);
+  - the one Python door `app.services.response_loop.section_staff_names`, asked
+    here about staff readers only. E7-01 settled it as `(session, *, section_id,
+    reader_person_id)`; E9-03's settlement made it set-based (`section_ids`, an
+    optional user key and scope, role rows), and `ask_the_service` below reads
+    the E7-01 answer out of the set-based one;
   - the survey payload's section entry member `instructors: list[str]`, the
     section's live teaching instructors only;
   - the tables `instructor_response` and `response_policy`, every column of each
@@ -208,8 +210,8 @@ DELIVERABLE = (
     "p_reader_person_id uuid) RETURNS TABLE (person_id uuid, display_name text)`, owned by the "
     "NOLOGIN role "
     f"`{DEFINER_ROLE}`, which `{APPLICATION_ROLE}` may execute, and (decision 3) one Python door, "
-    f"`{SERVICE_MODULE}.{SERVICE_FUNCTION}(session, *, section_id, reader_person_id) -> "
-    "list[StaffName]`."
+    f"`{SERVICE_MODULE}.{SERVICE_FUNCTION}`, set-based since E9-03: `(session, *, section_ids, "
+    "reader_user_id=None, reader_person_id=None, scope=None) -> list[StaffName]`."
 )
 
 # ---------------------------------------------------------------------------
@@ -408,36 +410,68 @@ def ask_the_definer(
     return Answer(columns=columns, rows=rows)
 
 
+# E9-03's settlement makes the door set-based: `section_staff_names(session, *,
+# section_ids, reader_user_id=None, reader_person_id=None, scope=None)`, each
+# `StaffName` carrying `section_id` and `role` beside `display_name`, the roles
+# being these five. E7-01's questions are about the names v001 answered — the
+# section's live instructors and its responses' authors — so the service half of
+# every E7-01 test reads exactly those two roles of the one section it asked about.
+SET_DOOR_ROLES_E7_01_ASKS_ABOUT = ("INSTRUCTOR", "AUTHOR")
+
+
 def ask_the_service(
     application_session: Any, *, section_id: Any, reader_person_id: Any
 ) -> list[str]:
     """Call the Python door on `pulse_app`'s own connection; the names it answered.
 
-    Staff readers only. Decision 3 settles the door's keywords as `section_id` and
-    `reader_person_id`; the ruling on B1 adds a user key to the definer and does
-    not say how the service takes one, so a student is asked at the definer and
-    through the survey payload, never here.
+    Staff readers only, by person key, with no scope: a single-section caller
+    "calls it with one id" (E9-03), and the scope belongs to leadership pages.
+
+    **Since E9-03** the door is set-based and answers role rows, so this asks for
+    one section and keeps the `INSTRUCTOR` and `AUTHOR` rows of that section,
+    each person once: the set v001 answered, which is what every E7-01 assertion
+    is about. The lead, chair and dean rows E9-03 adds are its own tests' subject
+    (`tests/fixtures/staff_names_for_sections.py`).
     """
+    import inspect
+
     function = the_service_function()
+    if "section_ids" not in inspect.signature(function).parameters:
+        pytest.fail(
+            f"`{SERVICE_FUNCTION}{inspect.signature(function)}` takes no `section_ids`. E9-03's "
+            "settlement makes the door set-based; this is E7-01's question asked through it."
+            f"\n\n{DELIVERABLE}"
+        )
+    # `scope=None` written out: since the E9-03 fix round `scope` is a required
+    # keyword, so a single-section caller's choice of no purview filter is visible.
     answered = function(
-        application_session, section_id=section_id, reader_person_id=reader_person_id
+        application_session,
+        section_ids=[section_id],
+        reader_person_id=reader_person_id,
+        scope=None,
     )
     application_session.rollback()
     assert isinstance(answered, list), (
-        f"`{SERVICE_FUNCTION}` answered {type(answered).__name__}, not a list. Work order decision "
-        "3: `-> list[StaffName]`."
+        f"`{SERVICE_FUNCTION}` answered {type(answered).__name__}, not a list. E9-03's "
+        "settlement: `-> list[StaffName]`."
     )
-    names: list[str] = []
+    names: set[str] = set()
     for item in answered:
         name = getattr(item, DISPLAY_NAME, None)
-        if not isinstance(name, str):
+        role = getattr(item, "role", None)
+        section = getattr(item, "section_id", None)
+        if not isinstance(name, str) or role is None or section is None:
             pytest.fail(
-                f"`{SERVICE_FUNCTION}` answered an item {item!r} with no string `{DISPLAY_NAME}`. "
-                "The definer's result column is `display_name` (work order decision 1), and this "
-                "suite reads a `StaffName` by the same member; a different spelling is a one-line "
-                "change in `tests/fixtures/staff_names.py`."
+                f"`{SERVICE_FUNCTION}` answered an item {item!r} without a string "
+                f"`{DISPLAY_NAME}`, a `role` and a `section_id` (E9-03's settlement)."
             )
-        names.append(name)
+        if str(section) != str(section_id):
+            pytest.fail(
+                f"`{SERVICE_FUNCTION}`, asked about one section {section_id}, answered a row for "
+                f"{section}."
+            )
+        if str(getattr(role, "value", role)) in SET_DOOR_ROLES_E7_01_ASKS_ABOUT:
+            names.add(name)
     return sorted(names)
 
 

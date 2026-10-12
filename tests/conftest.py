@@ -303,6 +303,7 @@ pytest_plugins = (
     "fixtures.instructor_decisions",
     "fixtures.lead_review",
     "fixtures.staff_names",
+    "fixtures.staff_names_for_sections",
     "fixtures.the_hold",
     "fixtures.response_draft",
     "fixtures.response_loop_doors",
