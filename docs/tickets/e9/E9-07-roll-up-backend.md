@@ -3,13 +3,12 @@
 **ID:** E9-07
 **Branch:** `e9/roll-up-backend`
 **Depends on:** 01, 03, 05
-**Lane:** light
-**Why this lane:** a new service, schema and routes. It reads the purview
-through E9-01's `leadership_scope` and the staff names through E9-03's door,
-calls the existing set functions through `services/benchmarks.py`, and
-changes no heavy path. Its conditional migration is an index on
-`instructor_response`, none of the four heavy kinds. It adds no
-`invariant`-marked test; E9-12 writes those over its routes.
+**Lane:** heavy
+**Why this lane:** set light at breakdown (a new service, schema and routes
+over E9-01's scope and E9-03's door), and re-laned heavy mid-build: `pulse_app`
+cannot read department and college names, so the tree needs a view under
+`views_sql/` (ADR 0205), and its review added a set identity definer. The rest
+ran tests first. E9-12 still writes the `invariant` tests over its routes.
 **Size:** L
 **Security-relevant:** the tree and every aggregate a leader sees. A defect
 here counts or labels sections outside the purview, shows a by-lead pivot to
