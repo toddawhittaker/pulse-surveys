@@ -109,10 +109,18 @@ door; `response_loop.is_owed` and `_week_clocks`; the set functions;
    mode and carries no grouping by lead; a chair's does. The gate is decided
    from the roles held: a lead whose purview is larger than a chair's still
    gets none.
-4. **Labels count held nodes only.** For a department reached only through one
-   cross-department led course, the row counts that course's sections and no
-   other section of the department, beside a twin department wholly held
-   whose count is its full size.
+4. **Labels count held nodes only, in every count of every label kind.**
+   Each count below gets a partly held container and a wholly held twin
+   whose count is its full size:
+   - **sections** in a course, prefix, department and college row: a
+     department reached only through one cross-department led course counts
+     that course's sections and no other section of the department;
+   - **prefixes** in a department row: a department where the reader holds
+     one course of one prefix counts one prefix, not every prefix the
+     department contains (ADR 0046 gives a lead's grant no prefix ids, so a
+     count by containment is the likely bug);
+   - **departments** in a college row: a college reached through one
+     department counts one department.
 5. **Names, in one call.** The payload names the dean, chairs, leads and each
    section's instructor through E9-03's door in one call (a query-count
    test), and omits the lead's name in the lead's own view.
