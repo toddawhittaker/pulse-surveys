@@ -47,7 +47,7 @@ test, stops and re-lanes in its pull request.
 
 Rulings 1 to 9 are the owner's, made on 2026-10-12 at the start of the epic.
 Rulings 1 and 5 depart from the architect's recommendation; the other seven
-took it. Decisions 10 to 15 were settled the same day as breakdown decisions
+took it. Decisions 10 to 16 were settled the same day as breakdown decisions
 inside the epic's scope. No ticket reopens them. This breakdown's pull request
 writes rulings 1, 2, 4, 5, 6, 7, 8 and 9 into SPEC §5.1, §5.4, §5.5, §6.2,
 §6.3 and §14.3.
@@ -69,7 +69,8 @@ writes rulings 1, 2, 4, 5, 6, 7, 8 and 9 into SPEC §5.1, §5.4, §5.5, §6.2,
    declined: subtracting one node or week from another can re-attribute them
    (MISTAKES entry 51).
 3. **The staff-name definer answers any live leadership holder, and the Python
-   door passes only sections from the reader's resolved purview.** There is no
+   door passes only sections from the reader's resolved purview** (narrowed
+   for leads by decision 16). There is no
    SQL copy of the walk, so ticket 03 does not wait on 01. The cost: a Python
    scoping bug would show staff names, never student data, outside the
    purview. Ticket 12 asserts the door passes purview sections only.
@@ -147,6 +148,13 @@ Breakdown decisions:
     student's words or a single response. The drill-down reuses the
     instructor report's surface and its line. Light tickets file their strings
     under these prefixes; one that needs a new prefix stops and re-lanes.
+16. **Ruling 3's broad answer applies to chair and above only.** A reader
+    whose only leadership assignments are `LEAD_FACULTY` keeps v001's
+    per-section check in the definer (sections of courses they lead), so the
+    database still refuses a sibling lead's section to a lead even if the
+    Python door passes one. Chair, assistant dean, dean and VP readers get
+    ruling 3's answer for any section the door passes. This narrows ruling 3
+    for leads only, inside its scope; it adds no SQL copy of the walk.
 
 **Facts checked in the code at 40d3e24b, which the tickets build on:**
 
@@ -179,7 +187,7 @@ Breakdown decisions:
 |---|---|---|---|---|---|---|
 | 01 | [The purview walk and its chokepoint](E9-01-purview-walk-and-chokepoint.md) | `e9/purview-walk-and-chokepoint` | heavy ⚠ | none | `transitive_purview` over `reports_to`, the lead clamp, the leadership scope resolved only from the verified session, `ActorScope.grants`, `course_leads`, the chair walk written once, Hypothesis properties over generated forests; ADR 0199. | |
 | 02 | [The admin gate and the people-graph writes](E9-02-admin-gate-and-people-graph-writes.md) | `e9/admin-gate-and-people-graph-writes` | heavy | none | `require_admin`; admin-checked definers for person, assignment, edge, mapping and web-login linkage writes and the admin's name reads; every Pulse-owned role grantable (ruling 1); revoke deletes (ruling 7); every grant and revocation audited; ADR 0200; migration `e9a1d0c3f201`. | |
-| 03 | [Staff names for a set of sections](E9-03-staff-names-for-a-set-of-sections.md) | `e9/staff-names-for-a-set-of-sections` | heavy | none | `section_staff_names` v002, set-based, answering instructors, response authors, lead, chair and dean; leadership readers per ruling 3; the reader's date from the app clock; ADR 0201; migration `e9b2c4d6a802`. | |
+| 03 | [Staff names for a set of sections](E9-03-staff-names-for-a-set-of-sections.md) | `e9/staff-names-for-a-set-of-sections` | heavy | none | `section_staff_names` v002, set-based, answering instructors, response authors, lead, chair and dean; leadership readers per ruling 3 and decision 16; the reader's date from the app clock; ADR 0201; migration `e9b2c4d6a802`. | |
 | 04 | [The role switcher and logout](E9-04-role-switcher-and-logout.md) | `e9/role-switcher-and-logout` | heavy | none | The landings at this door, a CSRF-protected switch that issues a new session and revokes the old one, logout that revokes, a revoked-session table that purges itself; the `landing` copy surface; ADR 0202; migration `e9c3f5a7b403`. | |
 | 05 | [Named-set figures under the reader's purview](E9-05-named-set-figures-under-the-readers-purview.md) | `e9/named-set-figures-under-the-readers-purview` | heavy | 01 | The seal counts a leadership reader; named-set figures over the set's sections inside the purview, on their own route; `named_set_term_axis` deleted; generated isolation properties over named sets; the set-name index; ADR 0203; migration `e9a7c9e1b807`. | |
 | 06 | [The people and mapping editor, backend](E9-06-people-and-mapping-editor-backend.md) | `e9/people-and-mapping-editor-backend` | light | 02 | `services/people.py`, `api/admin.py`, `schemas/admin.py`: sorting, paging, the reports-to selector, CSV export and import with a dry-run diff, the web-login linkage field; ADR 0204. | |

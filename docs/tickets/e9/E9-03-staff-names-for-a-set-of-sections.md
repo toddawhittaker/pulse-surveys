@@ -28,10 +28,13 @@ section's live teaching instructors, its published responses' authors, its
 course's lead, its department's chair and its college's dean. A student,
 instructor, lead or chair reader keeps exactly v001's reach, per section.
 
-**Ruling 3: leadership readers.** A reader holding any live leadership
-assignment (`LEAD_FACULTY`, `CHAIR`, `ASSISTANT_DEAN`, `DEAN`,
-`VP_ACADEMICS`) is answered for any section passed. The definer does not
-recompute the purview. The Python door in `services/response_loop.py`
+**Ruling 3, narrowed for leads by README decision 16.** A reader holding a
+live `CHAIR`, `ASSISTANT_DEAN`, `DEAN` or `VP_ACADEMICS` assignment is
+answered for any section passed. A reader whose only leadership assignments
+are `LEAD_FACULTY` keeps v001's per-section check: answered only for sections
+of courses they lead, so the database still refuses a sibling lead's section
+to a lead whatever the door passes. The definer does not recompute the
+purview for anyone. The Python door in `services/response_loop.py`
 takes the reader's `ActorScope` from its caller (the route resolves it
 through E9-01's `leadership_scope`) and passes only section ids inside its
 purview. The door's parameter is the existing `ActorScope` type, so this
@@ -58,8 +61,9 @@ Read first: SPEC §2.1 (labels and headers), §4 and §5.3; ADRs 0109, 0191,
   only purview sections. Existing single-section callers call it with one id.
 - `tests/integration/test_identity_grants.py`: the grant's row.
 - SPEC §13: the new view file.
-- ADR **0201** (the set-based channel and ruling 3); supersedes ADR 0191 in
-  part, with a line in 0191.
+- ADR **0201** (the set-based channel; ruling 3's broad answer for chair and
+  above, and decision 16's per-section check kept for leads); supersedes ADR
+  0191 in part, with a line in 0191.
 
 ## Reuse, do not rewrite
 
@@ -81,8 +85,11 @@ owner.
    rows and nothing for section B passed in the same call; an instructor of A
    likewise; a lead of A's course gets A's rows and nothing for a sibling
    lead's section. Each refused row has its present twin in the same call.
-4. **A leadership reader is answered for what the door passes (ruling 3).** A
-   dean's call with any section ids is answered; a person with no live
+4. **Chair and above are answered for what the door passes (ruling 3).** A
+   dean's, an assistant dean's, a VP's and a chair's call with any section
+   ids is answered; a lead's call is answered only for sections of courses
+   they lead (done-when 3), even when the call passes a sibling lead's
+   section; a person with no live
    assignment and no enrollment gets nothing; a Care-only and an Admin-only
    person get nothing. A `pulse_app` session cannot call v001 or v002 with a
    reader key it chooses to gain more than that key holds (the reader keys
