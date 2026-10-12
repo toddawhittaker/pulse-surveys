@@ -5,6 +5,7 @@ import {
   createRouter,
 } from '@tanstack/react-router';
 
+import { AppShell } from './components/AppShell';
 import { UnknownAddress } from './components/UnknownAddress';
 import { AdminLanding } from './routes/admin';
 import { CareLanding } from './routes/care';
@@ -12,6 +13,7 @@ import { InstructorLanding } from './routes/instructor';
 import { InstructorReportRoute } from './routes/instructor/InstructorMondayReport';
 import { LeadershipLanding } from './routes/leadership';
 import { ComparisonSetsRoute } from './routes/leadership/ComparisonSets';
+import { DRILL_DOWN_ROUTE, DrillDownRoute } from './routes/leadership/DrillDown';
 import { EXCLUSION_LOG_ROUTE, ExclusionLogRoute } from './routes/leadership/ExclusionLog';
 import { OnBehalfRoute } from './routes/leadership/OnBehalf';
 import { RESPONSE_POLICY_ROUTE, ResponsePolicyRoute } from './routes/leadership/ResponsePolicy';
@@ -58,8 +60,14 @@ import {
  * machine.
  */
 
+// The root renders the app shell — SPEC §2's role switcher and logout — around
+// whatever the address opens. The shell draws nothing without a session.
 const rootRoute = createRootRoute({
-  component: Outlet,
+  component: () => (
+    <AppShell>
+      <Outlet />
+    </AppShell>
+  ),
   notFoundComponent: UnknownAddress,
 });
 
@@ -155,6 +163,17 @@ const leadershipRoute = createRoute({
   component: LeadershipLanding,
 });
 
+// SPEC §5.5's drill-down: one section's Monday report, read-only, for a leader.
+// The week is a search parameter for the reason the instructor's report takes
+// one: an address with none opens the latest published week, and any week a
+// reader reaches is a link. The same validator, because it is the same rule.
+const leadershipDrillDownRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: DRILL_DOWN_ROUTE,
+  validateSearch: validateReportWeek,
+  component: DrillDownRoute,
+});
+
 // SPEC §5.1's comparison sets, under the leadership area (E5-09). Two addresses
 // rather than one: the list is where sets are read, compared for size and
 // defined, and a set being edited has an address of its own so that opening one
@@ -240,6 +259,7 @@ export const routeTree = rootRoute.addChildren([
   instructorRoute,
   instructorReportRoute,
   leadershipRoute,
+  leadershipDrillDownRoute,
   leadershipComparisonSetsRoute,
   leadershipComparisonSetRoute,
   leadershipReviewQueueRoute,

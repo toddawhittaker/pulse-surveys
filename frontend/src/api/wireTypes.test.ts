@@ -57,6 +57,7 @@ function readsTheGeneratedModule(rhs: string): boolean {
 const CANARIES: Record<string, { alias: string; outcome: string }> = {
   'instructor.ts': { alias: 'InstructorReportView', outcome: 'ReportRead' },
   'leadership.ts': { alias: 'ComparisonSetDetailView', outcome: 'ComparisonSetDeleteOutcome' },
+  'session.ts': { alias: 'SessionLandingsView', outcome: 'SwitchOutcome' },
   'student.ts': { alias: 'StudentSurveyView', outcome: 'SubmitOutcome' },
 };
 

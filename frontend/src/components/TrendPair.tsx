@@ -60,6 +60,10 @@ export function TrendPair({
   lengthWeeks,
   instructorBenchmark,
   courseBenchmark,
+  axis,
+  heroLabel,
+  comparisonLabel,
+  comparisonSuppressed,
 }: {
   /** The instructor stream's published weeks, oldest first. */
   readonly instructor: readonly TrendPoint[];
@@ -71,7 +75,16 @@ export function TrendPair({
   readonly instructorBenchmark?: StreamBenchmark;
   /** The course stream's two comparison series, or nothing. */
   readonly courseBenchmark?: StreamBenchmark;
+  /** Which week axis both panels plot; see `PulseTrendChart`. */
+  readonly axis?: 'course' | 'term';
+  /** The legend's name for the hero line, where it plots more than one section. */
+  readonly heroLabel?: string;
+  /** The comparison line's name, where it is not the comparable courses. */
+  readonly comparisonLabel?: string;
+  /** What a withheld comparison line says, where it is not the comparable courses. */
+  readonly comparisonSuppressed?: string;
 }): JSX.Element {
+  const variant = { axis, heroLabel, comparisonLabel, comparisonSuppressed };
   return (
     <div className="pulse-trend-pair">
       <PulseTrendChart
@@ -81,6 +94,7 @@ export function TrendPair({
         comparison={instructorBenchmark?.comparison}
         university={instructorBenchmark?.university}
         showTicks={false}
+        {...variant}
       />
       <PulseTrendChart
         points={course}
@@ -90,6 +104,7 @@ export function TrendPair({
         university={courseBenchmark?.university}
         showLegend
         drawDelayed
+        {...variant}
       />
     </div>
   );

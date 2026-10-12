@@ -1,12 +1,11 @@
 /**
- * The `landing` surface's words — ticket E9-04 (the E9 breakdown's decision 15).
+ * The `landing` surface's words: the landing views, and SPEC §2's switcher and logout.
  *
  * Two kinds of string live here. The headings and empty-state lines of the
- * three landing views that are still empty (leadership, Care, admin), moved
- * word for word out of `frontend/src/lib/landings.ts`, where neither the copy
- * inventory nor the component-string sweep read them (the carried E4 entry in
- * `docs/tickets/e4/deferred.md`). And the role switcher's and logout's labels
- * and refusal sentences, which E9-11 draws in the app shell.
+ * three landing views (leadership, Care, admin), moved word for word out of
+ * `frontend/src/lib/landings.ts`, where neither the copy inventory nor the
+ * component-string sweep read them. And the role switcher's and logout's
+ * labels, refusal sentences and signed-out state, which the app shell draws.
  *
  * The shape is the one `studentSurvey.ts` settles: **stable dotted keys, one
  * entry per string, one mapping**, and a lookup function after it. The view
@@ -34,11 +33,23 @@ export const LANDING_COPY = {
   // The role switcher: its control's label, and what it says when the server
   // refuses a switch. A refused switch changes nothing, and the sentence says so.
   'landing.switcher.label': 'Switch view',
+  'landing.switcher.submit': 'Switch',
+  // Each view by name, as the switcher lists it.
+  'landing.view.student': 'Student',
+  'landing.view.instructor': 'Instructor',
+  'landing.view.leadership': 'Leadership',
+  'landing.view.care': 'Care',
+  'landing.view.admin': 'Admin',
   'landing.switcher.refused': 'That view could not be opened. Your current view is unchanged.',
   // Logout: its control's label, and what it says when the request did not go
   // through. The session is still live then, so it asks for another try.
   'landing.logout.label': 'Sign out',
   'landing.logout.refused': 'Signing out did not go through. Please try again.',
+  // What the app shows once a sign-out has gone through: the session is gone,
+  // so nothing behind it can be read, and the way back in is the usual door.
+  'landing.signed_out.heading': 'You are signed out',
+  'landing.signed_out.body':
+    'Open Pulse Surveys again the way you usually do to sign back in.',
 } as const satisfies Record<string, string>;
 
 /** Every key this surface publishes. */
