@@ -1,7 +1,7 @@
 """the record of an applied import
 
 Revision ID: e9d4a6b8c905
-Revises: e9c3f5a7b403
+Revises: e9a7c9e1b807
 Create Date: 2026-10-12 13:00:00.000000
 
 E9-06's fix round, ADR 0204. SPEC §8 makes `audit_log` include every import
@@ -25,6 +25,10 @@ the diff of every recorded import. Otherwise it drops the function, revokes the
 owner's grant on `detail`, restores E9-02's check and drops the column and its
 check. The enum value stays: PostgreSQL cannot drop one, and `ADD VALUE IF NOT
 EXISTS` makes the next upgrade a no-op for it.
+
+**Chained after `e9a7c9e1b807`.** Written off `e9c3f5a7b403`; when E9-05's
+revision merged into the epic branch first, this one's `down_revision` moved onto
+it, so the chain stays linear, with no change to what this revision does.
 """
 
 from collections.abc import Sequence
@@ -36,7 +40,7 @@ from sqlalchemy.dialects import postgresql
 from app.views_sql import read_sql
 
 revision: str = "e9d4a6b8c905"
-down_revision: str | Sequence[str] | None = "e9c3f5a7b403"
+down_revision: str | Sequence[str] | None = "e9a7c9e1b807"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
