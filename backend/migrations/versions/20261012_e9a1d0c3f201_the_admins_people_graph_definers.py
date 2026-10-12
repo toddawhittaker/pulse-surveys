@@ -1,7 +1,7 @@
 """the admin's people-graph definers
 
 Revision ID: e9a1d0c3f201
-Revises: 7f679faf4b8d
+Revises: e9b2c4d6a802
 Create Date: 2026-10-12 12:00:00.000000
 
 E9-02, ADR 0200. The admin's writes to the people graph and the admin's reads
@@ -47,7 +47,7 @@ from sqlalchemy.dialects import postgresql
 from app.views_sql import read_sql
 
 revision: str = "e9a1d0c3f201"
-down_revision: str | Sequence[str] | None = "7f679faf4b8d"
+down_revision: str | Sequence[str] | None = "e9b2c4d6a802"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
