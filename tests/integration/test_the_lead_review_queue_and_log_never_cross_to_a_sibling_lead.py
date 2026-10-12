@@ -14,8 +14,9 @@ asserted as a refusal**: the decision on the sibling's comment is the work order
 queue carries it, so its absence from this lead's queue is about the grant, not
 about a comment nobody could see.
 
-**One level out (`docs/MISTAKES.md` entries 35 and 53).** `resolve_scope` unions
-instructor grants with leadership ones, and work order decision 3 adds a
+**One level out (`docs/MISTAKES.md` entries 35 and 53).** `resolve_scope` unioned
+instructor grants with leadership ones until E9-01 made it leadership-only (E9
+ruling 4), and work order decision 3 adds a
 leadership-only own-grant function for exactly that reason. The last test gives
 the lead a second hat — an `INSTRUCTOR` assignment on the sibling course's
 section — and requires the queue and the log to stay inside the lead grant.
@@ -166,11 +167,11 @@ def test_a_lead_who_also_teaches_a_sibling_section_still_sees_only_their_led_cou
     """One level out: a second hat, an `INSTRUCTOR` grant on the sibling course's section.
 
     Work order decision 3's function returns the reader's *leadership-role*
-    grants. `resolve_scope` would union this instructor grant in, and the
-    queue and log would then reach the sibling's course through it.
+    grants. `resolve_scope` unioned this instructor grant in until E9-01, and a
+    queue and log scoped that way would reach the sibling's course through it.
 
-    **The mutation this kills:** the queue or the log scoped with `resolve_scope`
-    (or any union over every assignment the person holds) rather than the
+    **The mutation this kills:** the queue or the log scoped with any union over
+    every assignment the person holds (`resolve_scope` before E9-01) rather than the
     leadership-only own grant. **The near miss:** the second hat dropped from the
     world — the assignment is read back first, so a world in which it did not
     land is red as a broken premise, not green.

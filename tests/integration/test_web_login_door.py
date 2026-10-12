@@ -18,8 +18,9 @@ is short-circuited, so the exchange below is the exchange a deployment performs.
 **What is deliberately not here.** E0-18's boundary section gives E1 the unified
 session, provisioning, the dual-door identity merge and role resolution from the
 assignment model. So no test below asserts anything about a `user` row, a session
-that outlives the flow, or a purview — `transitive_purview` raises by design (ADR
-0003) and the leadership landing view is empty *because* of it. The wrong-door
+that outlives the flow, or a purview — `transitive_purview` raised by design at the
+time (ADR 0003, until E9-01) and the leadership landing view was empty *because* of
+it. The wrong-door
 person — an instructor trying to sign in here — is E0-16's own test and is not
 re-proved.
 
@@ -509,8 +510,8 @@ def identifying_strings(provider: Any, except_for: Any) -> list[str]:
     The signed-in person's own identifiers are excluded deliberately. A landing
     that names who is signed in is legitimate — the session token carries its own
     subject, by construction — and a landing that names *anybody else* has
-    enumerated people, which nothing in E1 computes a purview to do (ADR 0003,
-    §2.1: `transitive_purview` still raises).
+    enumerated people, which nothing in E1 computed a purview to do (ADR 0003;
+    `transitive_purview` raised until E9-01).
     """
     mine = {value for value in except_for.values() if isinstance(value, str) and value}
     found: list[str] = []
@@ -1034,7 +1035,7 @@ def test_the_leadership_view_names_nobody_but_the_person_signed_in(
     """SPEC §4.1 over the one landing that would otherwise list people.
 
     E0-18: the leadership landing views "are empty *by design* and must not
-    traverse" `transitive_purview`, which raises (ADR 0003). So the honest
+    traverse" `transitive_purview`, which raised then (ADR 0003, until E9-01). So the honest
     assertion is that what the caller receives names nobody but its own caller — a
     landing that enumerated the institution would have obtained that list from
     somewhere, and there is nowhere in E1 it could legitimately have come from.
