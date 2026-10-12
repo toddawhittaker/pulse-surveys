@@ -286,7 +286,9 @@ export interface paths {
          *     `app.services.session.switch_session` re-reads the person's views at this
          *     door and decides. On success the new token is answered in the body, for the
          *     SPA's Bearer carrier, and set as the session cookie beside a fresh CSRF
-         *     token bound to it. A refusal sets no cookie and leaves the old session live.
+         *     token bound to it; it keeps the old token's expiry. A refusal, including a
+         *     switch to the session's own role, sets no cookie and leaves the old session
+         *     live. A token another switch spent first gets the expired-token 401.
          */
         readonly post: operations["switch_session_session_switch_post"];
         readonly delete?: never;
