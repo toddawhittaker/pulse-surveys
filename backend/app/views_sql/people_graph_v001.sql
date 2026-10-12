@@ -45,7 +45,8 @@
 -- `check_violation` and answers `edge_does_not_climb`. ADR 0044's trigger also
 -- raises `check_violation` when the transaction is REPEATABLE READ, so a write
 -- refused for that reason is reported as an edge that does not climb. The
--- application runs READ COMMITTED; ADR 0200 records the cost.
+-- application sets no isolation level and runs at PostgreSQL's default, READ
+-- COMMITTED; ADR 0200 records the cost.
 --
 -- **The reads answer staff records only.** Names, categories, the web-login
 -- issuer, assignments with their scope and parent, and mappings. Never
