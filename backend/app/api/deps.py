@@ -65,7 +65,7 @@ from app.copy.leadership_sets import NOT_LEADERSHIP, NOT_YOUR_ROLE
 from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
 from app.db import get_session
-from app.services.authz import Door, LandingRole, resolve_landing
+from app.services.authz import ActorScope, Door, LandingRole, resolve_landing, resolve_scope
 from app.services.identity import (
     ResolvedIdentity,
     identity_behind_a_launch,
@@ -112,6 +112,7 @@ __all__ = [
     "csrf_verified_student",
     "ending_session",
     "landing_with_session",
+    "leadership_scope",
     "no_live_session",
     "no_access",
     "no_access_page",
@@ -354,6 +355,35 @@ def require_leadership(request: Request, db: Session = Depends(get_session)) -> 
             headers=NOT_YOUR_ROLE_CHALLENGE,
         )
     return session
+
+
+def leadership_scope(
+    request: Request,
+    claims: SessionClaims = Depends(require_leadership),
+    session: Session = Depends(get_session),
+) -> ActorScope:
+    """The leadership scope of the person this verified leadership session names (E9-01).
+
+    The one way a leadership read gets a scope (ADR 0199). The person comes from
+    the session `require_leadership` verified, and from nothing else: this takes
+    no person, assignment or scope id from the request, so a request that carries
+    somebody else's id in a query string, a path segment or a body is answered
+    with the session's own scope. `resolve_scope` has no other caller under
+    `backend/app/`, and a unit sweep over the source tree holds that.
+
+    A leadership session whose person claim does not parse is a token this
+    deployment did not issue in that shape, and it is refused exactly as an
+    unverifiable token is. A person holding no leadership assignment resolves to
+    an empty scope; the gate already refuses their sessions.
+    """
+    person_id = person_of(claims)
+    if person_id is None:
+        raise HTTPException(
+            status_code=NOT_LEADERSHIP_STATUS,
+            detail=NOT_LEADERSHIP,
+            headers=NOT_LEADERSHIP_CHALLENGE,
+        )
+    return resolve_scope(session, person_id=person_id, settings=request.app.state.settings)
 
 
 def require_admin(request: Request, db: Session = Depends(get_session)) -> SessionClaims:

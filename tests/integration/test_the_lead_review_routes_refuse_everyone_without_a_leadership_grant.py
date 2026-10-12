@@ -148,9 +148,9 @@ def test_a_leadership_session_for_a_person_with_only_an_instructor_grant_is_refu
     and the reader's own leadership grant in the read. This session passes the
     first, so only the second can refuse it.
 
-    **The mutations this kill:** a scope read off `resolve_scope`, which holds the
-    instructor's taught section and would answer the queue with this very
-    comment; a door that, finding no grant, falls back to "every flagged comment".
+    **The mutations this kill:** a scope read off any union over every assignment
+    the person holds (`resolve_scope` before E9-01), which holds the instructor's
+    taught section and would answer the queue with this very comment; a door that, finding no grant, falls back to "every flagged comment".
     **The near miss:** a 200 with an empty list — refused here, because the ticket
     says refused.
     """

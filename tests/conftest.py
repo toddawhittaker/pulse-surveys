@@ -203,6 +203,12 @@ boundary: `metadata_tables` is asked for by both.
     students, former teacher, two-hat person and response a test plants for
     itself.
 
+  - `fixtures/named_set_figures.py` — E9-05: E5-03's benchmark world given named
+    departments, courses with several sections, and the people and assignments
+    E9-01's purview is resolved from (`purview_world`, unbuilt); the reads E9-05's
+    interface settles — `named_set_series` and `section_benchmarks` with the
+    reader's scope — reached inside a test body; and the readers for one week of
+    a series, a figure's state, and any answer as plain data for equality.
   - `fixtures/people_graph.py` — E9-02: the twelve people-graph definers called
     as `pulse_app` under their settled names and signatures, a world of one admin
     and three non-admins seeded committed, the rows read back on a second
@@ -227,6 +233,12 @@ complete.
     without deciding how they are built — two names spelled, the membership
     table found by its foreign keys, and the two seeding helpers four modules
     share.
+  - `fixtures/purview_walk.py` — E9-01: E0-09's `climbing_forest`, moved here so
+    the supervision-graph properties and the purview properties share one
+    generator; the `world_plans` strategy (a containment tree, an assignment
+    forest, people with several hats and a Lead Faculty mapping, as a pure value
+    `hypothesis.find` can interrogate); the writer that builds a plan; and the
+    purview computed from the plan alone, never from `authz`.
   - `fixtures/benchmark_history.py` — E5-12: `scripts/seed_benchmark_history.py`
     piped into an interpreter the way the runbook pipes it, the row counts a
     refused run is read by, the SPEC §2.2 reader that says which sections a
@@ -309,6 +321,7 @@ pytest_plugins = (
     "fixtures.the_hold",
     "fixtures.response_draft",
     "fixtures.response_loop_doors",
+    "fixtures.named_set_figures",
     "fixtures.session_switch",
     "fixtures.people_graph",
     "fixtures.people_editor",
