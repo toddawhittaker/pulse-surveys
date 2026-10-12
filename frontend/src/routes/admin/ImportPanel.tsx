@@ -4,12 +4,12 @@ import {
   applyImport,
   dryRun,
   exportCsv,
-  type Answer,
+  type AdminOutcome,
   type DiffView,
   type MappingDiffView,
   type PeopleDiffView,
-  type Table,
 } from '../../api/admin';
+import type { Table } from '../../lib/adminTable';
 import { copy, fillCopy } from '../../copy/adminPeople';
 import type { Gate } from './AdminPage';
 
@@ -61,7 +61,7 @@ export function ImportPanel({
   const fileId = useId();
 
   /** Whether `answer` was one the page cannot go on from; if so, say so. */
-  function gated(answer: Answer<unknown>): boolean {
+  function gated(answer: AdminOutcome<unknown>): boolean {
     if (answer.kind === 'session-ended' || answer.kind === 'not-your-role') {
       onGate(answer.kind);
       return true;
@@ -72,7 +72,7 @@ export function ImportPanel({
   async function dryRunOf(csv: string): Promise<void> {
     setHeld({ kind: 'checking' });
     announce(copy('admin_people.page.import_reading'));
-    const answer: Answer<DiffView> = await (table === 'people'
+    const answer: AdminOutcome<DiffView> = await (table === 'people'
       ? dryRun('people', csv)
       : dryRun('mappings', csv));
     if (gated(answer)) return;
@@ -108,7 +108,7 @@ export function ImportPanel({
   async function apply(csv: string, diff: DiffView): Promise<void> {
     setHeld({ kind: 'applying', csv, diff });
     announce(copy('admin_people.page.import_applying'));
-    const answer: Answer<DiffView> = await (table === 'people'
+    const answer: AdminOutcome<DiffView> = await (table === 'people'
       ? applyImport('people', csv, diff.digest)
       : applyImport('mappings', csv, diff.digest));
     if (gated(answer)) return;

@@ -1,6 +1,6 @@
 import type { JSX } from 'react';
 
-import type { Order } from '../../api/admin';
+import type { Order } from '../../lib/adminTable';
 import { copy, fillCopy } from '../../copy/adminPeople';
 
 /**

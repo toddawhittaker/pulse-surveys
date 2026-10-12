@@ -22,6 +22,7 @@
 import type { components } from './wire.gen';
 import { authorizationHeader } from '../lib/session';
 import { jsonBody, readHeaders, refusalSentence, writeHeaders } from '../lib/http';
+import type { MappingSort, Order, PeopleSort, Table } from '../lib/adminTable';
 
 type Schemas = components['schemas'];
 
@@ -84,9 +85,6 @@ export function reportsToPath(assignmentId: string): string {
   return `${assignmentPath(assignmentId)}/reports-to`;
 }
 
-/** Which table an import or export belongs to. */
-export type Table = 'people' | 'mappings';
-
 const TABLE_PATH: Readonly<Record<Table, string>> = {
   people: PEOPLE_PATH,
   mappings: MAPPINGS_PATH,
@@ -105,7 +103,7 @@ export function applyPath(table: Table): string {
 }
 
 /** What any admin call answered. */
-export type Answer<T> =
+export type AdminOutcome<T> =
   | { readonly kind: 'ok'; readonly value: T }
   | { readonly kind: 'session-ended' }
   | { readonly kind: 'not-your-role' }
@@ -125,7 +123,7 @@ function isNotYourRole(response: Response): boolean {
 }
 
 /** The answer common to every call before its own success is read. */
-async function refusalOf(response: Response): Promise<Answer<never>> {
+async function refusalOf(response: Response): Promise<AdminOutcome<never>> {
   if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
   if (isNotYourRole(response)) return { kind: 'not-your-role' };
   const detail = refusalSentence(await jsonBody(response));
@@ -143,7 +141,7 @@ async function send(path: string, init: RequestInit): Promise<Response | null> {
 }
 
 /** A read answering JSON. */
-async function read<T>(path: string): Promise<Answer<T>> {
+async function read<T>(path: string): Promise<AdminOutcome<T>> {
   const response = await send(path, { headers: readHeaders() });
   if (response === null) return { kind: 'unavailable' };
   if (!response.ok) return refusalOf(response);
@@ -153,7 +151,7 @@ async function read<T>(path: string): Promise<Answer<T>> {
 }
 
 /** A write whose success answers JSON. */
-async function write<T>(method: string, path: string, body: unknown): Promise<Answer<T>> {
+async function write<T>(method: string, path: string, body: unknown): Promise<AdminOutcome<T>> {
   const response = await send(path, { method, headers: writeHeaders(), body: JSON.stringify(body) });
   if (response === null) return { kind: 'unavailable' };
   if (!response.ok) return refusalOf(response);
@@ -167,7 +165,7 @@ async function writeNothing(
   method: string,
   path: string,
   body?: unknown,
-): Promise<Answer<null>> {
+): Promise<AdminOutcome<null>> {
   const response = await send(path, {
     method,
     headers: writeHeaders(),
@@ -177,11 +175,6 @@ async function writeNothing(
   if (!response.ok) return refusalOf(response);
   return { kind: 'ok', value: null };
 }
-
-/** The columns each table sorts by, and the directions. */
-export type PeopleSort = 'name' | 'category';
-export type MappingSort = 'name' | 'course';
-export type Order = 'asc' | 'desc';
 
 function query(params: Readonly<Record<string, string | number>>): string {
   const search = new URLSearchParams();
@@ -193,7 +186,7 @@ export function readPeople(
   sort: PeopleSort,
   order: Order,
   page: number,
-): Promise<Answer<PeoplePageView>> {
+): Promise<AdminOutcome<PeoplePageView>> {
   return read(`${PEOPLE_PATH}${query({ sort, order, page })}`);
 }
 
@@ -201,14 +194,14 @@ export function readMappings(
   sort: MappingSort,
   order: Order,
   page: number,
-): Promise<Answer<MappingPageView>> {
+): Promise<AdminOutcome<MappingPageView>> {
   return read(`${MAPPINGS_PATH}${query({ sort, order, page })}`);
 }
 
 /** The assignments a new or existing assignment of `role` may report to. */
 export async function readReportsToOptions(
   role: AssignmentRole,
-): Promise<Answer<readonly ReportsToOptionView[]>> {
+): Promise<AdminOutcome<readonly ReportsToOptionView[]>> {
   const answer = await read<Schemas['ReportsToOptions']>(
     `${REPORTS_TO_OPTIONS_PATH}${query({ role })}`,
   );
@@ -217,11 +210,11 @@ export async function readReportsToOptions(
   return { kind: 'ok', value: answer.value.options };
 }
 
-export function addPerson(name: string, category: string): Promise<Answer<Schemas['PersonCreated']>> {
+export function addPerson(name: string, category: string): Promise<AdminOutcome<Schemas['PersonCreated']>> {
   return write('POST', PEOPLE_PATH, { name, category });
 }
 
-export function editPerson(personId: string, name: string, category: string): Promise<Answer<null>> {
+export function editPerson(personId: string, name: string, category: string): Promise<AdminOutcome<null>> {
   return writeNothing('PUT', personPath(personId), { name, category });
 }
 
@@ -229,15 +222,15 @@ export function grantRole(
   personId: string,
   role: AssignmentRole,
   scopeNodeId: string,
-): Promise<Answer<Schemas['Granted']>> {
+): Promise<AdminOutcome<Schemas['Granted']>> {
   return write('POST', grantPath(personId), { role, scope_node_id: scopeNodeId });
 }
 
-export function revokeRole(assignmentId: string): Promise<Answer<null>> {
+export function revokeRole(assignmentId: string): Promise<AdminOutcome<null>> {
   return writeNothing('DELETE', assignmentPath(assignmentId));
 }
 
-export function setReportsTo(assignmentId: string, parent: string | null): Promise<Answer<null>> {
+export function setReportsTo(assignmentId: string, parent: string | null): Promise<AdminOutcome<null>> {
   return writeNothing('PUT', reportsToPath(assignmentId), { reports_to: parent });
 }
 
@@ -245,20 +238,20 @@ export function linkWebLogin(
   personId: string,
   issuer: string,
   subject: string,
-): Promise<Answer<null>> {
+): Promise<AdminOutcome<null>> {
   return writeNothing('PUT', webLoginPath(personId), { idp_issuer: issuer, idp_subject: subject });
 }
 
-export function unlinkWebLogin(personId: string): Promise<Answer<null>> {
+export function unlinkWebLogin(personId: string): Promise<AdminOutcome<null>> {
   return writeNothing('DELETE', webLoginPath(personId));
 }
 
 /** An import's diff, whichever table it was for. */
-export type DiffView = PeopleDiffView | MappingDiffView;
+export type DiffView = Schemas['PeopleDiff'] | Schemas['MappingDiff'];
 
-export function dryRun(table: 'people', csv: string): Promise<Answer<PeopleDiffView>>;
-export function dryRun(table: 'mappings', csv: string): Promise<Answer<MappingDiffView>>;
-export function dryRun(table: Table, csv: string): Promise<Answer<DiffView>> {
+export function dryRun(table: 'people', csv: string): Promise<AdminOutcome<PeopleDiffView>>;
+export function dryRun(table: 'mappings', csv: string): Promise<AdminOutcome<MappingDiffView>>;
+export function dryRun(table: Table, csv: string): Promise<AdminOutcome<DiffView>> {
   return write('POST', dryRunPath(table), { csv });
 }
 
@@ -267,18 +260,18 @@ export function applyImport(
   table: 'people',
   csv: string,
   digest: string,
-): Promise<Answer<PeopleDiffView>>;
+): Promise<AdminOutcome<PeopleDiffView>>;
 export function applyImport(
   table: 'mappings',
   csv: string,
   digest: string,
-): Promise<Answer<MappingDiffView>>;
-export function applyImport(table: Table, csv: string, digest: string): Promise<Answer<DiffView>> {
+): Promise<AdminOutcome<MappingDiffView>>;
+export function applyImport(table: Table, csv: string, digest: string): Promise<AdminOutcome<DiffView>> {
   return write('POST', applyPath(table), { csv, digest });
 }
 
 /** The table's CSV, as text. */
-export async function exportCsv(table: Table): Promise<Answer<string>> {
+export async function exportCsv(table: Table): Promise<AdminOutcome<string>> {
   const response = await send(exportPath(table), {
     headers: { Accept: 'text/csv', ...authorizationHeader() },
   });

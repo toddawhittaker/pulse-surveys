@@ -1,4 +1,4 @@
-import type { Answer } from '../../api/admin';
+import type { AdminOutcome } from '../../api/admin';
 import { copy } from '../../copy/adminPeople';
 import type { Gate } from './AdminPage';
 
@@ -10,7 +10,7 @@ import type { Gate } from './AdminPage';
  * claiming the change was or was not recorded.
  */
 export function settle(
-  answer: Answer<unknown>,
+  answer: AdminOutcome<unknown>,
   done: string,
   announce: (message: string) => void,
   onGate: (gate: Exclude<Gate, null>) => void,

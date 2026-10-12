@@ -1,12 +1,7 @@
 import { useEffect, useId, useState, type FormEvent, type JSX } from 'react';
 
-import {
-  addPerson,
-  readPeople,
-  type Order,
-  type PeoplePageView,
-  type PeopleSort,
-} from '../../api/admin';
+import { addPerson, readPeople, type PeoplePageView } from '../../api/admin';
+import type { Order, PeopleSort } from '../../lib/adminTable';
 import { copy, fillCopy } from '../../copy/adminPeople';
 import { AdminPage, type Gate } from './AdminPage';
 import { ImportPanel } from './ImportPanel';

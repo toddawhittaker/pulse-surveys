@@ -1,11 +1,7 @@
 import { useEffect, useState, type JSX } from 'react';
 
-import {
-  readMappings,
-  type MappingPageView,
-  type MappingSort,
-  type Order,
-} from '../../api/admin';
+import { readMappings, type MappingPageView } from '../../api/admin';
+import type { MappingSort, Order } from '../../lib/adminTable';
 import { copy, fillCopy } from '../../copy/adminPeople';
 import { AdminPage, type Gate } from './AdminPage';
 import { ImportPanel } from './ImportPanel';
