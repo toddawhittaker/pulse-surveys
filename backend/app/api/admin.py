@@ -44,6 +44,8 @@ from app.schemas.admin import (
     MappingDiff,
     MappingPage,
     MappingWrite,
+    OrgNode,
+    OrgNodes,
     PeopleDiff,
     PeoplePage,
     PersonCreated,
@@ -53,6 +55,7 @@ from app.schemas.admin import (
     WebLoginWrite,
 )
 from app.services import people
+from app.services.authz import admin_grant_nodes
 from app.services.people import ImportLineRefusedError, ImportStaleError, PeopleRefusedError
 from app.services.session import SessionClaims
 
@@ -69,6 +72,7 @@ PEOPLE_IMPORT_PATH = f"{PEOPLE_PATH}/import"
 ASSIGNMENT_PATH = "/admin/assignments/{assignment_id}"
 REPORTS_TO_PATH = f"{ASSIGNMENT_PATH}/reports-to"
 REPORTS_TO_OPTIONS_PATH = "/admin/reports-to-options"
+ORG_NODES_PATH = "/admin/org-nodes"
 
 MAPPINGS_PATH = "/admin/lead-mappings"
 MAPPING_PATH = f"{MAPPINGS_PATH}/{{course_id}}"
@@ -442,3 +446,23 @@ def apply_mappings(
         raise _refused(refusal) from None
     except (ImportLineRefusedError, ImportStaleError) as error:
         raise _import_refused(error) from None
+
+
+# --- The nodes a grant may name ---------------------------------------------
+
+
+@router.get(ORG_NODES_PATH, summary="The organization nodes a role may be granted at")
+def read_org_nodes(
+    response: Response,
+    role: AssignmentRole,
+    claims: SessionClaims = Depends(require_admin),
+    session: Session = Depends(get_session),
+) -> OrgNodes:
+    """Only nodes at the level `role` is granted at, sorted by name."""
+    response.headers["Cache-Control"] = NO_STORE
+    nodes = [
+        OrgNode(node_id=n.node_id, label=n.name, parent_label=n.parent_name)
+        for n in admin_grant_nodes(session, role=role)
+    ]
+    session.rollback()
+    return OrgNodes(nodes=nodes)

@@ -45,10 +45,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 __all__ = [
+    "OrgNodeChoice",
     "OrgNodeLabel",
     "SectionEnrollmentCount",
     "SectionRosterRow",
     "org_node_labels_above",
+    "org_nodes_at_level",
     "section_enrollment_counts",
     "section_roster",
 ]
@@ -87,6 +89,17 @@ _ORG_NODE_LABELS_ABOVE = text(
     " JOIN above ON label.node_id = above.parent_id"
     ")"
     " SELECT level, node_id, name, parent_id FROM above"
+)
+
+# Every node of one level with its parent's name, for the admin's grant picker.
+# The parent is read from the same view, so no table is named here. The institution
+# has no parent, hence the outer join.
+_ORG_NODES_AT_LEVEL = text(
+    "SELECT label.level, label.node_id, label.name, parent.name AS parent_name"
+    " FROM public.org_node_label AS label"
+    " LEFT JOIN public.org_node_label AS parent ON parent.node_id = label.parent_id"
+    " WHERE label.level = :level"
+    " ORDER BY label.name, parent.name, label.node_id"
 )
 
 
@@ -161,3 +174,19 @@ def section_enrollment_counts(
     """One count per section of `course_id`, including the sections holding nobody."""
     rows = session.execute(_SECTION_ENROLLMENT_COUNTS, {"course_id": course_id}).mappings()
     return [SectionEnrollmentCount(**row) for row in rows]
+
+
+@dataclass(frozen=True, slots=True)
+class OrgNodeChoice:
+    """One org node an admin may grant a role at, and its parent's name if it has a parent."""
+
+    level: str
+    node_id: UUID
+    name: str
+    parent_name: str | None
+
+
+def org_nodes_at_level(session: Session, *, level: str) -> Sequence[OrgNodeChoice]:
+    """Every org node of `level`, named, by name. Nothing here checks who is asking."""
+    rows = session.execute(_ORG_NODES_AT_LEVEL, {"level": level}).mappings()
+    return [OrgNodeChoice(**row) for row in rows]

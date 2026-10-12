@@ -34,6 +34,8 @@ __all__ = [
     "MappingLine",
     "MappingPage",
     "MappingWrite",
+    "OrgNode",
+    "OrgNodes",
     "PeopleDiff",
     "PeoplePage",
     "PersonChange",
@@ -255,3 +257,19 @@ class MappingDiff(BaseModel):
     changed: list[MappingChange]
     removed: list[MappingLine]
     unmapped: list[UnmappedCourse]
+
+
+class OrgNode(BaseModel):
+    """One organization node a role may be granted at, with its parent's name to tell namesakes apart."""
+
+    model_config = ConfigDict(frozen=True)
+
+    node_id: UUID
+    label: str
+    parent_label: str | None
+
+
+class OrgNodes(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    nodes: list[OrgNode]

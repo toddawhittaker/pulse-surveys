@@ -2605,6 +2605,48 @@
         }
       }
     },
+    "/admin/org-nodes": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The organization nodes a role may be granted at",
+        "description": "Only nodes at the level `role` is granted at, sorted by name.",
+        "operationId": "read_org_nodes_admin_org_nodes_get",
+        "parameters": [
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssignmentRole"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgNodes"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/dev": {
       "get": {
         "tags": [
@@ -3740,6 +3782,54 @@
         ],
         "title": "OpenSurvey",
         "description": "The one survey open for a section right now (SPEC \u00a73.1's one-open rule).\n\nPresent only while the window is open. \u00a73.1 says a missed week cannot be\nback-filled, so a closed week is not something the form can answer and is not\noffered as one; the section it belonged to is still reported, which is how a\nstudent is told they are enrolled and there is nothing to do this minute.\n\n**`length_weeks` is the reader's own section's length and nobody else's**\n(E4-17). It is the `length_weeks` column of the section the window belongs\nto, reached through the section the reader is enrolled in \u2014 the same scoping\nargument `EnrolledSection.course_label` stands on, and \u00a74.1 item 1 is what it\nhas to hold against. It names no other section, carries no identity, and\ndiscloses nothing new: SPEC \u00a72.2 puts the length in the section code the\nstudent is already shown. It is a number about a calendar rather than about a\nperson, so no confidentiality rule in \u00a74 reaches it.\n\nIt is a plain integer because the column is `NOT NULL` on the section row. An\noptional one would let a read path that found no length answer a half-eyebrow\n\u2014 \"COURSE WK 04 / , TERM WK 07\" \u2014 instead of failing where the data is wrong."
+      },
+      "OrgNode": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Node Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "parent_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "label",
+          "parent_label"
+        ],
+        "title": "OrgNode",
+        "description": "One organization node a role may be granted at, with its parent's name to tell namesakes apart."
+      },
+      "OrgNodes": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/OrgNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes"
+        ],
+        "title": "OrgNodes"
       },
       "OwedWeek": {
         "properties": {
