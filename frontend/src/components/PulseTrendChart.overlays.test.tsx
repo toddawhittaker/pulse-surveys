@@ -406,7 +406,7 @@ describe('a week whose seal does not say exactly false', () => {
    *
    * **The casts are the point rather than a shortcut.** The client casts the
    * report JSON into its TypeScript shapes without parsing it at runtime, so
-   * `OverlayFigure` describes what the server is expected to send and does not
+   * `ComparisonFigureView` describes what the server is expected to send and does not
    * check that it did. These are what the props actually hold the day the field
    * is renamed on the wire, dropped, or serialised loosely — and each of the
    * first three is falsy or truthy in a way a plain `if (mean.suppressed)` reads

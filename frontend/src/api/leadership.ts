@@ -99,16 +99,12 @@ export type ComparisonSetDetailView = Schemas['SetDetail'];
 export type ComparisonSetWrite = Schemas['SetWrite'];
 
 /**
- * What a set reaches.
+ * What a set reaches: its member count and its resolved section count.
  *
- * `section_count` is optional and nullable here, and required on the server,
- * because E5-06's scope note allows the preview to answer the member count
- * without it. An absent count is rendered as an absence; a zero printed in its
- * place would state something the server did not say.
+ * The list's line still says the section count is not known when an answer
+ * arrives without one, because the answer is cast rather than parsed.
  */
-export type ComparisonSetPreviewView = Omit<Schemas['SetPreview'], 'section_count'> & {
-  readonly section_count?: Schemas['SetPreview']['section_count'] | null;
-};
+export type ComparisonSetPreviewView = Schemas['SetPreview'];
 
 /** What a read of the set list answered. */
 export type ComparisonSetsRead =

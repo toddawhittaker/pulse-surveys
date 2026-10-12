@@ -28,22 +28,6 @@ export interface TrendPoint {
 }
 
 /**
- * One benchmark number as the report payload carries it — the wire's
- * `ComparisonFigure`, the same figure type `StatPair`'s cells read.
- *
- * `figure` is `null` wherever `suppressed` is true — a value carrying both would
- * be a suppressed figure on the wire, which SPEC §4.1 item 7 is exactly about —
- * and it is `null` again for a week the population reported nothing in, which is
- * a different fact the notice below tells apart.
- *
- * `reason` is the payload's one-word token (`"below-minimum"`) and **nothing
- * renders it**: a wire token is not a governed string, and the words a reader
- * sees come from `instructorReportTrendCopy.ts` like every other sentence on
- * this surface. {@link isShownFigure} is what reads the seal, fail-closed.
- */
-export type OverlayFigure = ComparisonFigureView;
-
-/**
  * One week of one comparison series — the wire's `BenchmarkSeriesPoint`.
  *
  * **Every week the report publishes is a point here, suppressed weeks
@@ -62,7 +46,7 @@ export type OverlayFigure = ComparisonFigureView;
  */
 export interface OverlayPoint {
   readonly course_week: number;
-  readonly mean: OverlayFigure;
+  readonly mean: ComparisonFigureView;
 }
 
 /**
