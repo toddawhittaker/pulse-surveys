@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 import { test, expect } from '@playwright/test';
 
 import { expectNoAxeViolations } from './support/axe';
-import { signInAs } from './support/doors';
+import { sessionToken, signInAs } from './support/doors';
 import { databaseStatement } from './support/stack';
 
 const ADMIN_SUBJECT = 'mock-idp-user-admin';
@@ -149,9 +149,14 @@ test('a lead faculty member is told the admin pages are not part of their role',
   test.setTimeout(CASE_TIMEOUT_MS);
 
   await signInAs(page, LEAD_SUBJECT);
+  // The SPA lifts the token out of the address before it is stored; going to
+  // another address before then would arrive with no session at all.
+  await expect(page).toHaveURL(/\/app\//);
+  expect(await sessionToken(page), 'The lead faculty member was not signed in.').not.toBeNull();
   for (const address of [PEOPLE_HREF, MAPPINGS_HREF]) {
     await page.goto(address);
-    await expect(page.getByText(NOT_YOUR_ROLE)).toBeVisible();
+    // The notice and the live region both carry the sentence; the region is the one.
+    await expect(page.getByRole('status')).toHaveText(NOT_YOUR_ROLE);
     await expect(page.getByRole('table')).toHaveCount(0);
   }
   await expectNoAxeViolations(page, 'The not-your-role notice on an admin page');
