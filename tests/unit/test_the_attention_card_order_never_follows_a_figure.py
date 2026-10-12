@@ -25,6 +25,11 @@ that kept the input order is caught too.
 an order that follows a figure FAILS on the subsequence assertion with
 Hypothesis's shrunk example. On dac77db5 this is expected to pass if the light
 build sorts by labels.
+
+**Marked `invariant` since E9-14 (item 5(d)).** SPEC §4.1 item 4 forbids
+"score-sorting anywhere", and this property is that rule for the attention
+list; the E9 boundary invariant-coverage review found it outside CI's isolated
+§4.1 pass. Both tests assert in their own bodies.
 """
 
 from datetime import date
@@ -34,6 +39,8 @@ from uuid import UUID
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+
+pytestmark = pytest.mark.invariant
 
 ROLLUPS_MODULE = "app.services.rollups"
 INSTRUCTOR = "INSTRUCTOR"

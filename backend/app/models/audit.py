@@ -12,7 +12,8 @@ automatically audit-logged with actor, timestamp, and case".
 `WEB_LOGIN_LINKAGE_CHANGED`), because the E9 owner ruling makes every grant and
 revocation made in the People editor audited: that row, not a code refusal, is
 what keeps a Care or Admin grant visible to the outside review (SPEC §6.2,
-[ADR 0200](../../../docs/adr/0200-the-admins-people-graph-definers.md)). Each
+[ADR 0200](../../../docs/adr/0200-the-admins-people-graph-definers.md)). E9-06
+added `IMPORT_APPLIED`, one row per applied CSV import (ADR 0204). Each
 later ticket that logs something adds its own member in the same change as the
 code that writes it, so the type is a list of things that actually happen rather
 than a forecast — the same reasoning `AssignmentRole` gives for leaving `STUDENT`
@@ -21,10 +22,11 @@ out.
 **Nothing in the application writes this table, and that is the design.** Every
 row is written inside a `SECURITY DEFINER` function: a reveal by
 `public.record_identity_reveal`, which returns the row's id and no identity at
-all, and an admin write by the people-graph definer that made the write, in the
+all; an admin write by the people-graph definer that made the write, in the
 same transaction and with no exception handler around the insert, so a write
-whose row cannot be written is not committed. Neither runtime role holds
-`INSERT` here, so there is no second way to write a row.
+whose row cannot be written is not committed; and an applied import by
+`public.admin_record_import`, inside the apply's transaction. Neither runtime
+role holds `INSERT` here, so there is no second way to write a row.
 
 **Two shapes of row, each held by a check.** A reveal names a student
 (`subject_user_id`) and no person written about; an admin write names the person
@@ -34,8 +36,10 @@ while the reveal was the only action; it is nullable now, and two two-way checks
 hold each shape: a row names a student exactly when it is a reveal, and names a
 person exactly when it is neither a reveal nor an applied import. E9-06's
 `IMPORT_APPLIED` row is the third shape: it names no student and no person, and
-it alone carries `detail`, the import's kind and dry-run diff, written by
-`public.admin_record_import` inside the apply's transaction.
+it alone carries `detail`, the import's kind and dry-run diff. Since E9-14 two
+more checks hold the admin write's own shape: an assignment or mapping row
+carries a role and a scope node and no other row carries both, and a linkage row
+carries no scope node, so a later writer cannot record a grant without its role.
 
 **A row has to be committed before any name is handed over, and that is what
 makes it a record rather than a courtesy.**
@@ -120,7 +124,8 @@ class AuditLog(UuidPrimaryKey, Base):
 
     Append-only by rule rather than by instrument today: nothing holds `UPDATE`
     or `DELETE` on it, because the two runtime roles hold no privilege on it at
-    all and the only writer is a `SECURITY DEFINER` function that inserts. E10
+    all and the only writers are `SECURITY DEFINER` functions that insert (the
+    reveal's record, the people-graph definers and the import record). E10
     owns the review surface (§6.2 makes the log "reviewable by Admin, without
     comment content") and can add the instrument with the reader.
     """
@@ -150,6 +155,20 @@ class AuditLog(UuidPrimaryKey, Base):
         CheckConstraint(
             "action = 'REPORTS_TO_SET' OR parent_assignment_id IS NULL",
             name="only_an_edge_write_names_a_parent",
+        ),
+        # An assignment or mapping write names the role and the scope node it
+        # wrote (ADR 0200), so a Care grant cannot be recorded without saying
+        # so; and no other row carries both, so none reads as a grant (E9-14).
+        CheckConstraint(
+            "(action IN ('ROLE_GRANTED', 'ROLE_REVOKED', 'REPORTS_TO_SET', "
+            "'LEAD_MAPPING_CHANGED')) = (role IS NOT NULL AND scope_node_id IS NOT NULL)",
+            name="an_admin_write_names_its_role_and_scope",
+        ),
+        # A linkage row may carry the linked person's privilege as its role, and
+        # never a scope node: a login is linked to a person, not to a node.
+        CheckConstraint(
+            "action <> 'WEB_LOGIN_LINKAGE_CHANGED' OR scope_node_id IS NULL",
+            name="a_linkage_names_no_scope",
         ),
     )
 

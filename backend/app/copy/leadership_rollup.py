@@ -85,7 +85,7 @@ RESPONSE_RATE_LOW = CopyEntry(
 )
 RESPONSE_OWED = CopyEntry(
     key="leadership_rollup.attention.response_owed",
-    text="Response required and delinquent 48 hours or more",
+    text="Response required, not yet published after 48 hours",
 )
 
 # The pieces a tree row's label is joined from, with `LABEL_SEPARATOR`.

@@ -90,6 +90,18 @@
   font-size: var(--text-3);
 }
 
+/* A start cohort's name above its workload or participation, when the chips
+ * show more than one cohort. */
+.pulse-rollup-subheading {
+  margin: var(--space-4) 0 var(--space-2);
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: var(--text-1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--spruce-60);
+}
+
 .pulse-rollup-note {
   margin: 0;
   font-size: var(--text-1);
@@ -468,42 +480,4 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--spruce-60);
-}
-
-/* ---- The app shell's switcher and logout ---------------------------------- */
-
-.pulse-shell-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--space-3);
-  padding: var(--space-2) var(--space-5);
-  font-family: var(--font-mono);
-  font-size: var(--text-1);
-  color: var(--spruce-60);
-}
-
-.pulse-shell-button {
-  min-height: 32px;
-  padding: var(--space-1) var(--space-3);
-  border: 1px solid var(--input-edge);
-  border-radius: var(--radius-input);
-  background: var(--paper);
-  color: var(--spruce);
-  font-family: var(--font-body);
-  font-size: var(--text-1);
-  cursor: pointer;
-}
-
-/* A control that is aria-disabled (busy, or nothing to switch to) looks it. */
-.pulse-shell-button[aria-disabled='true'],
-.pulse-rollup-select[aria-disabled='true'] {
-  color: var(--spruce-60);
-  border-color: var(--hairline);
-  cursor: default;
-}
-
-.pulse-shell-status {
-  margin: 0;
 }

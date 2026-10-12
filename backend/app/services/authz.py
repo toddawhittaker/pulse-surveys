@@ -2088,7 +2088,7 @@ def _enrolled_today(session: Session, *, user_id: UUID, settings: Settings) -> b
 
     **The day comes from `app.services.clock`, and the second copy of it is gone**
     (E2-04, ADR 0109). This read and `app.services.provisioning`'s term lookup
-    (`_term_containing_the_launch_day`) each computed the institution's day for
+    (`provisioning.term_containing_today`) each computed the institution's day for
     itself, and the two were named at both ends because a shared helper would have
     moved a function across a module boundary. E2-04 is the ticket that made the
     move worth taking: the same question is asked by a third site, the roster sync,
@@ -2105,6 +2105,20 @@ def _enrolled_today(session: Session, *, user_id: UUID, settings: Settings) -> b
     today = clock.today(session, settings=settings)
     answer = session.execute(_A_LIVE_ENROLLMENT, {"user_id": user_id, "today": today}).scalar_one()
     return bool(answer)
+
+
+def _roles_at(session: Session, *, door: Door, person_id: UUID | None) -> list[AssignmentRole]:
+    """The person's live assignment roles that `door`'s permission column admits.
+
+    `resolve_landing` and `resolve_landings` read the same roles; an absent
+    person reads none.
+    """
+    if person_id is None:
+        return []
+    return [
+        AssignmentRole(role)
+        for role in session.execute(_ASSIGNED_ROLES_AT[door], {"person_id": person_id}).scalars()
+    ]
 
 
 def resolve_landing(
@@ -2147,14 +2161,7 @@ def resolve_landing(
     `run_in_threadpool` (ADR 0013): the session is synchronous and reading it on
     the event loop would block every other request on the process.
     """
-    roles: list[AssignmentRole] = []
-    if person_id is not None:
-        roles = [
-            AssignmentRole(role)
-            for role in session.execute(
-                _ASSIGNED_ROLES_AT[door], {"person_id": person_id}
-            ).scalars()
-        ]
+    roles = _roles_at(session, door=door, person_id=person_id)
 
     landed = chosen_landing(roles, enrolled_today=False, door=door)
     if landed is not None:
@@ -2176,27 +2183,20 @@ def resolve_landings(
     user_id: UUID | None,
     settings: Settings,
 ) -> tuple[LandingRole, ...]:
-    """Every view this session's own identity may open at this door, read now (E9-04).
+    """Every view this session's own identity may open at this door, read now (ADR 0202).
 
     The same two reads as `resolve_landing`, both taken every time: the role
     switcher lists every view a person holds, not only the first, so the
     enrollment is read even when an assignment lands. Read at the moment of
     asking and never carried in a session, so an assignment deleted between
-    listing and switching is not offered to the switch (ruling 7: revoking
-    deletes the row).
+    listing and switching is not offered to the switch (revoking deletes the
+    row, ADR 0200).
 
     **Only the session's own identity is resolved here**, as for
     `resolve_landing`: both ids come from the verified session, and no route
     passes another person's.
     """
-    roles: list[AssignmentRole] = []
-    if person_id is not None:
-        roles = [
-            AssignmentRole(role)
-            for role in session.execute(
-                _ASSIGNED_ROLES_AT[door], {"person_id": person_id}
-            ).scalars()
-        ]
+    roles = _roles_at(session, door=door, person_id=person_id)
     enrolled = (
         door is Door.LAUNCH
         and user_id is not None

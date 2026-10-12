@@ -962,7 +962,7 @@ export interface paths {
         };
         /**
          * The exclusion log inside my own grant or purview
-         * @description Every exclusion, keep and undo a person made inside the reader's reach, newest first.
+         * @description Every exclusion, keep and undo a person made inside the reader's reach; dated rows first.
          *
          *     A lead's or chair's own grant, and an assistant dean's, dean's or vice
          *     president's purview (ADR 0206); the scope is the session's own.
@@ -1864,7 +1864,7 @@ export interface components {
         };
         /**
          * ExclusionLog
-         * @description The reader's exclusion log, newest decision first.
+         * @description The reader's exclusion log: dated rows newest first, then undated rows in no time order.
          */
         readonly ExclusionLog: {
             /** Rows */
@@ -1998,8 +1998,9 @@ export interface components {
          *
          *     `roles` is every leadership role the reader holds, highest first, so a
          *     read-only context bar can name the reader's role. `terms` is every term,
-         *     oldest first; `current_term_id` is the term whose dates contain the
-         *     institution's today, absent between terms. Terms are no secret.
+         *     oldest first; `current_term_id` is the term the pages open: the one whose
+         *     dates contain the institution's today, else the latest that has begun,
+         *     absent before the first term begins. Terms are no secret.
          */
         readonly LeadershipContext: {
             /** Roles */
@@ -2030,11 +2031,8 @@ export interface components {
             readonly flagged: boolean;
             /** Reason */
             readonly reason: string | null;
-            /**
-             * Decided On
-             * Format: date
-             */
-            readonly decided_on: string;
+            /** Decided On */
+            readonly decided_on: string | null;
             /** Excerpt */
             readonly excerpt: string | null;
             /** Is Undo */

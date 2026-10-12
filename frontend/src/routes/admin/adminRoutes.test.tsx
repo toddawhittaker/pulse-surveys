@@ -153,6 +153,12 @@ function nodesFor(path: string) {
       ];
 }
 
+/** The element a control's `aria-describedby` names, or `null`. */
+function describing(control: HTMLElement): HTMLElement | null {
+  const id = control.getAttribute('aria-describedby');
+  return id === null ? null : document.getElementById(id);
+}
+
 function tableRowNames(): string[] {
   const table = screen.getByTestId('pulse-admin-people-table');
   return within(table)
@@ -367,6 +373,39 @@ describe('the person panel', () => {
     });
     // The very node that was in the page before the refusal, not a new one.
     expect(screen.getByRole('status')).toBe(region);
+    // And beside the button that sent it, which names it.
+    const note = describing(within(panel).getByRole('button', { name: 'Grant role' }));
+    expect(note?.textContent).toBe(SENTENCE);
+    expect(note).not.toBe(region);
+  });
+
+  it('clears a control’s refusal once a write from it lands', async () => {
+    const SENTENCE = 'This role is granted at another level of the organization than the one chosen.';
+    let grants = 0;
+    serving((ask) => {
+      if (ask.method === 'POST') {
+        grants += 1;
+        return grants === 1 ? json(409, { detail: SENTENCE }) : json(201, { assignment_id: 'new-one' });
+      }
+      return peopleReads()(ask);
+    });
+    mountAt(PEOPLE_PAGE);
+    const panel = await manage('Bo Adams');
+    const nodeSelect = await within(panel).findByLabelText<HTMLSelectElement>('Granted at');
+    await within(nodeSelect).findByRole('option', { name: 'Biology (Sciences)' });
+    fireEvent.change(nodeSelect, { target: { value: 'dept-a' } });
+    const grant = within(panel).getByRole('button', { name: 'Grant role' });
+    fireEvent.click(grant);
+    await waitFor(() => {
+      expect(describing(grant)?.textContent).toBe(SENTENCE);
+    });
+
+    fireEvent.click(grant);
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe('Role granted.');
+    });
+    expect(grant.hasAttribute('aria-describedby')).toBe(false);
+    expect(within(panel).queryByText(SENTENCE)).toBeNull();
   });
 
   it('shows the server’s sentence for a revoke that has children, and removes nothing', async () => {
@@ -386,7 +425,8 @@ describe('the person panel', () => {
       expect(screen.getByRole('status').textContent).toBe(SENTENCE);
     });
     // The assignment is still listed, and the table was not read again as if it had changed.
-    expect(within(panel).getByRole('button', { name: 'Revoke Chair' })).toBeTruthy();
+    const revoke = within(panel).getByRole('button', { name: 'Revoke Chair' });
+    expect(describing(revoke)?.textContent).toBe(SENTENCE);
     expect(asked.filter((ask) => ask.path.startsWith('/admin/people?'))).toHaveLength(readsBefore);
     expect(asked.filter((ask) => ask.method === 'DELETE').map((ask) => ask.path)).toEqual([
       `/admin/assignments/${ADAMS_ASSIGNMENT}`,
@@ -893,7 +933,9 @@ describe('/admin/lead-mappings, the Lead Faculty mapping table and its import', 
     // Its sentence is on the page itself, not only in the live region.
     expect(applyButton()).toBeNull();
     expect(within(screen.getByRole('main')).getAllByText(STALE).length).toBeGreaterThanOrEqual(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Check the file again' }));
+    const retry = screen.getByRole('button', { name: 'Check the file again' });
+    expect(describing(retry)?.textContent).toBe(STALE);
+    fireEvent.click(retry);
     await screen.findByTestId('pulse-admin-import-diff');
     expect(applyButton()).not.toBeNull();
 

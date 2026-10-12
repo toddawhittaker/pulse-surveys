@@ -252,13 +252,13 @@ def section_lead_name(
     section_id: UUID,
     reader_user_id: UUID | None = None,
     reader_person_id: UUID | None = None,
-    scope: ActorScope | None = None,
+    scope: ActorScope | None,
     settings: Settings | None = None,
 ) -> str | None:
     """The name of the section's course's Lead Faculty, for the header of a course page (§2.1).
 
     Asked through `section_staff_names` with the reader's own key. `scope` is
-    that door's, and every caller writes it: `None` for the student's results page and the teaching
+    that door's, a required keyword with no default, so every caller writes it: `None` for the student's results page and the teaching
     instructor's report, readers the definer checks per section, and the
     leader's own `ActorScope` on the drill-down, so the name is read only for a
     section inside her purview. Passing neither key or both raises
@@ -853,9 +853,11 @@ class _WeekClock:
 def is_owed(session: Session, *, section_id: UUID, course_week: int, now: datetime) -> bool:
     """Whether a response to this section's course week is owed at `now` (§5.6 rule 4).
 
-    True when the week's policy of record is required, nobody has published a
+    The one-section form of `owed_section_weeks`, which holds the rule: true
+    when the week's policy of record is required, nobody has published a
     response, and `now` is at or after report open + 48 hours. Computed on read
-    from `now`, so a caller pins the clock; E9's attention list calls this.
+    from `now`, so a caller pins the clock. The attention list reads
+    `owed_section_weeks` over a whole purview; this form answers one question.
     False for a section or a course week that does not exist.
     """
     return (section_id, course_week) in owed_section_weeks(
@@ -868,7 +870,7 @@ def owed_section_weeks(
 ) -> set[tuple[UUID, int]]:
     """Every `(section, course week)` of these sections owed a response at `now` (§5.6 rule 4).
 
-    The set-based form of `is_owed`, which calls this: one read of the sections
+    The set-based form; `is_owed` asks it about one section. One read of the sections
     and `_week_clocks`' three, however many sections are asked about, so E9's
     attention list reads policies and responses a fixed number of times (ADR
     0205). The rule is `_WeekClock.owed`'s and nowhere else. A section id that

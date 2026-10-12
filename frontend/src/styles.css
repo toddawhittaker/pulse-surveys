@@ -91,6 +91,15 @@
     display: block;
     margin: var(--space-4) 0;
   }
+
+  /* The line a page loaded on first visit shows while its code arrives. */
+  .pulse-route-pending {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: var(--space-6) var(--space-5);
+    font-size: var(--text-1);
+    color: var(--spruce-60);
+  }
 }
 
 /* ==========================================================================

@@ -8,8 +8,6 @@ import { useAnnouncer } from './announcer';
 import { ImportPanel } from './ImportPanel';
 import { Pager, SortHeader, nextOrder, sortedBy } from './tableParts';
 
-/** The address of the Lead Faculty mapping table, under the admin area. */
-export const MAPPINGS_ROUTE = '/admin/lead-mappings';
 
 /** Where a spec finds the page, and its table. */
 export const MAPPINGS_TESTID = 'pulse-admin-mappings';

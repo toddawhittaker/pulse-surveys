@@ -2,18 +2,21 @@
 
 SPEC §6.3 puts the People & reporting editor and the Lead Faculty mapping table in
 the admin console. The writes underneath them are `SECURITY DEFINER` functions
-in `app/views_sql/people_graph_v001.sql` (ADR 0200) and `people_graph_v002.sql`
-(E9-06's import record), and each refusal they can
+in `app/views_sql/people_graph_v001.sql` (ADR 0200), `people_graph_v002.sql`
+(E9-06's import record) and `people_graph_v003.sql` (E9-14's lead rule), and each
+refusal they can
 make is raised as SQLSTATE `P0001` whose message is **exactly one key below**,
 for example `admin_people.actor_not_an_admin`. The message names no person and
 no id. A caller reads the key off the database error and looks it up in `COPY`;
 `app.services.people` writes that translation.
 
-**One refusal carries a number.** `admin_people.assignment_has_reports` is raised
-with the count of assignments that still report to the one being revoked, as
-digits in the error's detail field. Its text holds the placeholder `{count}`,
-filled with `entry.text.format(count=...)`, as `app.copy.gradebook` fills its
-own placeholders.
+**Two refusals carry a number.** `admin_people.assignment_has_reports` is raised
+with the count of assignments that still report to the one being revoked, and
+`admin_people.lead_still_leads_courses` (`people_graph_v003.sql`) with the count
+of courses a Lead Faculty assignment's person still leads, each as digits in the
+error's detail field. Each text holds the placeholder `{count}`, filled with
+`entry.text.format(count=...)`, as `app.copy.gradebook` fills its own
+placeholders.
 
 **Each sentence describes only itself.** It is answered to an admin about a staff
 record, and it names no person, no role holder and no node, because the same
@@ -116,6 +119,26 @@ _COURSE_ALREADY_LED = CopyEntry(
     text="This course already has a lead. Unmap the current lead first.",
 )
 
+# E9-14: a course is mapped only to somebody holding a Lead Faculty assignment,
+# so the course reaches a review queue (people_graph_v003.sql).
+_LEAD_NEEDS_THE_LEAD_ROLE = CopyEntry(
+    key="admin_people.lead_needs_the_lead_role",
+    text=(
+        "A course can be mapped only to somebody who holds the Lead Faculty role. Grant the "
+        "role first."
+    ),
+)
+
+# E9-14: the other side of the same rule. `{count}` is filled from the refusal's
+# detail field.
+_LEAD_STILL_LEADS_COURSES = CopyEntry(
+    key="admin_people.lead_still_leads_courses",
+    text=(
+        "Courses still mapped to this lead: {count}. Unmap each of them before revoking the "
+        "Lead Faculty role."
+    ),
+)
+
 _COURSE_NOT_LED = CopyEntry(
     key="admin_people.course_not_led",
     text="This course has no lead to unmap.",
@@ -210,6 +233,8 @@ COPY: Mapping[str, CopyEntry] = {
         _EDGE_DOES_NOT_CLIMB,
         _NO_SUCH_COURSE,
         _COURSE_ALREADY_LED,
+        _LEAD_NEEDS_THE_LEAD_ROLE,
+        _LEAD_STILL_LEADS_COURSES,
         _COURSE_NOT_LED,
         _SUBJECT_LINKED_TO_ANOTHER,
         _PERSON_ALREADY_LINKED,

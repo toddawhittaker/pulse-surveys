@@ -18,7 +18,8 @@ inside a test body naming what is missing (entry 44).
     section_id, reader_user_id=None, reader_person_id=None) -> str | None`, which
     answers the `display_name` of E9-03's `LEAD_FACULTY` row for that section, or
     `None` for a refused reader or an unled course, and raises `ValueError` when
-    given neither reader key or both.
+    given neither reader key or both. E9-09 added a `scope` keyword and E9-14
+    made it required (no default); the readers here pass `scope=None`.
 
 **Nothing here decides an answer.** It reads and fails naming the interface;
 every expectation is written in the test that makes it (entries 19 and 30).
@@ -89,11 +90,14 @@ def ask_for_the_lead(
     """
     door = the_lead_door()
     try:
+        # E9-14 item 4: `scope` is a required keyword. These readers are a
+        # student and an instructor on their own pages, which pass `None`.
         answered = door(
             session,
             section_id=section_id,
             reader_user_id=reader_user_id,
             reader_person_id=reader_person_id,
+            scope=None,
         )
     except TypeError as mismatch:
         session.rollback()

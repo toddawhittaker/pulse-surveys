@@ -1361,7 +1361,7 @@
           "leadership"
         ],
         "summary": "The exclusion log inside my own grant or purview",
-        "description": "Every exclusion, keep and undo a person made inside the reader's reach, newest first.\n\nA lead's or chair's own grant, and an assistant dean's, dean's or vice\npresident's purview (ADR 0206); the scope is the session's own.",
+        "description": "Every exclusion, keep and undo a person made inside the reader's reach; dated rows first.\n\nA lead's or chair's own grant, and an assistant dean's, dean's or vice\npresident's purview (ADR 0206); the scope is the session's own.",
         "operationId": "read_exclusion_log_leadership_moderation_log_get",
         "responses": {
           "200": {
@@ -3197,7 +3197,7 @@
           "rows"
         ],
         "title": "ExclusionLog",
-        "description": "The reader's exclusion log, newest decision first."
+        "description": "The reader's exclusion log: dated rows newest first, then undated rows in no time order."
       },
       "GrantWrite": {
         "properties": {
@@ -3439,7 +3439,7 @@
           "current_term_id"
         ],
         "title": "LeadershipContext",
-        "description": "What the leadership pages need before their first read (SPEC \u00a75.5).\n\n`roles` is every leadership role the reader holds, highest first, so a\nread-only context bar can name the reader's role. `terms` is every term,\noldest first; `current_term_id` is the term whose dates contain the\ninstitution's today, absent between terms. Terms are no secret."
+        "description": "What the leadership pages need before their first read (SPEC \u00a75.5).\n\n`roles` is every leadership role the reader holds, highest first, so a\nread-only context bar can name the reader's role. `terms` is every term,\noldest first; `current_term_id` is the term the pages open: the one whose\ndates contain the institution's today, else the latest that has begun,\nabsent before the first term begins. Terms are no secret."
       },
       "LogRow": {
         "properties": {
@@ -3482,8 +3482,15 @@
             "title": "Reason"
           },
           "decided_on": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Decided On"
           },
           "excerpt": {

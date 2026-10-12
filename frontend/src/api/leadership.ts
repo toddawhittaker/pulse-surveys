@@ -463,7 +463,7 @@ export async function decideOnQueuedComment(
   return { kind: 'refused', detail: refusalSentence(await jsonBody(response)) };
 }
 
-/** The exclusion log inside this reader's own grant, newest decision first. */
+/** The exclusion log inside this reader's reach: dated rows newest first, then undated rows. */
 export async function readExclusionLog(): Promise<ExclusionLogRead> {
   let response: Response;
   try {

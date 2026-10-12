@@ -38,6 +38,18 @@ is read; a leadership page in a module not listed and in a function not named fo
 leadership is held only to the first clause.
 
 **Marked `invariant`. Expected green on today's branch.**
+
+**Extended by E9-14 (item 4) to the lead-name door.**
+`app.services.response_loop.section_lead_name` reads the Lead Faculty name
+through the same definer, and the E9 boundary privacy review found its `scope`
+defaulting to `None`. E9-14 makes it a required keyword
+(`test_the_lead_name_door_takes_a_scope_with_no_default.py`), and the same
+rule now holds its call sites: every call writes `scope=`, and a leadership
+page's is not the literal `None`. Both doors are swept by the one rule, each
+with its own planted control and its own found-reference control (the
+drill-down asks the lead's name with the reader's scope, ADR 0206). **Expected
+red before E9-14 lands** wherever a caller of the lead-name door relies on the
+default (`FORGETS_THE_SCOPE`).
 """
 
 import ast
@@ -50,6 +62,9 @@ pytestmark = pytest.mark.invariant
 REPO_ROOT = Path(__file__).resolve().parents[2]
 APP_ROOT = REPO_ROOT / "backend" / "app"
 THE_DOOR = "section_staff_names"
+# E9-14 item 4: the lead-name door, held to the same rule.
+THE_LEAD_DOOR = "section_lead_name"
+SWEPT_DOORS = (THE_DOOR, THE_LEAD_DOOR)
 THE_DOORS_MODULE = Path("services/response_loop.py")
 THE_READER = "scope"
 LEADERSHIP_PAGE_MODULES = (Path("services/rollups.py"), Path("api/leadership.py"))
@@ -62,22 +77,24 @@ HIDES_THE_SCOPE = "a call through ** the sweep cannot read"
 NOT_A_CALL = "a reference that is not a call"
 
 
-def call_sites(source: str, where: str) -> list[tuple[int, str, tuple[str, ...]]]:
-    """Every reference to the door in one module: (line, verdict, enclosing function names)."""
+def call_sites(
+    source: str, where: str, door: str = THE_DOOR
+) -> list[tuple[int, str, tuple[str, ...]]]:
+    """Every reference to `door` in one module: (line, verdict, enclosing function names)."""
     try:
         tree = ast.parse(source, filename=where)
     except SyntaxError as failure:  # pragma: no cover - a broken source tree
         pytest.fail(f"{where} does not parse ({failure}); this sweep would report it clean.")
-    aliases = {THE_DOOR}
+    aliases = {door}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             for alias in node.names:
-                if alias.name == THE_DOOR and alias.asname:
+                if alias.name == door and alias.asname:
                     aliases.add(alias.asname)
 
     def names_it(node: ast.AST) -> bool:
         return (isinstance(node, ast.Name) and node.id in aliases) or (
-            isinstance(node, ast.Attribute) and node.attr == THE_DOOR
+            isinstance(node, ast.Attribute) and node.attr == door
         )
 
     found: list[tuple[int, str, tuple[str, ...]]] = []
@@ -113,12 +130,13 @@ def is_a_leadership_page(relative: Path, enclosing: tuple[str, ...]) -> bool:
     )
 
 
-def offenders_under(root: Path) -> list[tuple[str, str]]:
-    """Every reference under `root` the rule forbids, as ("path:line", verdict)."""
+def offenders_under(root: Path, door: str = THE_DOOR) -> list[tuple[str, str]]:
+    """Every reference to `door` under `root` the rule forbids, as ("path:line", verdict)."""
     out: list[tuple[str, str]] = []
     for path in sorted(root.rglob("*.py")):
         relative = path.relative_to(root)
-        for line, verdict, enclosing in call_sites(path.read_text(encoding="utf-8"), str(relative)):
+        source = path.read_text(encoding="utf-8")
+        for line, verdict, enclosing in call_sites(source, str(relative), door):
             if verdict == PASSES_A_SCOPE:
                 continue
             if verdict == PASSES_NONE and not is_a_leadership_page(relative, enclosing):
@@ -219,4 +237,98 @@ def test_every_leadership_caller_of_the_staff_name_door_passes_a_scope() -> None
         f"These references to `{THE_DOOR}` break the rule: {offenders}. README ruling 3: the door "
         "passes only sections from the reader's resolved purview, which it can do only when a "
         "leadership page hands it the reader's scope."
+    )
+
+
+# ---------------------------------------------------------------------------
+# E9-14 item 4: the lead-name door, under the same rule.
+# ---------------------------------------------------------------------------
+
+PLANTED_LEAD_TREE = {
+    "services/response_loop.py": (
+        "def section_lead_name(session, *, section_id, scope, reader_user_id=None):\n"
+        "    return None\n\n\n"
+        "def student_page(session, section_id, user_id):\n"
+        "    return section_lead_name(\n"
+        "        session, section_id=section_id, scope=None, reader_user_id=user_id\n"
+        "    )\n"
+    ),
+    "services/reporting.py": (
+        "from app.services import response_loop as loop\n"
+        "from app.services.response_loop import section_lead_name as lead_of\n\n\n"
+        "def instructor_report(session, section_id, person_id):\n"
+        "    return loop.section_lead_name(session, section_id=section_id, scope=None)\n\n\n"
+        "def leadership_report(session, section_id, leader):\n"
+        "    return lead_of(session, section_id=section_id, scope=leader)\n\n\n"
+        "def leadership_careless(session, section_id):\n"
+        "    return loop.section_lead_name(session, section_id=section_id, scope=None)\n\n\n"
+        "def forgetful(session, section_id):\n"
+        "    return lead_of(session, section_id=section_id)\n\n\n"
+        "def section_lead_name_label():\n"
+        "    return 'section_lead_name'\n"
+    ),
+}
+
+
+def test_the_sweep_flags_every_careless_call_of_the_lead_name_door(tmp_path: Path) -> None:
+    """The control on the sweep for the second door, over a planted tree. **A red means this module is broken.**
+
+    **The mutations it kills (in the sweep):** the door's name not threaded
+    through (the planted lead-door calls are not found at all); an import alias
+    of the lead door not followed (`lead_of(...)` without a scope walks free);
+    `scope=None` on a leadership page not caught one level out
+    (`loop.section_lead_name` in `leadership_careless`). **The near misses it
+    spares:** the student's and the instructor's pages writing `scope=None`, the
+    leadership report passing its reader, and a longer name spelt in a string.
+    """
+    for name, source in PLANTED_LEAD_TREE.items():
+        planted = tmp_path / name
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(source, encoding="utf-8")
+    found = offenders_under(tmp_path, THE_LEAD_DOOR)
+    assert found == [
+        ("services/reporting.py:14", PASSES_NONE),
+        ("services/reporting.py:18", FORGETS_THE_SCOPE),
+    ], found
+
+
+def test_a_call_of_the_lead_name_door_passing_a_scope_is_found_in_the_application() -> None:
+    """The found-reference control for the second door (`docs/MISTAKES.md` entry 35).
+
+    ADR 0206: the drill-down asks the Lead Faculty name with the reader's scope,
+    so at least one call under `backend/app/` passes a scope that is not the
+    literal `None`. A sweep that finds none has gone blind to this door (a
+    renamed door, an alias it cannot follow), and the rule below would report a
+    clean tree it did not read.
+    """
+    found = [
+        (str(path.relative_to(APP_ROOT)), line)
+        for path in sorted(APP_ROOT.rglob("*.py"))
+        for line, verdict, _where in call_sites(
+            path.read_text(encoding="utf-8"), str(path), THE_LEAD_DOOR
+        )
+        if verdict == PASSES_A_SCOPE
+    ]
+    assert found, (
+        f"The sweep finds no call to `{THE_LEAD_DOOR}` passing a scope anywhere under "
+        f"{APP_ROOT.relative_to(REPO_ROOT)}; the drill-down makes one (ADR 0206)."
+    )
+
+
+def test_every_caller_of_the_lead_name_door_writes_its_scope_and_a_leadership_page_a_real_one() -> (
+    None
+):
+    """The rule over the real tree, for `section_lead_name`.
+
+    **The mutation it kills:** a caller relying on the old `scope=None` default
+    (red before E9-14 wherever one does); a leadership page passing
+    `scope=None`, which reads a lead's name for a section outside the reader's
+    purview. **The near miss it spares:** an instructor's or a student's own
+    page writing `scope=None` explicitly.
+    """
+    assert APP_ROOT.is_dir(), f"{APP_ROOT} is not a directory, so this sweep walked nothing."
+    offenders = offenders_under(APP_ROOT, THE_LEAD_DOOR)
+    assert not offenders, (
+        f"These references to `{THE_LEAD_DOOR}` break the rule: {offenders}. E9-14: the door's "
+        "scope is a required keyword, and a leadership page hands it the reader's scope."
     )

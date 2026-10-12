@@ -70,10 +70,13 @@ def plant(review: LeadReviewWorld, decisions: tuple[tuple[str, int, str], ...]) 
             verdict=HARMFUL,
             cohort=cohort,
         )
+        # Decided by the reading lead: E9-14 item 1 blanks a withheld row's reason
+        # for any other reader, and several of these rows are held, so the reasons
+        # that find the rows below would otherwise be null.
         review.plant_decision(
             comment,
             STORED_EXCLUDED,
-            decided_by=review.door.a_person(),
+            decided_by=review.lead.person_id,
             decided_as=AS_LEAD_FACULTY,
             reason=reason,
         )

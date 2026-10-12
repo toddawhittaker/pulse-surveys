@@ -22,7 +22,10 @@ working, and identity is not the only thing it is refused. `CONTRIBUTING.md`'s
 `ScopedReader.section_roster`, `ScopedReader.section_enrollment_counts` and
 `ScopedReader.org_node_labels` check the purview and then pass the session
 and keys straight through to them — the chokepoint is the one door these are
-reached from, not a second way in beside it.
+reached from, not a second way in beside it. One helper is unscoped on purpose:
+`org_nodes_at_level`, which `authz.admin_grant_nodes` calls for the admin's
+grant picker, lists every node of a level from `org_node_label`, and its one
+caller is `api/admin.py` behind `require_admin` (ADR 0200, ADR 0205).
 
 **These return plain frozen rows, not ORM entities, and deliberately.** A view is
 not on `Base.metadata` (E0-10: views ship "as Alembic migrations under

@@ -89,6 +89,9 @@ section's per-week completion ledger in the gradebook (§3.4) can narrow the
 author in a small week. Ruling 1 accepts showing the
 text, and the shuffle removes order as a second clock. Second, a lead's own
 stated reason is free text shown beside a date, and could quote a held comment.
+(Narrowed by [0206](0206-the-drill-down-reuses-the-report-read-only-and-the-wider-roles-read-the-log-and-policy.md)'s
+E9-14 amendment: on a withheld row, only the decider now reads that reason and
+date.)
 
 ## Alternatives rejected
 

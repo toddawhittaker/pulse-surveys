@@ -1,0 +1,58 @@
+/* The app shell's role switcher and logout (SPEC §2), drawn above every page
+ * that has one. Its own small sheet, so a student or instructor page does not
+ * download the leadership roll-up's stylesheet to draw two controls. Tokens
+ * only; the controls take the roll-up's control sizes.
+ */
+
+.pulse-shell-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+.pulse-shell-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pulse-shell-select {
+  min-height: 32px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--input-edge);
+  border-radius: var(--radius-input);
+  background: var(--paper);
+  color: var(--spruce);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+}
+
+.pulse-shell-button {
+  min-height: 32px;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--input-edge);
+  border-radius: var(--radius-input);
+  background: var(--paper);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  cursor: pointer;
+}
+
+/* A control that is aria-disabled (busy, or nothing to switch to) looks it. */
+.pulse-shell-button[aria-disabled='true'],
+.pulse-shell-select[aria-disabled='true'] {
+  color: var(--spruce-60);
+  border-color: var(--hairline);
+  cursor: default;
+}
+
+.pulse-shell-status {
+  margin: 0;
+}

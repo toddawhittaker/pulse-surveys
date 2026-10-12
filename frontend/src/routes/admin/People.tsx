@@ -7,12 +7,10 @@ import { AdminPage, useGate, type Gate } from './AdminPage';
 import { useAnnouncer } from './announcer';
 import { useNodeLabels } from './nodeLabels';
 import { ImportPanel } from './ImportPanel';
-import { Field, PersonPanel, roleLabel } from './PersonPanel';
-import { settle } from './outcome';
+import { Field, PersonPanel, RefusalNote, roleLabel } from './PersonPanel';
+import { describedBy, settle, useWriteRefusal } from './outcome';
 import { Pager, SortHeader, nextOrder, sortedBy } from './tableParts';
 
-/** The address of the People & reporting table, under the admin area. */
-export const PEOPLE_ROUTE = '/admin/people';
 
 /** Where a spec finds the page, and its table. */
 export const PEOPLE_TESTID = 'pulse-admin-people';
@@ -235,10 +233,12 @@ function AddPerson({
   const id = useId();
   const [name, setName] = useState('');
   const [category, setCategory] = useState('');
+  const refusal = useWriteRefusal();
 
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
-    if (settle(await addPerson(name, category), copy('admin_people.page.person_added'), announce, onGate)) {
+    const answer = await addPerson(name, category);
+    if (settle(answer, copy('admin_people.page.person_added'), announce, onGate, refusal)) {
       setName('');
       setCategory('');
       onAdded();
@@ -267,9 +267,10 @@ function AddPerson({
             onChange={(event) => setCategory(event.target.value)}
           />
         </Field>
-        <button type="submit" className="pulse-admin-button">
+        <button type="submit" className="pulse-admin-button" aria-describedby={describedBy(refusal)}>
           {copy('admin_people.page.add_submit')}
         </button>
+        <RefusalNote refusal={refusal} />
       </form>
     </section>
   );
