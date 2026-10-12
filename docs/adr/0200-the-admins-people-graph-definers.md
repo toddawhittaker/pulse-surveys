@@ -106,3 +106,15 @@ not.
   row holds the names it wrote in `audit_log.detail` (`people_graph_v002.sql`).
   Each is admin-checked; a screen that later reads `audit_log.detail` must scope
   it as a staff-name read. SPEC §8 states the exception.
+
+## Amendment (E9-14)
+
+Two rules this ADR left out, from the E9 boundary review.
+`views_sql/people_graph_v003.sql` replaces `admin_map_lead_course`, which now
+refuses a person holding no `LEAD_FACULTY` assignment, and `admin_revoke_role`,
+which refuses a `LEAD_FACULTY` assignment while its person still has mappings
+(the count travels in the detail, as `assignment_has_reports`'s does). Without
+them a course could be mapped to somebody the review queue does not read as a
+lead, so it neither fell to its chair nor reached a queue. And `audit_log` now
+holds what the Decision says a row names: two checks require a role and a scope
+node on every assignment or mapping row, and none on a linkage row.

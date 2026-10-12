@@ -25,6 +25,7 @@ from fixtures.lead_review import (
     AS_LEAD_FACULTY,
     ASSISTANT_DEAN_ROLE,
     LOG_REASON,
+    LOG_SECTION_LABEL,
     Reader,
 )
 from fixtures.moderation import HARMFUL
@@ -106,6 +107,24 @@ def log_reasons(review: Any, reader: Reader) -> set[str]:
     return {str(row.get(LOG_REASON)) for row in answered.json()["rows"]}
 
 
+def logged_cohorts(review: Any, reader: Reader) -> set[str]:
+    """The cohorts whose sections the reader's log carries a row of, read off each row's label.
+
+    E9-14 item 1 blanks the reason of a withheld row for a reader who did not
+    decide it, and the single comments planted here sit in held streams, so a
+    row is found by the section its label names rather than by its reason.
+    """
+    answered = review.ask("GET", LOG, token=reader.token)
+    assert (
+        answered.status_code == 200
+    ), f"The log answered {answered.status_code} to {reader.label}. Body {answered.text[:300]!r}."
+    labels = [str(row.get(LOG_SECTION_LABEL)) for row in answered.json()["rows"]]
+    cohorts = (TAUGHT_COHORT, UNTAUGHT_COHORT, SIBLING_COHORT, UNMAPPED_COHORT)
+    return {
+        cohort for cohort in cohorts if any(review.code_of(cohort) in label for label in labels)
+    }
+
+
 def policy_courses(review: Any, reader: Reader) -> dict[str, bool]:
     """Each course the reader's policy read lists, and whether they may set it."""
     answered = review.ask("GET", POLICY, token=reader.token)
@@ -134,13 +153,13 @@ def test_the_assistant_dean_reads_the_log_and_policy_of_their_purview_and_nothin
     three_exclusions(review)
     reader = an_assistant_dean_over_the_lead(review)
 
-    reasons = log_reasons(review, reader)
-    assert {TAUGHT_REASON, UNTAUGHT_REASON} <= reasons, (
-        f"The assistant dean's log carries {reasons}; both of the own course's exclusions are in "
-        "their purview."
+    cohorts = logged_cohorts(review, reader)
+    assert {TAUGHT_COHORT, UNTAUGHT_COHORT} <= cohorts, (
+        f"The assistant dean's log carries rows of the cohorts {cohorts}; both of the own course's "
+        "exclusions are in their purview."
     )
     assert (
-        SIBLING_REASON not in reasons
+        SIBLING_COHORT not in cohorts
     ), "The assistant dean's log carries the sibling lead's exclusion, outside their purview."
 
     courses = policy_courses(review, reader)
@@ -159,12 +178,12 @@ def test_the_dean_and_the_vice_president_read_the_whole_college(
     three_exclusions(review)
     reader = READERS[role](review)
 
-    reasons = log_reasons(review, reader)
+    cohorts = logged_cohorts(review, reader)
     assert {
-        TAUGHT_REASON,
-        UNTAUGHT_REASON,
-        SIBLING_REASON,
-    } <= reasons, f"The {role}'s log carries {reasons}; all three exclusions are in their purview."
+        TAUGHT_COHORT,
+        UNTAUGHT_COHORT,
+        SIBLING_COHORT,
+    } <= cohorts, f"The {role}'s log carries rows of {cohorts}; all three are in their purview."
     courses = policy_courses(review, reader)
     expected = {str(review.own_course), str(review.sibling_course), str(review.unmapped_course)}
     assert expected <= set(courses), f"The {role}'s policy read lists {sorted(courses)}."
@@ -181,14 +200,14 @@ def test_a_wider_role_who_teaches_a_section_reads_no_log_row_from_it(
     reader = READERS[role](review)
     review.teaches(reader, TAUGHT_COHORT)
 
-    reasons = log_reasons(review, reader)
-    assert TAUGHT_REASON not in reasons, (
+    cohorts = logged_cohorts(review, reader)
+    assert TAUGHT_COHORT not in cohorts, (
         f"The {role} teaches the section and its log still carries that section's exclusion; "
         "the instructor's own view governs that section (SPEC §5.2)."
     )
     assert (
-        UNTAUGHT_REASON in reasons
-    ), f"The {role}'s log lost the untaught section's exclusion too: {reasons}."
+        UNTAUGHT_COHORT in cohorts
+    ), f"The {role}'s log lost the untaught section's exclusion too: {cohorts}."
 
 
 @pytest.mark.parametrize("role", sorted(READERS))
@@ -203,7 +222,7 @@ def test_a_wider_role_still_has_no_queue_and_no_on_behalf_door(lead_review: Any,
     review = lead_review
     three_exclusions(review)
     reader = READERS[role](review)
-    assert log_reasons(review, reader), f"The {role} reads an empty log, so the control is void."
+    assert logged_cohorts(review, reader), f"The {role} reads an empty log, so the control is void."
 
     queue = review.ask("GET", QUEUE, token=reader.token)
     assert queue.status_code == FORBIDDEN
@@ -224,8 +243,9 @@ def test_a_chair_still_reads_only_the_unled_courses_log(lead_review: Any) -> Non
     an_excluded_comment(review, UNMAPPED_COHORT, UNMAPPED_REASON, review.chair, AS_CHAIR)
     reasons = log_reasons(review, review.chair)
     assert UNMAPPED_REASON in reasons, f"The chair's log lacks the unled course's row: {reasons}."
-    assert not reasons & {
-        TAUGHT_REASON,
-        UNTAUGHT_REASON,
-        SIBLING_REASON,
-    }, f"The chair's log carries a led course's exclusion: {reasons}."
+    cohorts = logged_cohorts(review, review.chair)
+    assert not cohorts & {
+        TAUGHT_COHORT,
+        UNTAUGHT_COHORT,
+        SIBLING_COHORT,
+    }, f"The chair's log carries a led course's exclusion: rows of {cohorts}."

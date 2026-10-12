@@ -27,13 +27,23 @@ import './exclusionLogRow.css';
  * **A row with no excerpt says so.** The server withholds the excerpt when the
  * comment's own report does not show it (ADR 0190), and an empty quotation mark
  * would look like a comment with no words.
+ *
+ * **A row with no date says so too.** On a withheld row the server also drops
+ * the date and the reason for every reader but the person who decided (ADR
+ * 0206), because a reason beside a date would place the comment in its week.
+ * The date column then reads "No date" rather than an empty cell, and the
+ * reason line is left out, as it is for a decision made without one.
  */
 export function ExclusionLogRow({ row }: { readonly row: LogRowView }): JSX.Element {
   return (
     <li className="pulse-log-row">
-      <time className="pulse-log-row__date" dateTime={row.decided_on}>
-        {row.decided_on}
-      </time>
+      {row.decided_on == null ? (
+        <span className="pulse-log-row__date">{copy('leadership_moderation.log.no_date')}</span>
+      ) : (
+        <time className="pulse-log-row__date" dateTime={row.decided_on}>
+          {row.decided_on}
+        </time>
+      )}
       <span className="pulse-log-row__role">{copy(ROLE_WORDS[row.decided_as])}</span>
       <span className="pulse-log-row__body">
         <span className="pulse-log-row__section">{row.section_label}</span>

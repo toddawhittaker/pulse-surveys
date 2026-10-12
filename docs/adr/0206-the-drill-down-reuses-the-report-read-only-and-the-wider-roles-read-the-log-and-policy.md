@@ -79,3 +79,39 @@ today changes; no backfill guesses what an old walk saw.
   flight and never holds the lock during the model call.
 - Every reader of a stored summary other than the instructor's own report goes
   through `_summary_rows_since_latest_removal`.
+
+## Amendment (E9-14): a withheld row names no week to anyone but its decider
+
+The E9 boundary threat review found the log and the drill-down together re-dating
+a released comment: a wider reader reads a release batch's text in the
+drill-down, and the log row for the same comment, its excerpt withheld, still
+carried the decider's free-text reason and the decision date. A reason that
+paraphrases the comment, beside a date, places it in its week, which the
+release drops its week to prevent ([0153](0153-a-release-drops-its-week-because-the-gradebook-ledger-would-otherwise-name-the-author.md)).
+ADR 0190 accepted the reason as a residual for a lead reading their own
+decisions; it was never accepted for a reader who did not decide.
+
+So on a row whose excerpt is withheld, `reason` and `decided_on` are null for
+every reader but the person who made the decision, whatever role the reader holds:
+a lead reading an instructor's row, a chair reading somebody else's, and the three
+wider roles. The members stay on the row, nullable. The decider keeps both, since
+the row is their own record and tells them nothing they did not know. A row whose
+excerpt is shown keeps every member for everyone. The rule is in
+`moderation.exclusion_log`, next to the excerpt rule it extends.
+
+**An undated row sits in no time order.** Left in the newest-first run, its
+neighbours' dates would bracket the date it lost. So the dated rows come first,
+newest first, and the undated rows follow as one group ordered by section label,
+then decision, then the comment's random key.
+
+*Rejected:* nulling the date only (a reason can name the week's events); nulling
+both for every reader (takes the decider's own record away); keying the rule on
+the wider roles (a lead reading an instructor's dated reason is the same leak).
+
+**Residual, accepted:** the log is read live, so a non-decider who reloads it
+every day learns roughly when an undated row first appeared, which is about
+when its decision was made. Closing it would mean holding new undated rows back
+until some later, unrelated moment, which would delay the accountability record
+for every reader. It is accepted for that reason, and named here so a later
+change to how often the log can be read is judged against it.
+

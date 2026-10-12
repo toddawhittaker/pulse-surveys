@@ -249,8 +249,9 @@ def test_a_lead_whose_teaching_grant_ended_finds_none_of_that_sections_rows_in_t
 ) -> None:
     """The log, for a lead: the ended section's rows absent, the sibling section's present.
 
-    Another Lead Faculty member excluded a held comment in each section; one read
-    of the log must carry the canary's row and no row of the ended section, by
+    A held comment in each section carries an exclusion planted in the reader's
+    own name (so its reason is the reader's to read, E9-14 item 1); one read of
+    the log must carry the canary's row and no row of the ended section, by
     reason and by section label.
 
     **The mutation this kills:** `exclusion_log` filtering taught sections from
@@ -270,10 +271,13 @@ def test_a_lead_whose_teaching_grant_ended_finds_none_of_that_sections_rows_in_t
         (canary_text, LEADS_CANARY_COHORT, canary_reason),
         (ended_text, LEADS_ENDED_COHORT, ended_reason),
     ):
+        # Decided by the reader: E9-14 item 1 blanks a held row's reason for any
+        # other reader, so the canary could not be found by its reason, and a
+        # leaked ended-section row would carry none and pass the check by reason.
         review.plant_decision(
             a_held_harmful(review, text_, cohort),
             STORED_EXCLUDED,
-            decided_by=review.door.a_person(),
+            decided_by=reader.person_id,
             decided_as=AS_LEAD_FACULTY,
             reason=reason,
         )

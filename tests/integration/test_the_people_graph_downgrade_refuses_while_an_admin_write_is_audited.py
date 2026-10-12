@@ -27,6 +27,7 @@ refuses an empty table or the downgrade leaves a column behind.
 """
 
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fixtures.migration_journey import (
@@ -106,7 +107,8 @@ def plant_an_admin_write(database: Any, tables: dict[str, Any]) -> None:
                 subject_user_id=None,
                 case_id=None,
                 role="CARE",
-                scope_node_id=None,
+                # E9-14 item 3: a grant row names its scope node, by a check.
+                scope_node_id=uuid4(),
                 parent_assignment_id=None,
             )
         )

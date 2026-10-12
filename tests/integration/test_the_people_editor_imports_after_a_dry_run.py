@@ -59,7 +59,14 @@ class _Mapped:
 
     def __init__(self, editor: PeopleEditor) -> None:
         self.editor = editor
-        self.leads = [editor.person(f"Lead {name} {uuid4().hex[:6]}") for name in "ABC"]
+        # E9-14 item 2: the import maps through the definer, which maps a course
+        # only to a person holding a `LEAD_FACULTY` assignment.
+        self.leads = [
+            editor.assignment(
+                "LEAD_FACULTY", person=editor.person(f"Lead {name} {uuid4().hex[:6]}")
+            ).person
+            for name in "ABC"
+        ]
         self.courses = [editor.course() for _ in range(4)]
         for lead, course in zip(self.leads, self.courses, strict=False):
             editor.mapping(person=lead, course=course)
