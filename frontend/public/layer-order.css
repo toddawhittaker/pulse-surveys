@@ -1,0 +1,11 @@
+/* The cascade layer order, declared once, before any other stylesheet loads.
+ *
+ * A layer's precedence is the order it is first named. The build splits the
+ * stylesheet per page, and a lazily loaded page's sheet can be linked ahead of
+ * the entry's; if its `@layer components` came first, Tailwind's preflight
+ * (`base`) would win over it. Naming the whole order here, in the first sheet
+ * index.html links, makes that order a statement rather than an accident of
+ * which file the bundler emits first. A file rather than an inline <style>,
+ * because the Content-Security-Policy allows same-origin stylesheets only.
+ */
+@layer properties, theme, base, components, utilities;
