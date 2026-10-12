@@ -14,15 +14,15 @@ left for exactly this ticket to ask, and this module asks it of every figure
 every public function answers.
 
 **Every door is driven** — both streams of the default-set trend, both
-populations of the workload comparison, the named-set trend, the named-set
-workload and the term-axis pass-through — because a chokepoint is defeated one
-level out (`docs/MISTAKES.md` entry 22) and a function nobody drove is one level
-out. The term-axis door matters most here and is the one E5 does not draw yet:
-E5-06's preview and E9 consume it, so a figure that leaves this module unsealed
-leaves it towards a surface nobody has written yet.
+populations of the workload comparison, and the named-set series — because a
+chokepoint is defeated one level out (`docs/MISTAKES.md` entry 22) and a
+function nobody drove is one level out. E9-05 replaced E5's three named-set
+doors (the trend, the workload and the term-axis pass-through, none of which
+took a reader) with one, `named_set_series`, read here by a chair whose purview
+holds every section in the world; it is the door the roll-ups draw, so a figure
+that leaves it unsealed leaves it towards a leader's screen.
 
-**The figures are found by type, never by member name.** The work order leaves
-`named_set_term_axis`'s row shape to the implementer, so a sweep keyed on a
+**The figures are found by type, never by member name.** A sweep keyed on a
 member would assert nothing about a shape it did not predict — and would go
 quietly green the day the shape changed.
 
@@ -41,6 +41,7 @@ inside each test body, so the first red is a FAILED naming
 """
 
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -51,9 +52,7 @@ from fixtures.benchmark_views import (
     COURSE_STREAM,
     DEFAULT_SET_POPULATION,
     INSTRUCTOR_STREAM,
-    NAMED_SET_TERM_AXIS,
-    NAMED_SET_TREND,
-    NAMED_SET_WORKLOAD,
+    NAMED_SET_SERIES,
     PINNED_NOW,
     PROVENANCE_CHECK,
     UG,
@@ -157,17 +156,35 @@ def a_default_trend(world: BenchmarkWorld, api: dict[str, Any], stream: str) -> 
     )
 
 
+def a_reader_over_every_section(
+    world: BenchmarkWorld, graph: Any, authz: Any, settings: Any
+) -> SimpleNamespace:
+    """A chair of the one department every section here hangs under: her scope, and settings.
+
+    The named-set door takes the reader's `ActorScope` (E9-05), resolved by E9-01's
+    chokepoint. A chair of `BenchmarkWorld`'s one department holds every section
+    this world plants, so the door answers over the whole set.
+    """
+    department = world.spine()["department"]
+    person = graph.person()
+    graph.assign("CHAIR", scope=department[world.key_of("department")], person=person)
+    world.session.flush()
+    return SimpleNamespace(
+        scope=authz.resolve_scope(world.session, person_id=person), settings=settings
+    )
+
+
 THE_DOORS = (
     pytest.param(
-        lambda world, api: a_default_trend(world, api, INSTRUCTOR_STREAM),
+        lambda world, api, reader: a_default_trend(world, api, INSTRUCTOR_STREAM),
         id="benchmark_trend-instructor",
     ),
     pytest.param(
-        lambda world, api: a_default_trend(world, api, COURSE_STREAM),
+        lambda world, api, reader: a_default_trend(world, api, COURSE_STREAM),
         id="benchmark_trend-course",
     ),
     pytest.param(
-        lambda world, api: api[BENCHMARK_WORKLOAD](
+        lambda world, api, reader: api[BENCHMARK_WORKLOAD](
             world.session,
             section_id=world.section_id(HERO),
             population=a_population(DEFAULT_SET_POPULATION),
@@ -177,7 +194,7 @@ THE_DOORS = (
         id="benchmark_workload-default-set",
     ),
     pytest.param(
-        lambda world, api: api[BENCHMARK_WORKLOAD](
+        lambda world, api, reader: api[BENCHMARK_WORKLOAD](
             world.session,
             section_id=world.section_id(HERO),
             population=a_population(UNIVERSITY_POPULATION),
@@ -187,28 +204,14 @@ THE_DOORS = (
         id="benchmark_workload-university",
     ),
     pytest.param(
-        lambda world, api: api[NAMED_SET_TREND](
+        lambda world, api, reader: api[NAMED_SET_SERIES](
             world.session,
             set_id=world.comparison_set_id("named"),
-            stream=INSTRUCTOR_STREAM,
-            cutoffs=THE_CUTOFFS,
+            scope=reader.scope,
+            term_id=world.term_id(),
+            settings=reader.settings,
         ),
-        id="named_set_trend",
-    ),
-    pytest.param(
-        lambda world, api: api[NAMED_SET_WORKLOAD](
-            world.session,
-            set_id=world.comparison_set_id("named"),
-            course_week=THE_COURSE_WEEK,
-            cutoffs=THE_CUTOFFS,
-        ),
-        id="named_set_workload",
-    ),
-    pytest.param(
-        lambda world, api: api[NAMED_SET_TERM_AXIS](
-            world.session, set_id=world.comparison_set_id("named")
-        ),
-        id="named_set_term_axis",
+        id="named_set_series",
     ),
 )
 
@@ -218,6 +221,9 @@ def test_every_figure_a_public_benchmark_function_answers_passes_the_provenance_
     benchmark_world: BenchmarkWorld,
     report_api_contract: Any,
     pinned_benchmark_clock: Any,
+    supervision_graph: Any,
+    authz: Any,
+    window_settings: Any,
     door: Any,
 ) -> None:
     """Criterion 8, one public function at a time.
@@ -255,8 +261,9 @@ def test_every_figure_a_public_benchmark_function_answers_passes_the_provenance_
     api = benchmarks_api()
     figure_type = reporting_symbol(COMPARISON_FIGURE_TYPE)
     refuse = reporting_symbol(PROVENANCE_CHECK)
+    reader = a_reader_over_every_section(benchmark_world, supervision_graph, authz, window_settings)
 
-    answered = door(benchmark_world, api)
+    answered = door(benchmark_world, api, reader)
     figures = figures_in(answered, figure_type)
     assert figures, (
         f"This door answered {answered!r}, which holds no `{COMPARISON_FIGURE_TYPE}` at all. Every "

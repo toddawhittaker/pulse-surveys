@@ -223,6 +223,7 @@ ENTRY = "entry"
 LEADERSHIP_MODERATION = "leadership_moderation"
 LEADERSHIP_RESPONSE = "leadership_response"
 STUDENT_RESULTS = "student_results"
+LEADERSHIP_ROLLUP = "leadership_rollup"
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
@@ -239,7 +240,9 @@ STUDENT_RESULTS = "student_results"
 # `gradebook`, `unknown_address`, `comparison_sets` and `entry` are governed for
 # item 4's vocabulary and owe no line; see `SURFACES_WITH_NO_CONFIDENTIALITY_LINE`
 # below for each reason. Three of five surfaces owed none when E5-13 left this
-# map, which ADR 0176 records; E5.1-03's `entry` makes it four of six.
+# map, which ADR 0176 records; E5.1-03's `entry` made it four of six. Later
+# surfaces (`leadership_response`, E9's `leadership_rollup`) are counted by the
+# map below, not by this sentence.
 GOVERNED_SURFACES = {
     "student_survey": SURVEY,
     "submit": SURVEY,
@@ -315,6 +318,15 @@ GOVERNED_SURFACES = {
     # sentence added to the results page would read as the survey's second line —
     # or the survey's own line, moved there, as satisfying both.
     "student_results": STUDENT_RESULTS,
+    # E9-05's leadership roll-ups (README decision 15): the series route's one
+    # refusal, `leadership_rollup.term_unavailable`, registered in
+    # `app/copy/leadership_rollup.py`, and the words E9-07 and E9-11 file under the
+    # same prefix for the roll-up pages. One prefix, one surface.
+    #
+    # **The mutation this row kills** is a roll-up sentence filed under
+    # `leadership_comparison_sets.` because that prefix already existed, which
+    # would count the roll-up page's words toward the named-set management screen.
+    "leadership_rollup": LEADERSHIP_ROLLUP,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -399,7 +411,19 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
         "on-behalf pages owe item 5 a line is that ticket's question, and the on-behalf "
         "composer shows stored summaries, so it is asked again there (MISTAKES entry 22)."
     ),
+    LEADERSHIP_ROLLUP: (
+        "E9's leadership roll-ups show figures over sections, attention cards and staff "
+        "names; no comment, no summary and no single response (E9 ruling 2: no comments on "
+        "roll-up pages), so item 5's sentence would have no subject. The section drill-down "
+        "reuses the instructor report's surface and that surface's line (E9 README decision "
+        "15)."
+    ),
 }
+
+# The roll-up surface's first key, registered by E9-05: the series route's refusal
+# for a term that does not exist. Named here, the sentence not (`docs/MISTAKES.md`
+# entry 19): the route test holds the transcription.
+LEADERSHIP_ROLLUP_TERM_UNAVAILABLE_KEY = "leadership_rollup.term_unavailable"
 
 # The frontend canary keys. Two, because one of them is item 5's own subject and
 # would go missing in exactly the case the rule is about; the heading is an
@@ -1927,28 +1951,26 @@ def test_the_surface_check_accepts_an_inventory_whose_prefixes_are_all_governed(
 def test_the_surface_check_refuses_a_key_whose_prefix_no_surface_governs() -> None:
     """Acceptance criterion 3, in test: a surface that registered nowhere is red.
 
-    E4 added the report, the gradebook and the unknown-address screen; E9 adds
-    the leadership roll-ups. Until a row for one exists in `GOVERNED_SURFACES`,
-    its strings are swept by nothing and counted toward no surface's
+    E4 added the report, the gradebook and the unknown-address screen; E10 adds
+    the Care queue. Until a row for one exists in `GOVERNED_SURFACES`, its
+    strings are swept by nothing and counted toward no surface's
     confidentiality line — so the inventory has to say so rather than quietly
     ignore them.
 
     The planted prefix is a surface that does not exist yet, deliberately.
-    It was `report.` until E4-12, and the day the report became a governed
-    surface a control planting a report-shaped key would have been demonstrating
-    the opposite of what it says.
+    It was `report.` until E4-12 and `leadership_rollup.` until E9-05, and the
+    day each became a governed surface a control planting a key under it would
+    have been demonstrating the opposite of what it says.
 
     **The mutation it kills:** an `ungoverned_keys` that filters unknown prefixes
     out instead of reporting them, which is exactly how an unregistered surface
     ships unnoticed. **A red here means this module is broken, not that the copy
     is.**
     """
-    inventory = a_governed_inventory(
-        CopyString("leadership_rollup.heading", A_PLAIN_SENTENCE, SYNTHETIC)
-    )
-    assert ungoverned_keys(inventory) == ["leadership_rollup.heading"], (
+    inventory = a_governed_inventory(CopyString("care_queue.heading", A_PLAIN_SENTENCE, SYNTHETIC))
+    assert ungoverned_keys(inventory) == ["care_queue.heading"], (
         f"The check reported {ungoverned_keys(inventory)} over an inventory carrying a "
-        "`leadership_rollup.`-prefixed key, which no row in the governance map claims."
+        "`care_queue.`-prefixed key, which no row in the governance map claims."
     )
 
 
@@ -2713,6 +2735,55 @@ def test_the_collector_finds_the_instructor_gates_refusal() -> None:
         "The instructor gate answers this sentence to every student and every caller with no "
         "session at an instructor route. Until it is an entry, the vocabulary rules pass over it.",
     )
+
+
+@pytest.mark.invariant
+def test_the_roll_up_surface_owes_no_line_and_collects_the_series_routes_refusal() -> None:
+    """E9-05 done-when 14: `leadership_rollup` is placed, and collects this ticket's key.
+
+    README decision 15: every copy prefix sits in `GOVERNED_SURFACES` or
+    `SURFACES_WITH_NO_CONFIDENTIALITY_LINE`, and every governed prefix collects
+    at least one key, so placing a new surface is an invariant-test edit made by
+    a heavy ticket. E9-05 places `leadership_rollup` with its reason, and its
+    first key is the series route's refusal for an unknown term,
+    `leadership_rollup.term_unavailable` in `app/copy/leadership_rollup.py`.
+
+    **The mutations it kills:** the module missing from the registry's
+    enumeration, or its key spelled under another prefix (the key is not
+    collected); the surface moved into `CONFIDENTIALITY_KEY_OF_SURFACE`; the
+    no-line row's reason emptied. **The near miss it spares:** another
+    `leadership_rollup.` key E9-07 or E9-11 adds later, which this test neither
+    requires nor refuses.
+
+    **Expected red before E9-05 lands:** a FAILED on `assert_collected`, naming
+    the missing key.
+    """
+    assert (
+        LEADERSHIP_ROLLUP in SURFACES_WITH_NO_CONFIDENTIALITY_LINE
+    ), f"The {LEADERSHIP_ROLLUP} surface is not recorded as owing item 5 no line."
+    assert SURFACES_WITH_NO_CONFIDENTIALITY_LINE[LEADERSHIP_ROLLUP].strip(), (
+        f"The {LEADERSHIP_ROLLUP} row records no reason, which is an omission reading like a "
+        "decision (ADR 0158)."
+    )
+    assert (
+        LEADERSHIP_ROLLUP not in CONFIDENTIALITY_KEY_OF_SURFACE
+    ), f"The {LEADERSHIP_ROLLUP} surface is in both line maps."
+    assert (
+        GOVERNED_SURFACES.get(prefix_of(LEADERSHIP_ROLLUP_TERM_UNAVAILABLE_KEY))
+        == (LEADERSHIP_ROLLUP)
+    ), f"No governed row maps `{prefix_of(LEADERSHIP_ROLLUP_TERM_UNAVAILABLE_KEY)}.` to the surface."
+
+    collected = {string.key: string.text for string in collect_backend_copy()}
+    assert_collected(
+        collected,
+        (LEADERSHIP_ROLLUP_TERM_UNAVAILABLE_KEY,),
+        "E9-05 registers the series route's refusal for a term that does not exist as "
+        "`leadership_rollup.term_unavailable` in `app/copy/leadership_rollup.py`, the roll-up "
+        "surface's first key (README decision 15).",
+    )
+    assert (
+        LEADERSHIP_ROLLUP_TERM_UNAVAILABLE_KEY in collected
+    ), f"`{LEADERSHIP_ROLLUP_TERM_UNAVAILABLE_KEY}` is not in the collected registry."
 
 
 def test_the_collector_reads_the_moderation_pages_copy_module_and_its_confidentiality_line() -> (
