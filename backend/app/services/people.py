@@ -723,9 +723,17 @@ def _on_line(line: int, session: Session, statement: str, values: dict[str, Any]
 
 
 def _begin(session: Session, *, applying: bool) -> None:
-    """An apply runs `SERIALIZABLE`, so a write landing between its check and its commit fails it."""
+    """An apply runs `SERIALIZABLE`, so a write landing between its check and its commit fails it.
+
+    The admin gate has already read through this session (the revocation
+    check), so its transaction is open, and an isolation level asked of an open
+    transaction is ignored. So the gate's read-only transaction is ended first,
+    and `SET TRANSACTION` is the new transaction's first statement, before the
+    digest re-check takes its snapshot.
+    """
     if applying:
-        session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+        session.rollback()
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
 
 
 _RECORD_IMPORT = (
