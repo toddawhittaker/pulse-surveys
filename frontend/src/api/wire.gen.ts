@@ -840,6 +840,53 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/rollup": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The tree over my leadership purview, one term
+         * @description The whole tree in one payload: the hierarchy, and the by-lead pivot for chair and above.
+         *
+         *     The scope is the session's own (ADR 0199). A term id no term carries is the
+         *     404 the named-set series route answers for it.
+         */
+        readonly get: operations["read_rollup_tree_leadership_rollup_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/rollup/{kind}/{node_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One node's figures and attention cards, one term
+         * @description A node's line per start cohort, its participation, and §5.6's cards.
+         *
+         *     **A node outside the purview is answered exactly as a node that does not
+         *     exist**: one 404, one sentence. So is a by-lead group asked by a reader who
+         *     is not offered the pivot.
+         */
+        readonly get: operations["read_rollup_figures_leadership_rollup__kind___node_id__get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/leadership/moderation/queue": {
         readonly parameters: {
             readonly query?: never;
@@ -1451,6 +1498,32 @@ export interface components {
          * @enum {string}
          */
         readonly AssignmentRole: "INSTRUCTOR" | "LEAD_FACULTY" | "CHAIR" | "ASSISTANT_DEAN" | "DEAN" | "VP_ACADEMICS" | "CARE" | "ADMIN";
+        /**
+         * AttentionCard
+         * @description One §5.6 rule met by one section: the rule, its stream, and where its report is.
+         */
+        readonly AttentionCard: {
+            /**
+             * Rule
+             * @enum {string}
+             */
+            readonly rule: "instructor_trend_down" | "course_trend_down" | "response_rate_low" | "response_owed";
+            /** Rule Name */
+            readonly rule_name: string;
+            /** Stream */
+            readonly stream: ("INSTRUCTOR" | "COURSE") | null;
+            /**
+             * Section Id
+             * Format: uuid
+             */
+            readonly section_id: string;
+            /** Section Code */
+            readonly section_code: string;
+            /** Course Name */
+            readonly course_name: string;
+            /** Course Week */
+            readonly course_week: number;
+        };
         /**
          * BenchmarkSeries
          * @description One comparison line: the weeks it covers, each carrying its own sealed figure.
@@ -2465,6 +2538,147 @@ export interface components {
         readonly ReviewQueue: {
             /** Items */
             readonly items: readonly components["schemas"]["QueueItem"][];
+        };
+        /**
+         * RollupCohort
+         * @description One start cohort of a node's sections, its line on the term axis, and its participation.
+         */
+        readonly RollupCohort: {
+            /**
+             * Section Start Date
+             * Format: date
+             */
+            readonly section_start_date: string;
+            /** Label */
+            readonly label: string;
+            /** Weeks */
+            readonly weeks: readonly components["schemas"]["RollupWeek"][];
+            readonly participation: components["schemas"]["RollupParticipation"] | null;
+        };
+        /**
+         * RollupFigures
+         * @description One node's figures in one term: a line per start cohort, and the attention cards.
+         *
+         *     `attention_empty` is §5.6's calm sentence when no card is due, and absent
+         *     when one is.
+         */
+        readonly RollupFigures: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            readonly kind: "college" | "department" | "prefix" | "course" | "lead" | "no_lead";
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /**
+             * Term Id
+             * Format: uuid
+             */
+            readonly term_id: string;
+            /** Cohorts */
+            readonly cohorts: readonly components["schemas"]["RollupCohort"][];
+            /** Attention */
+            readonly attention: readonly components["schemas"]["AttentionCard"][];
+            /** Attention Empty */
+            readonly attention_empty: string | null;
+        };
+        /**
+         * RollupNode
+         * @description One row of the tree, with its children.
+         *
+         *     Every count is over the sections the reader holds, in the viewed term, so a
+         *     container the reader holds part of counts that part only. `staff_name` is
+         *     the row's Dean, Chair or Lead (absent for a course in its own lead's view,
+         *     and where nobody holds the post); `instructor_names` is a section row's
+         *     teaching instructors. `label` is SPEC §2.1's row label, joined from those.
+         */
+        readonly RollupNode: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            readonly kind: "college" | "department" | "prefix" | "course" | "section" | "lead" | "no_lead";
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Name */
+            readonly name: string;
+            /** Label */
+            readonly label: string;
+            /** Section Count */
+            readonly section_count: number;
+            /** Course Count */
+            readonly course_count?: number | null;
+            /** Prefix Count */
+            readonly prefix_count?: number | null;
+            /** Department Count */
+            readonly department_count?: number | null;
+            /** Staff Name */
+            readonly staff_name?: string | null;
+            /**
+             * Instructor Names
+             * @default []
+             */
+            readonly instructor_names: readonly string[];
+            /**
+             * Children
+             * @default []
+             */
+            readonly children: readonly components["schemas"]["RollupNode"][];
+        };
+        /**
+         * RollupParticipation
+         * @description A cohort's response rate and validity rate in its latest published week.
+         */
+        readonly RollupParticipation: {
+            /** Course Week */
+            readonly course_week: number;
+            /** Response Rate */
+            readonly response_rate: number | null;
+            /** Validity Rate */
+            readonly validity_rate: number | null;
+        };
+        /**
+         * RollupTree
+         * @description The whole tree over the reader's leadership purview in one term.
+         *
+         *     `hierarchy` holds the roots (SPEC §2.1: the highest useful nodes, several
+         *     for a union of assignments). `by_lead` is the by-lead pivot, offered only to
+         *     a reader holding a `CHAIR` or higher assignment, and absent otherwise.
+         */
+        readonly RollupTree: {
+            /**
+             * Term Id
+             * Format: uuid
+             */
+            readonly term_id: string;
+            /** Hierarchy */
+            readonly hierarchy: readonly components["schemas"]["RollupNode"][];
+            /** By Lead */
+            readonly by_lead: readonly components["schemas"]["RollupNode"][] | null;
+        };
+        /**
+         * RollupWeek
+         * @description One course week of one cohort, on both week axes; `None` where nobody answered.
+         */
+        readonly RollupWeek: {
+            /** Course Week */
+            readonly course_week: number;
+            /** Term Week */
+            readonly term_week: number;
+            /** Instructor Mean */
+            readonly instructor_mean: string | null;
+            /** Course Mean */
+            readonly course_mean: string | null;
+            /** Workload Mean */
+            readonly workload_mean: string | null;
+            /** Workload Median */
+            readonly workload_median: string | null;
         };
         /**
          * SectionView
@@ -4126,6 +4340,71 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["SetPreview"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_rollup_tree_leadership_rollup_get: {
+        readonly parameters: {
+            readonly query: {
+                readonly term_id: string;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RollupTree"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_rollup_figures_leadership_rollup__kind___node_id__get: {
+        readonly parameters: {
+            readonly query: {
+                readonly term_id: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly kind: "college" | "department" | "prefix" | "course" | "lead" | "no_lead";
+                readonly node_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RollupFigures"];
                 };
             };
             /** @description Validation Error */
