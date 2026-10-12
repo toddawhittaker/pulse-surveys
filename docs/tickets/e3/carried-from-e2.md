@@ -150,6 +150,10 @@ rather than end.
 surfaces, whose web-door roles are the people who need a session to end before
 its hour expires.
 **Done when:** E9's breakdown schedules it and it is built there.
+**Closed by E9-04 for logout** (2026-10-12): `POST /session/logout` revokes the
+session's `jti` in `revoked_session` and clears both cookies, and every role
+gate refuses a revoked session (ADR 0202). Back-channel logout moved to E13 by
+the E9 breakdown's ruling 8, written into SPEC §14.3.
 
 ## Local-account fallback for web login
 
