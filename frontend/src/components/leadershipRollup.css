@@ -201,6 +201,7 @@
 /* The cohort chips carry an input's edge, so each is a visible control. */
 .pulse-rollup-choices .pulse-rollup-mode {
   border: 1px solid var(--input-edge);
+  padding: 0 var(--space-3);
 }
 
 /* The cohort and named-set choices under the trend. */
@@ -493,6 +494,14 @@
   font-family: var(--font-body);
   font-size: var(--text-1);
   cursor: pointer;
+}
+
+/* A control that is aria-disabled (busy, or nothing to switch to) looks it. */
+.pulse-shell-button[aria-disabled='true'],
+.pulse-rollup-select[aria-disabled='true'] {
+  color: var(--spruce-60);
+  border-color: var(--hairline);
+  cursor: default;
 }
 
 .pulse-shell-status {
