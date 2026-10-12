@@ -3,13 +3,13 @@
 **ID:** E9-16
 **Branch:** `e9/boundary-records-and-tidy-up`
 **Depends on:** 01–12, 15
-**Lane:** light
-**Why this lane:** records (SPEC, ADRs, comments), a published-weeks refactor
-in the reporting services, a mockup, and two frontend fixes. Edits that reach
-heavy paths (`services/authz.py`, `services/identity.py`,
-`services/session.py`, `api/deps.py`, `views_sql/queries.py`) are comments
-only, except one pure refactor in `authz.py` with no test change; anything
-more stops and re-lanes.
+**Lane:** heavy
+**Why this lane:** heavy because the diff reaches heavy paths (`services/authz.py`,
+`services/identity.py`, `services/session.py`, `api/deps.py`,
+`views_sql/queries.py`). Every edit there is a comment or docstring except one
+pure refactor in `authz.py` (`_roles_at`, shared by `resolve_landing` and
+`resolve_landings`), which changes no test: the existing tests are its
+specification, so there are no new tests to write first. No ⚠.
 **Size:** M
 
 ## Context
