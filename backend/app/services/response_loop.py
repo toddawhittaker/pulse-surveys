@@ -61,6 +61,8 @@ Every door here decides who may write or read, then calls the writers above.
     (`authz.chaired_courses_with_a_lead`, ruling 5).
   - **`is_owed` and `on_behalf_open`**: a week required by its policy of record,
     unanswered, and 48 or 96 hours past its report opening (ruling 2).
+    `owed_section_weeks` is `is_owed` over a set of sections, which the
+    roll-ups' attention list reads (ADR 0205).
   - **`responses_owed`**: the reader's owed section-weeks, set-based.
   - **The on-behalf doors**: one gate (`_on_behalf_door`) decides every refusal
     before anything that varies with the week's state is read, and every
@@ -121,6 +123,7 @@ __all__ = [
     "on_behalf_draft",
     "on_behalf_open",
     "on_behalf_week",
+    "owed_section_weeks",
     "policy_overview",
     "publish_as_instructor",
     "publish_on_behalf",
@@ -847,8 +850,31 @@ def is_owed(session: Session, *, section_id: UUID, course_week: int, now: dateti
     from `now`, so a caller pins the clock; E9's attention list calls this.
     False for a section or a course week that does not exist.
     """
-    week = _clock_of(session, section_id=section_id, course_week=course_week, settings=Settings())
-    return week is not None and week.owed(now)
+    return (section_id, course_week) in owed_section_weeks(
+        session, section_ids=[section_id], now=now, settings=Settings()
+    )
+
+
+def owed_section_weeks(
+    session: Session, *, section_ids: Iterable[UUID], now: datetime, settings: Settings
+) -> set[tuple[UUID, int]]:
+    """Every `(section, course week)` of these sections owed a response at `now` (§5.6 rule 4).
+
+    The set-based form of `is_owed`, which calls this: one read of the sections
+    and `_week_clocks`' three, however many sections are asked about, so E9's
+    attention list reads policies and responses a fixed number of times (ADR
+    0205). The rule is `_WeekClock.owed`'s and nowhere else. A section id that
+    does not exist is owed nothing.
+    """
+    asked = sorted(set(section_ids))
+    if not asked:
+        return set()
+    sections = list(session.scalars(select(Section).where(Section.id.in_(asked))))
+    return {
+        (week.section.id, week.course_week)
+        for week in _week_clocks(session, sections=sections, settings=settings)
+        if week.owed(now)
+    }
 
 
 def on_behalf_open(session: Session, *, section_id: UUID, course_week: int, now: datetime) -> bool:

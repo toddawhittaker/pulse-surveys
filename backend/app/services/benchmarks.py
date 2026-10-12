@@ -18,8 +18,12 @@ on a term, and that absence is the feature. **A named set is read differently**
 inside her purview, in the term she is viewing, one series per start cohort on
 the term axis (`named_set_series`).
 
-**Every figure this module emits is sealed by `comparison_after_suppression`
-and there is no second route to one.** SPEC §4.1 item 7 suppresses "a mean, a
+**Every comparison figure this module emits is sealed by
+`comparison_after_suppression` and there is no second route to one.** The one
+read here that answers unsealed numbers is `node_series`, a roll-up node's own
+figures over sections the reader already holds: a node is not a comparison set,
+so it answers plain values and never a `ComparisonFigure` (SPEC §5.5, ADR 0205).
+It sits here only because the two set functions do. SPEC §4.1 item 7 suppresses "a mean, a
 median, or any other statistic" computed from a comparison set below either
 configured minimum, and E4-07 made that decision the only way a `ComparisonFigure`
 can be built (ADR 0155). This module is a caller of that chokepoint and adds
@@ -1178,6 +1182,113 @@ def named_set_series(
                     )
                     for course_week in sorted(cutoffs)
                 ],
+            )
+        )
+    return series
+
+
+# ---------------------------------------------------------------------------
+# A roll-up node's own figures, for one leadership reader (E9-07, SPEC §5.5).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class NodeWeek:
+    """One course week of one start cohort of a roll-up node, on both of SPEC §2.2's week axes.
+
+    **These are not comparison figures, and nothing seals them.** A node's
+    sections are the reader's own: every one of them is a section she may open
+    in the drill-down, so a node's mean tells her nothing she could not read
+    section by section. §4.1 item 7's minimums govern a comparison set, and a
+    node is not one (ADR 0205). `None` is a week nobody answered, or nobody
+    reported hours in.
+    """
+
+    course_week: int
+    term_week: int
+    instructor_mean: Decimal | None
+    course_mean: Decimal | None
+    workload_mean: Decimal | None
+    workload_median: Decimal | None
+
+
+@dataclass(frozen=True, slots=True)
+class NodeCohort:
+    """One start cohort of a node's sections in the viewed term, and its published weeks."""
+
+    section_start_date: date
+    section_ids: frozenset[UUID]
+    weeks: list[NodeWeek]
+
+
+def node_series(
+    session: Session, *, section_ids: Collection[UUID], term: Term, settings: Settings
+) -> list[NodeCohort]:
+    """A roll-up node's figures in one term: one series per start cohort, on the term axis.
+
+    The caller hands the node's sections, every one inside the reader's purview
+    (`app.services.rollups` resolves them from the scope). They are grouped by
+    start date (SPEC §2.2: averaging week 3 across cohorts that began weeks apart
+    is meaningless). Each cohort's course week N is cut off at its own earliest
+    week-N close among the node's sections of that cohort, the same freeze the
+    named-set read applies (E9 decision 14), and only weeks whose report has
+    opened are answered. Each cohort's sections are read by each set function
+    once, so a node's figures cost two statements per cohort.
+
+    Answered in start-date order, and each cohort's weeks in course-week order.
+    """
+    if not section_ids:
+        return []
+    rows = session.execute(
+        select(Section.id, Section.start_date, Week.number, SurveyWindow.closes_at)
+        .join(SurveyWindow, SurveyWindow.section_id == Section.id)
+        .join(Week, Week.id == SurveyWindow.week_id)
+        .where(Section.id.in_(sorted(section_ids)), Section.term_id == term.id)
+    ).all()
+    cohorts: dict[date, set[UUID]] = {}
+    closes: dict[date, dict[int, datetime]] = {}
+    for section_id, start_date, number, closes_at in rows:
+        cohorts.setdefault(start_date, set()).add(section_id)
+        course_week = course_week_of(number, section_start=start_date, term_start=term.start_date)
+        earliest = closes.setdefault(start_date, {})
+        if course_week >= 1 and (course_week not in earliest or closes_at < earliest[course_week]):
+            earliest[course_week] = closes_at
+    now = clock.now(session, settings=settings)
+    zone = ZoneInfo(settings.institution_timezone)
+    instructor, course = REPORT_STREAMS
+    series: list[NodeCohort] = []
+    for start_date in sorted(cohorts):
+        cutoffs = {
+            course_week: closes_at
+            for course_week, closes_at in closes[start_date].items()
+            if week_is_published(closes_at, now=now, zone=zone)
+        }
+        answered = _answered(session, sorted(cohorts[start_date]), cutoffs)
+        weeks = []
+        for course_week in sorted(cutoffs):
+            workload = answered.workload.get(course_week, _NOTHING_ANSWERED)
+            means = {
+                stream: None if rated is None else rated.rating_mean
+                for stream in (instructor, course)
+                for rated in [answered.ratings.get((course_week, stream))]
+            }
+            weeks.append(
+                NodeWeek(
+                    course_week=course_week,
+                    term_week=week_of_the_term(
+                        course_week, section_start=start_date, term_start=term.start_date
+                    ),
+                    instructor_mean=means[instructor],
+                    course_mean=means[course],
+                    workload_mean=workload.workload_mean,
+                    workload_median=workload.workload_median,
+                )
+            )
+        series.append(
+            NodeCohort(
+                section_start_date=start_date,
+                section_ids=frozenset(cohorts[start_date]),
+                weeks=weeks,
             )
         )
     return series
