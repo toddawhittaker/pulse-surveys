@@ -1,16 +1,23 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
+import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
 import { SmallNNotice } from './SmallNNotice';
 import { SMALL_N_THRESHOLD } from './instructorReportCommentFixtures';
 
 afterEach(cleanup);
 
+// The instructor's notice is built by `CommentGroup`; these are its governed words.
+const instructorWords = (threshold: number) => ({
+  title: copy('instructor_report_comments.small_n.title'),
+  body: fillCopy('instructor_report_comments.small_n.body', { threshold: String(threshold) }),
+});
+
 const TITLE = 'No raw comments are shown here this week';
 
 describe('SmallNNotice', () => {
   it('says plainly what is hidden and why, without becoming a landmark', () => {
-    render(<SmallNNotice threshold={SMALL_N_THRESHOLD} />);
+    render(<SmallNNotice {...instructorWords(SMALL_N_THRESHOLD)} />);
 
     // SPEC §4 hides one stream's raw comments below the threshold of distinct
     // commenters and the brief asks for an honest explanation of why; §4.1
@@ -31,14 +38,14 @@ describe('SmallNNotice', () => {
   });
 
   it('states the configured threshold rather than a five written into the component', () => {
-    render(<SmallNNotice threshold={8} />);
+    render(<SmallNNotice {...instructorWords(8)} />);
 
     expect(screen.getByText(/at least 8 students comment in it/)).toBeTruthy();
     expect(screen.queryByText(/at least 5 students/)).toBeNull();
   });
 
   it('counts nobody: the threshold is the only number it says', () => {
-    const { container } = render(<SmallNNotice threshold={SMALL_N_THRESHOLD} />);
+    const { container } = render(<SmallNNotice {...instructorWords(SMALL_N_THRESHOLD)} />);
 
     // §5.2 forbids a count below the threshold — "no chip, no count, no
     // flag-type hint" — and since E5.1-01 the notice sits inside one group,
@@ -51,5 +58,20 @@ describe('SmallNNotice', () => {
     const digits = (container.textContent ?? '').match(/\d+/g) ?? [];
 
     expect(digits).toEqual([String(SMALL_N_THRESHOLD)]);
+  });
+});
+
+describe('SmallNNotice, student words', () => {
+  it('shows the words it is given and states no number when none is given', () => {
+    const { container } = render(
+      <SmallNNotice
+        title="Comments in this group are not shown this week"
+        body="They may appear here later."
+      />,
+    );
+
+    expect(screen.getByText('Comments in this group are not shown this week')).toBeTruthy();
+    expect(container.textContent).not.toMatch(/\d/);
+    expect(screen.queryByRole('region')).toBeNull();
   });
 });

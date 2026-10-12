@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { JSX } from 'react';
 
 // Two copy modules, because the two strings belong to two surfaces. The stream
@@ -6,8 +7,10 @@ import type { JSX } from 'react';
 // so the page's inventory sweeps it beside the rest of the page's sentences.
 import { fillCopy as fillPageCopy } from '../copy/instructorReportPageCopy';
 import { copy, fillCopy } from '../copy/instructorReportStatCopy';
+import { copy as studentCopy, fillCopy as fillStudentCopy } from '../copy/studentResults';
 import { formatStatistic } from './instructorReportFigures';
 import './instructorReportStats.css';
+import './instructorReportTrend.css';
 
 /** The two comment streams SPEC §5.1 reports each week under. */
 export type RatingStream = 'instructor' | 'course';
@@ -91,9 +94,17 @@ export function RatingHistogram({
   stream,
   distribution,
   questionText,
+  unit = 'count',
 }: {
   readonly stream: RatingStream;
+  /** Counts per rating, or with `unit="percent"` whole-number shares summing to 100. */
   readonly distribution: RatingDistribution;
+  /**
+   * What the five numbers are. `percent` is the student's view: shares and never
+   * counts, drawn with a percent sign, with no total and no mean, because a
+   * student is told neither how many rated nor a figure computed from the shares.
+   */
+  readonly unit?: 'count' | 'percent';
   /** The served wording of this stream's rating question, where the payload has one. */
   readonly questionText?: string;
 }): JSX.Element {
@@ -106,14 +117,26 @@ export function RatingHistogram({
   const tallest = Math.max(...buckets.map((bucket) => bucket.count), 1);
 
   const title = copy(STREAM_TITLE[stream]);
+  const [numbersShown, setNumbersShown] = useState(false);
   const heading =
-    questionText === undefined || questionText.trim() === ''
+    unit === 'percent'
+      ? studentCopy(
+          stream === 'instructor'
+            ? 'student_results.ratings_title_instructor'
+            : 'student_results.ratings_title_course',
+        )
+      : questionText === undefined || questionText.trim() === ''
       ? title
       : fillPageCopy('instructor_report_page.histogram_question_title', {
           question: questionText.trim(),
         });
-  const reading =
-    mean === null
+  const percent = unit === 'percent';
+  const reading = percent
+    ? fillStudentCopy('student_results.distribution_reading', {
+        stream: title,
+        shares: buckets.map((bucket) => `${String(bucket.count)}%`).join(', '),
+      })
+    : mean === null
       ? fillCopy('instructor_report_stats.distribution_reading_absent', { stream: title })
       : fillCopy('instructor_report_stats.distribution_reading', {
           stream: title,
@@ -123,9 +146,12 @@ export function RatingHistogram({
         });
 
   return (
-    <div className="pulse-stat-histogram" role="img" aria-label={reading}>
+    <div className="pulse-stat-histogram">
       <p className="pulse-stat-histogram-title">{heading}</p>
-      <p className="pulse-stat-histogram-summary">
+      {/* Only the drawing is the image: children of role=img are presentational,
+          so the toggle and the table must sit outside it to be reachable. */}
+      <div role="img" aria-label={reading}>
+      {percent ? null : <p className="pulse-stat-histogram-summary">
         {mean === null ? (
           copy('instructor_report_stats.no_responses')
         ) : (
@@ -134,7 +160,7 @@ export function RatingHistogram({
             <span className="pulse-stat-histogram-mean">{formatStatistic(mean)}</span>
           </>
         )}
-      </p>
+      </p>}
       {/* Two boxes, as `design/RatingHistogram.dc.html:14-24` draws them: a fixed
           96px row holding each bucket's count above its bar, and a tick row
           beneath it carrying one continuous hairline rule. The count used to
@@ -145,7 +171,9 @@ export function RatingHistogram({
       <ul className="pulse-stat-histogram-bars" aria-hidden="true">
         {buckets.map((bucket) => (
           <li className="pulse-stat-histogram-bucket" key={bucket.value}>
-            <span className="pulse-stat-histogram-count">{String(bucket.count)}</span>
+            <span className="pulse-stat-histogram-count">
+              {percent ? `${String(bucket.count)}%` : String(bucket.count)}
+            </span>
             <span
               className="pulse-stat-histogram-bar"
               style={{ height: barHeight(bucket.count, tallest) }}
@@ -160,6 +188,43 @@ export function RatingHistogram({
           </li>
         ))}
       </ul>
+      </div>
+      {percent ? (
+        <>
+          <button
+            type="button"
+            className="pulse-trend-numbers-toggle"
+            aria-label={fillStudentCopy(
+              numbersShown ? 'student_results.ratings_hide_numbers' : 'student_results.ratings_show_numbers',
+              { stream: title },
+            )}
+            onClick={() => {
+              setNumbersShown(!numbersShown);
+            }}
+          >
+            {studentCopy(
+              numbersShown ? 'student_results.ratings_hide_button' : 'student_results.ratings_show_button',
+            )}
+          </button>
+          <table className={numbersShown ? 'pulse-trend-table' : 'sr-only'}>
+            <caption>{fillStudentCopy('student_results.ratings_table_caption', { stream: title })}</caption>
+            <thead>
+              <tr>
+                <th scope="col">{studentCopy('student_results.ratings_table_rating')}</th>
+                <th scope="col">{studentCopy('student_results.ratings_table_percent')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {buckets.map((bucket) => (
+                <tr key={bucket.value}>
+                  <th scope="row">{bucket.value}</th>
+                  <td>{`${String(bucket.count)}%`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : null}
     </div>
   );
 }

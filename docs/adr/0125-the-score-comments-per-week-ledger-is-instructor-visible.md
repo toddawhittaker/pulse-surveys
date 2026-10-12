@@ -7,7 +7,8 @@ holding a per-week ledger — one line per elapsed week, of the form
 `Week 1: 4 of 5 items`. SPEC §3.4 records the ruling. Since v1 ships no
 student-facing and no instructor-facing view of the participation score, that
 comment is the only place the arithmetic behind a posted percentage is
-visible to anyone.
+visible to anyone. (A student now reads their own latest accepted score and
+ledger on the results page; see [ADR 0198](0198-the-student-reads-their-own-posted-score-as-posted.md).)
 
 An AGS score comment is **not** private to the student. It lands in the
 platform's gradebook beside the score, where an instructor with ordinary

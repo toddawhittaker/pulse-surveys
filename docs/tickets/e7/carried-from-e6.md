@@ -22,6 +22,10 @@ change that records the finding.
 pull request and the merge commit, and every entry still open is carried on in
 `../e8/carried-from-e7.md`, whose ledger names this file's entries in order.
 
+**At the E8 exit,** the two entries E8 owned from this file say below which E8
+pull request closed them, and what is left of them is carried on in
+`../e9/carried-from-e8.md`.
+
 ## How the sources were dispositioned
 
 **Closed inside E6,** each closure recorded in its source file with the pull
@@ -103,7 +107,7 @@ ever, with a test for each; and a record decides whether stored summaries
 that predate a Care verdict on a comment they drew from are withheld or
 regenerated.
 
-## A note for E8: what a student's comment read uses
+## A note for E8: what a student's comment read uses — closed by E8-01
 
 Student comment reads use `report_comment` v004 and show published and kept
 comments only. The view already leaves out every comment that has no moderation
@@ -112,6 +116,11 @@ student read adds the lifecycle filter on top of it, and never a query of its
 own over `answer`. **Owner:** E8, with the student results view. **Done when:**
 the student results view reads comments through v004, a test shows a flagged,
 an excluded and a Care-class comment absent, and a kept one present.
+
+**Closed by E8-01** (#324, merged as 295cc9fd): the student's two comment reads
+filter the instructor's reads over `report_comment` v004, and
+`test_only_published_and_kept_comments_reach_a_student.py` shows a flagged, an
+excluded and a Care-class comment absent and a kept one present.
 
 ## The bounced comment stays outside the moderation pass
 
@@ -312,13 +321,17 @@ page is not part of your role", a token that does not verify still gets the
 401 and the ended-session sentence, and `tests/e2e/leadership-moderation.spec.ts`
 drives both. E7-07's three pages render the same outcome.
 
-## Two mockups still pass a count to the small-N notice
+## Two mockups still pass a count to the small-N notice — half closed by E8-02
 
 E6-04 (#295) made `design/SmallNNotice.dc.html` state no count.
 `design/LeadershipRollup.dc.html` and `design/StudentResults.dc.html` still pass
 it `responded` and `total`, which it now ignores. **Owner:** the next ticket that
 touches either mockup; E8 and E9 are the candidates. **Done when:** neither
 passes the two attributes.
+
+**Half closed by E8-02** (#326, afc04110): `design/StudentResults.dc.html` passes
+neither attribute. `design/LeadershipRollup.dc.html` still does, and is carried
+to E9 in `../e9/carried-from-e8.md`.
 
 ## The exit drives read pinned dates in Fall 2026
 

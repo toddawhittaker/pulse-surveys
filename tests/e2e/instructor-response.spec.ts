@@ -26,6 +26,7 @@
 
 import { test, expect } from "@playwright/test";
 
+import { expectNoAxeViolations } from "./support/axe";
 import { clearTheClock, setTheClockTo } from "./support/clock";
 import { INSTRUCTOR_SUBJECT, type SectionUnderTest, sectionStartClock, standTheLearnerIn } from "./support/survey";
 import { databaseStatement, stopTheScheduler } from "./support/stack";
@@ -113,6 +114,7 @@ test("draft, check, edit clears the check, publish, read as students do, then ed
   await expect(panel).toHaveCount(0);
   await check.click();
   await expect(panel).toBeVisible();
+  await expectNoAxeViolations(page, "The composer with a draft and its check");
 
   const rows = databaseStatement(
     `select count(*) from instructor_response where section_id = ${SECTION};`,
@@ -130,6 +132,7 @@ test("draft, check, edit clears the check, publish, read as students do, then ed
   await expect(card.getByText(INSTRUCTOR_NAME, { exact: true })).toBeVisible();
   await expect(composer.getByText("As students see it")).toBeVisible();
   await expect(editor).toHaveCount(0);
+  await expectNoAxeViolations(page, "The report with its published response");
 
   // Edit opens the composer on the published text; publishing it shows the new text.
   await composer.getByRole("button", { name: "Edit response" }).click();
@@ -139,4 +142,5 @@ test("draft, check, edit clears the check, publish, read as students do, then ed
   await expect(card.getByText(REVISED)).toBeVisible();
   await expect(card.getByText(REPLY)).toHaveCount(0);
   await expect(card.getByText(INSTRUCTOR_NAME, { exact: true })).toBeVisible();
+  await expectNoAxeViolations(page, "The report after an edit");
 });

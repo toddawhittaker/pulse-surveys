@@ -2324,7 +2324,7 @@
           "set_by_role"
         ],
         "title": "PolicyCourse",
-        "description": "One course's response policy as one reader reads it (E7-03, decision 2).\n\n`mode` is the course's latest policy row now, or `ENCOURAGED` with none.\n`set_by_role` says which role set it, and only on a course the reader cannot\nset (a chair reading a course with a lead): on a course the reader sets, it is\nabsent, so nothing on it moves with anybody else's change (done-when 4).\nNever a name: the setter's name is E9's."
+        "description": "One course's response policy as one reader reads it (ADR 0194).\n\n`mode` is the course's latest policy row now, or `ENCOURAGED` with none.\n`set_by_role` says which role set it, and only on a course the reader cannot\nset (a chair reading a course with a lead): on a course the reader sets, it is\nabsent, so nothing on it moves with anybody else's change (done-when 4).\nNever a name: the setter's name is E9's."
       },
       "PolicyMode": {
         "type": "string",
@@ -2912,6 +2912,67 @@
         "title": "StreamsView",
         "description": "The two groups \u00a75.1 heads separately, never pooled into one."
       },
+      "StudentComment": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "StudentComment",
+        "description": "One published or kept comment under its stream: its words and nothing else.\n\nNo key, status, time or week: SPEC \u00a74 never shows a time with a comment, and\nany handle would let a reader line it up with something else."
+      },
+      "StudentParticipation": {
+        "properties": {
+          "score_text": {
+            "type": "string",
+            "title": "Score Text",
+            "description": "The canonical percentage posted, before the platform scales it to the column's maximum."
+          },
+          "ledger_text": {
+            "type": "string",
+            "title": "Ledger Text",
+            "description": "The per-week ledger as posted beside the score."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "score_text",
+          "ledger_text"
+        ],
+        "title": "StudentParticipation",
+        "description": "The student's own participation score from the last post Pulse knows the platform took.\n\n`score_text` is Pulse's canonical percentage, the text stored with the post,\nbefore AGS scales it to the gradebook column's maximum\n(`scoreGiven = percentage / 100 x scoreMaximum`), so it is not necessarily\nthe characters the gradebook shows. `ledger_text` is the per-week ledger as\nposted (SPEC \u00a73.4, ADR 0125). Nothing is recomputed. It is the student's own\nrecord and not an aggregate of the week, so it does not follow the week's\nhold (SPEC \u00a75.4)."
+      },
+      "StudentReleasedComment": {
+        "properties": {
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "stream": {
+            "type": "string",
+            "enum": [
+              "instructor",
+              "course"
+            ],
+            "title": "Stream"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "text",
+          "stream"
+        ],
+        "title": "StudentReleasedComment",
+        "description": "One comment from a release batch: its words and its stream, and never its week (ADR 0153)."
+      },
       "StudentResponse": {
         "properties": {
           "text": {
@@ -2946,6 +3007,65 @@
         "title": "StudentResponse",
         "description": "The response a student reads for one week, and who wrote it (SPEC \u00a75.3).\n\nThe text and the time are the latest row's: an edit is a new row, and the\nlatest row is what students read (ruling 3). The author and the role are the\nfirst row's, which is the same person, since only the person who first\npublished a week's response may edit it."
       },
+      "StudentStream": {
+        "properties": {
+          "stream": {
+            "type": "string",
+            "enum": [
+              "instructor",
+              "course"
+            ],
+            "title": "Stream"
+          },
+          "trend": {
+            "items": {
+              "$ref": "#/components/schemas/StudentTrendPoint"
+            },
+            "type": "array",
+            "title": "Trend",
+            "description": "One point per readable week up to this one; a held week has none."
+          },
+          "shares": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shares",
+            "description": "Each rating's whole-number percentage, keyed 1 to 5, summing to 100; null when too few students rated."
+          },
+          "small_n": {
+            "type": "boolean",
+            "title": "Small N",
+            "description": "Whether this stream's comments are withheld this week."
+          },
+          "comments": {
+            "items": {
+              "$ref": "#/components/schemas/StudentComment"
+            },
+            "type": "array",
+            "title": "Comments",
+            "description": "The published and kept comments, in a random order; empty when small_n."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "stream",
+          "trend",
+          "shares",
+          "small_n",
+          "comments"
+        ],
+        "title": "StudentStream",
+        "description": "One of a released week's two streams, as a student of the section reads it (SPEC \u00a75.4).\n\n`small_n` is true when the stream's comments are withheld (SPEC \u00a74.1 item 3),\nand then `comments` is empty. The ratings are shares, never counts, and are\nwithheld when too few students rated (ruling 8). No count of anybody, here or\nanywhere on the payload (SPEC \u00a75.4)."
+      },
       "StudentSurveyView": {
         "properties": {
           "sections": {
@@ -2971,8 +3091,41 @@
         "title": "StudentSurveyView",
         "description": "Everything a student's weekly survey form needs, in one answer.\n\nA list rather than a single section, because a student may be enrolled in\nseveral and the form asks about all of them at once. An empty list is an\nordinary answer: somebody between terms is enrolled in nothing today and is\ntold so, rather than refused.\n\n**`institution_timezone` is deployment configuration, not person data**\n(FIX-01 item 4). SPEC \u00a73.1 puts every window at a wall-clock time in the\ninstitution's zone, and the screen renders the next opening with an\nabbreviation derived from the date; a browser handed an instant and no zone\nrenders it in the reader's own, so a student travelling \u2014 or one whose\nlaptop is set to UTC \u2014 would be told an hour nobody's institution keeps. It\nis the same string for every reader of the deployment and says nothing about\nany of them."
       },
+      "StudentTrendPoint": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mean",
+            "description": "The mean of the week's ratings; null if too few students rated."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "course_week",
+          "mean"
+        ],
+        "title": "StudentTrendPoint",
+        "description": "One week's rating mean in one stream, for a week a student may read (SPEC \u00a75.4's trend).\n\nA week fewer than the threshold of students rated has a point with no mean\n(ruling 8). A held week has no point at all (ADR 0197)."
+      },
       "StudentWeekResults": {
         "properties": {
+          "course_label": {
+            "type": "string",
+            "title": "Course Label",
+            "description": "The course's label, with its section code and term."
+          },
           "state": {
             "type": "string",
             "enum": [
@@ -3002,17 +3155,74 @@
             "type": "array",
             "title": "Published Weeks",
             "description": "The section's course weeks whose report has opened, ascending: the weeks the page may page through."
+          },
+          "streams": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StudentStream"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Streams",
+            "description": "The instructor stream, then the course stream; null while awaiting."
+          },
+          "workload_median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workload Median",
+            "description": "The median of the week's workload answers; null while awaiting or if too few."
+          },
+          "released": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StudentReleasedComment"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Released",
+            "description": "Comments released from earlier weeks, with no week named. Present on the latest published week only, and only while no published week is awaiting."
+          },
+          "participation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudentParticipation"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The student's latest accepted participation score; absent before any score has been posted. Shown in every state."
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
+          "course_label",
           "state",
           "response",
-          "published_weeks"
+          "published_weeks",
+          "streams",
+          "workload_median",
+          "released"
         ],
         "title": "StudentWeekResults",
-        "description": "One week's state for one of the student's own sections, its response if any, and the\ncourse weeks a student may page through (SPEC \u00a75.4: published weeks only)."
+        "description": "One week of one of the student's own sections, under the hold (SPEC \u00a75.3, \u00a75.4).\n\nIn every state: the course label, the state, the response if any, and the\ncourse weeks a student may page through (published weeks only). While the\nweek is `awaiting`, `streams`, `workload_median` and `released` are null:\nnothing about the week is served until a response releases it (ADR 0193,\nADR 0197)."
       },
       "SubmissionAccepted": {
         "properties": {

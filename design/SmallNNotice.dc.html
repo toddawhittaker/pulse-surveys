@@ -25,7 +25,7 @@ class Component extends DCLogic {
     if (audience === 'student') {
       return {
         title: 'Comments in this group stay private this week',
-        body: 'Fewer than ' + threshold + ' classmates commented here this week, so comments stay private so no one can be identified \u2014 including you. They may appear later among comments from earlier weeks.'
+        body: 'Comments appear here once enough classmates have commented. Until then they stay private, so that none can be traced back to the person who left it. They may appear later among comments from earlier weeks.'
       };
     }
     return {

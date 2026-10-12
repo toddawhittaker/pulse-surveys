@@ -1,10 +1,10 @@
 /**
  * The two calls the weekly survey screen makes — SPEC §13's `frontend/src/api/`.
  *
- * `GET /student/survey` (E2-09) answers the form's whole question — which
+ * `GET /student/survey` answers the form's whole question — which
  * sections this reader is enrolled in today, which of them has a window open,
  * the questions to answer and what they have already submitted — and
- * `POST /student/submissions` (E2-08) is the weekly submission. Neither takes a
+ * `POST /student/submissions` is the weekly submission. Neither takes a
  * parameter naming a section, a person or a week that the reader could choose:
  * the read takes none at all, and the write names only a section the server then
  * checks the reader's own enrollment in.
@@ -22,8 +22,8 @@
  * carries one is exempt from the write path's double-submit check by
  * construction, because no cross-site page can make a browser attach it.
  *
- * **A session that rides the cookie instead is not exempt, and until E2-17 this
- * file had no answer for it**: `csrf_verified_student` requires `X-Pulse-CSRF`
+ * **A session that rides the cookie instead is not exempt, and this file once had no
+ * answer for it**: `csrf_verified_student` requires `X-Pulse-CSRF`
  * from a cookie carrier, nothing under `frontend/src` read `pulse_csrf`, and a
  * cookie-borne student could therefore read the survey and never submit it. Every
  * POST below carries the cookie's value when the cookie is readable — see
@@ -123,7 +123,7 @@ export type SurveyRead =
  * `submit.classifier_down` says so in as many words ("Your answers are still in
  * the form, so nothing is lost"), and a form cleared underneath that sentence
  * would make it false. A revise that would clear a judged comment is one of
- * these since E5.1-05, answered 422 rather than 409: the window is still open
+ * these, answered 422 rather than 409: the window is still open
  * and the student can put the comment back, so the form stays.
  */
 export type SubmitOutcome =
@@ -217,6 +217,9 @@ export async function submitWeeklySurvey(
 
 /** One week of results for one of this reader's sections (SPEC §5.4). */
 export type StudentWeekResults = Schemas['StudentWeekResults'];
+
+/** One of the page's two streams: its trend, its distribution and its comments. */
+export type StudentStream = Schemas['StudentStream'];
 
 /** The published response a student reads, and who wrote it. */
 export type StudentResponse = Schemas['StudentResponse'];

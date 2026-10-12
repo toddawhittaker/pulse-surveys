@@ -4,11 +4,10 @@
  *
  * Same shape as `studentSurvey.ts`, under a key prefix of its own,
  * `student_results.`: the copy inventory (SPEC §4.1 items 4 and 5) collects by
- * prefix, and the results page is its own surface (E7-10). It shows only text
- * staff wrote, so it owes item 5 no confidentiality line today;
- * `docs/tickets/e8/carried-from-e7.md` reopens that when E8 adds anything
- * derived from students to the page. The keys the survey page uses for its
- * heading and its link to this page are filed here with the rest.
+ * prefix, and the results page is its own surface. It shows what classmates
+ * wrote and how they rated the week, so it carries item 5's line exactly once:
+ * `student_results.confidentiality` (ADR 0197). The keys the survey page uses
+ * for its heading and its link to this page are filed here with the rest.
  *
  * **The words state facts and blame nobody** (`design/Usage Rules.md` §4). A
  * response written by someone other than the instructor is attributed by name
@@ -37,6 +36,40 @@ export const STUDENT_RESULTS_COPY = {
   'student_results.awaiting': 'There is no reply to show for this week yet.',
   'student_results.unanswered': 'There is no reply for this week.',
 
+  // The figures. The two streams are told apart by their words and not by a
+  // legend, because the trend draws one line in each panel and nothing else.
+  'student_results.class_heading': 'Your class this week',
+  'student_results.trend_instructor': 'Instructor',
+  'student_results.trend_course': 'Course',
+  // A week with no mean says only that it has no figure: no count, no reason.
+  'student_results.trend_no_figure': 'No figure for this week',
+  'student_results.trend_mean_header': 'Mean rating',
+  // The histogram's spoken form: shares of the week's ratings, never counts.
+  'student_results.distribution_reading':
+    '{stream}, ratings this week, percent of ratings 1 to 5: {shares}.',
+  'student_results.workload_median': 'Class median: {hours} hours on this course',
+
+  // The comments. A stream held back says why in one voice to the student and
+  // states no number: how many commented is what the hold exists to keep.
+  'student_results.comments_none': 'No comments this week.',
+  'student_results.small_n_title': 'Comments in this group are not shown this week',
+  'student_results.small_n_body': 'They may appear here later.',
+  // A stream whose ratings are held. It names the stream and says nothing about comments.
+  'student_results.ratings_held_instructor': 'Ratings about the instructor are not shown this week',
+  'student_results.ratings_held_course': 'Ratings about the course are not shown this week',
+  'student_results.ratings_held_body': 'They appear once enough classmates have rated.',
+  // The percent histogram: a title naming what is rated, and the table behind it.
+  'student_results.ratings_title_instructor': 'Ratings about the instructor',
+  'student_results.ratings_title_course': 'Ratings about the course',
+  'student_results.ratings_table_caption': '{stream}, percent of ratings',
+  'student_results.ratings_table_rating': 'Rating',
+  'student_results.ratings_table_percent': 'Percent',
+  'student_results.ratings_show_button': 'Show the numbers',
+  'student_results.ratings_hide_button': 'Hide the numbers',
+  'student_results.ratings_show_numbers': 'Show the numbers: {stream}',
+  'student_results.ratings_hide_numbers': 'Hide the numbers: {stream}',
+  'student_results.released_heading': 'Comments from earlier weeks',
+
   // A refusal of any kind, one calm sentence that says nothing about why.
   'student_results.nothing_to_show': 'There is nothing to show for this section yet.',
   'student_results.session_ended_title': 'Your session has ended',
@@ -50,6 +83,22 @@ export const STUDENT_RESULTS_COPY = {
   'student_results.author_chair': '{name}, Department Chair',
   'student_results.published_on': 'Published {day}',
 
+  // SPEC §4.1 item 5: the page's one confidentiality line. There is exactly one
+  // entry for it here, which is the form the inventory reads it in.
+  'student_results.confidentiality':
+    'Comments are shown without the names of the students who wrote them.',
+
+  // The student's own posted participation score, shown in every state. The one
+  // sentence says only that a count can change; it names no cause and no fault.
+  'student_results.participation_heading': 'Your participation score',
+  'student_results.participation_score': 'Your participation: {score}%',
+  'student_results.participation_note':
+    'A comment counted when you submitted it can be re-checked later, so a week’s count can go down.',
+
+  // The landing's lead for a section with no survey open: the newest results.
+  'student_results.results_lead': 'Week {week} results are in',
+  'student_results.results_lead_link': 'See Week {week} results',
+  'student_results.results_lead_link_named': 'See Week {week} results for {course}',
 } as const satisfies Record<string, string>;
 
 /** Every key this surface publishes. */

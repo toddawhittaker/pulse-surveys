@@ -22,7 +22,8 @@ import './instructorReportTrend.css';
  */
 export interface TrendPoint {
   readonly courseWeek: number;
-  readonly termWeek: number;
+  /** `null` where the payload carries no term week (a student's payload does not). */
+  readonly termWeek: number | null;
   readonly mean: number | null;
 }
 
@@ -358,6 +359,8 @@ export function PulseTrendChart({
   showTicks = true,
   showLegend = false,
   drawDelayed = false,
+  meanHeader,
+  absentText,
 }: {
   /** One stream's published weeks, oldest first. */
   readonly points: readonly TrendPoint[];
@@ -391,12 +394,19 @@ export function PulseTrendChart({
   readonly showLegend?: boolean;
   /** Whether the draw waits for another panel's: the pair draws top, then bottom. */
   readonly drawDelayed?: boolean;
+  /** The table's last column header, for a surface that words the mean its own way. */
+  readonly meanHeader?: string;
+  /** What a week with no mean says, where "no responses" would claim too much. */
+  readonly absentText?: string;
 }): JSX.Element {
   // What each comparison series actually contributes to the drawing. Absent and
   // suppressed both come out empty here, and they part company below: absent
   // renders nothing anywhere, suppressed renders a notice.
   const [numbersShown, setNumbersShown] = useState(false);
   const tableClass = numbersShown ? 'pulse-trend-table' : 'sr-only';
+  // The term-week column is the server's word for a section's place in the term;
+  // a payload that sends none has no column rather than an empty one.
+  const showTermWeek = points.some((point) => point.termWeek !== null);
   const comparisonPoints = drawnPoints(comparison);
   const universityPoints = drawnPoints(university);
 
@@ -536,8 +546,10 @@ export function PulseTrendChart({
         <thead>
           <tr>
             <th scope="col">{copy('instructor_report_trend.table_course_week_header')}</th>
-            <th scope="col">{copy('instructor_report_trend.table_term_week_header')}</th>
-            <th scope="col">{copy('instructor_report_trend.table_mean_header')}</th>
+            {showTermWeek && (
+              <th scope="col">{copy('instructor_report_trend.table_term_week_header')}</th>
+            )}
+            <th scope="col">{meanHeader ?? copy('instructor_report_trend.table_mean_header')}</th>
           </tr>
         </thead>
         <tbody>
@@ -548,14 +560,18 @@ export function PulseTrendChart({
                   week: padWeek(point.courseWeek),
                 })}
               </th>
-              <td>
-                {fillCopy('instructor_report_trend.term_week_tick', {
-                  week: padWeek(point.termWeek),
-                })}
-              </td>
+              {showTermWeek && (
+                <td>
+                  {point.termWeek === null
+                    ? null
+                    : fillCopy('instructor_report_trend.term_week_tick', {
+                        week: padWeek(point.termWeek),
+                      })}
+                </td>
+              )}
               <td>
                 {point.mean === null
-                  ? copy('instructor_report_trend.no_responses')
+                  ? (absentText ?? copy('instructor_report_trend.no_responses'))
                   : point.mean.toFixed(1)}
               </td>
             </tr>

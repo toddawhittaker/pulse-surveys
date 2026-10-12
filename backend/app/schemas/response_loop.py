@@ -1,18 +1,20 @@
-"""What the response loop's routes take and answer — E7-02 and E7-03, SPEC §5.3 and §5.4.
+"""What the response loop's routes take and answer — SPEC §5.3 and §5.4.
 
-**E7-02: the student results route.**
+**The student results route.**
 
-One section-week, read by one of its own students: the week's state, and the
-response a named person published to it. Nothing else. SPEC §5.4 puts the
-aggregates, the comments and the small-N state on the same page; those are E8's
-(the owner's ruling 8 for E7), and this contract has no member for any of them.
+One section-week, read by one of its own students, under the hold (ADR 0193,
+ADR 0197): the course label, the week's state and the response a named person
+published to it in every state; and, once the week is not `awaiting`, the two
+streams' trend, distributions, small-N state and published comments, the
+workload median, and on the latest published week the comments released from
+earlier weeks. No count of anybody and no benchmark (SPEC §4.1 item 1, §5.4).
 
 **Every model here refuses a member it never declared**, as every student schema
-in `app.schemas.student` does (E5-11): a comparison figure, a benchmark or a
-university average handed to one of these constructors raises rather than being
-dropped in silence, so a later join cannot quietly carry one to a student (SPEC
-§4.1 item 1). `tests/unit/test_the_student_results_payload_carries_nothing_of_a_
-benchmark.py` measures it inside the invariant pass.
+in `app.schemas.student` does: a comparison figure, a benchmark or a university
+average handed to one of these constructors raises rather than being dropped in
+silence, so a later join cannot quietly carry one to a student (SPEC §4.1 item
+1). `tests/unit/test_the_student_payload_schema_carries_nothing_of_a_benchmark.py`
+walks every model the results payload reaches inside the invariant pass.
 
 **The states are a closed set.** `awaiting`: the policy of record holds the week
 and nobody has published. `published`: the first response was written as the
@@ -39,7 +41,13 @@ __all__ = [
     "PolicyPrefix",
     "PolicyWrite",
     "ResponseWrite",
+    "StudentComment",
+    "StudentParticipation",
+    "StudentReleasedComment",
     "StudentResponse",
+    "StudentStream",
+    "StudentStreamName",
+    "StudentTrendPoint",
     "StudentWeekResults",
     "WeekResponseView",
     "WeekState",
@@ -70,12 +78,108 @@ class StudentResponse(BaseModel):
     published_at: datetime = Field(description="When the text now shown was published.")
 
 
-class StudentWeekResults(BaseModel):
-    """One week's state for one of the student's own sections, its response if any, and the
-    course weeks a student may page through (SPEC §5.4: published weeks only)."""
+class StudentParticipation(BaseModel):
+    """The student's own participation score from the last post Pulse knows the platform took.
+
+    `score_text` is Pulse's canonical percentage, the text stored with the post,
+    before AGS scales it to the gradebook column's maximum
+    (`scoreGiven = percentage / 100 x scoreMaximum`), so it is not necessarily
+    the characters the gradebook shows. `ledger_text` is the per-week ledger as
+    posted (SPEC §3.4, ADR 0125). Nothing is recomputed. It is the student's own
+    record and not an aggregate of the week, so it does not follow the week's
+    hold (SPEC §5.4).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    score_text: str = Field(
+        description=(
+            "The canonical percentage posted, before the platform scales it to the "
+            "column's maximum."
+        )
+    )
+    ledger_text: str = Field(description="The per-week ledger as posted beside the score.")
+
+
+StudentStreamName = Literal["instructor", "course"]
+
+
+class StudentTrendPoint(BaseModel):
+    """One week's rating mean in one stream, for a week a student may read (SPEC §5.4's trend).
+
+    A week fewer than the threshold of students rated has a point with no mean
+    (ruling 8). A held week has no point at all (ADR 0197).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    course_week: int
+    mean: float | None = Field(
+        description="The mean of the week's ratings; null if too few students rated."
+    )
+
+
+class StudentComment(BaseModel):
+    """One published or kept comment under its stream: its words and nothing else.
+
+    No key, status, time or week: SPEC §4 never shows a time with a comment, and
+    any handle would let a reader line it up with something else.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+
+
+class StudentReleasedComment(BaseModel):
+    """One comment from a release batch: its words and its stream, and never its week (ADR 0153)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    stream: StudentStreamName
+
+
+class StudentStream(BaseModel):
+    """One of a released week's two streams, as a student of the section reads it (SPEC §5.4).
+
+    `small_n` is true when the stream's comments are withheld (SPEC §4.1 item 3),
+    and then `comments` is empty. The ratings are shares, never counts, and are
+    withheld when too few students rated (ruling 8). No count of anybody, here or
+    anywhere on the payload (SPEC §5.4).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    stream: StudentStreamName
+    trend: list[StudentTrendPoint] = Field(
+        description="One point per readable week up to this one; a held week has none."
+    )
+    shares: dict[str, int] | None = Field(
+        description=(
+            "Each rating's whole-number percentage, keyed 1 to 5, summing to 100; null "
+            "when too few students rated."
+        )
+    )
+    small_n: bool = Field(description="Whether this stream's comments are withheld this week.")
+    comments: list[StudentComment] = Field(
+        description="The published and kept comments, in a random order; empty when small_n."
+    )
+
+
+class StudentWeekResults(BaseModel):
+    """One week of one of the student's own sections, under the hold (SPEC §5.3, §5.4).
+
+    In every state: the course label, the state, the response if any, and the
+    course weeks a student may page through (published weeks only). While the
+    week is `awaiting`, `streams`, `workload_median` and `released` are null:
+    nothing about the week is served until a response releases it (ADR 0193,
+    ADR 0197).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    course_label: str = Field(description="The course's label, with its section code and term.")
     state: WeekState = Field(description="Whether the week is held, answered, or neither.")
     response: StudentResponse | None = Field(
         description="The published response; absent while awaiting and when unanswered."
@@ -86,10 +190,29 @@ class StudentWeekResults(BaseModel):
             "page may page through."
         )
     )
+    streams: list[StudentStream] | None = Field(
+        description="The instructor stream, then the course stream; null while awaiting."
+    )
+    workload_median: float | None = Field(
+        description="The median of the week's workload answers; null while awaiting or if too few."
+    )
+    released: list[StudentReleasedComment] | None = Field(
+        description=(
+            "Comments released from earlier weeks, with no week named. Present on the "
+            "latest published week only, and only while no published week is awaiting."
+        )
+    )
+    participation: StudentParticipation | None = Field(
+        default=None,
+        description=(
+            "The student's latest accepted participation score; absent before any score "
+            "has been posted. Shown in every state."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
-# E7-03: the publish and edit doors, the policy, the owed read and on behalf.
+# The publish and edit doors, the policy, the owed read and on behalf (ADR 0194).
 #
 # Every model refuses a member it never declared, as the student models above
 # do, so a later join cannot quietly carry a comment, a name or a time onto a
@@ -154,7 +277,7 @@ class PolicyWrite(BaseModel):
 
 
 class PolicyCourse(BaseModel):
-    """One course's response policy as one reader reads it (E7-03, decision 2).
+    """One course's response policy as one reader reads it (ADR 0194).
 
     `mode` is the course's latest policy row now, or `ENCOURAGED` with none.
     `set_by_role` says which role set it, and only on a course the reader cannot

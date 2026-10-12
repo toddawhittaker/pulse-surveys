@@ -6,7 +6,8 @@ import { CommentCard } from './CommentCard';
 import type { CommentDecision, DecisionAnswer, ReportComment } from './CommentCard';
 import { SmallNNotice } from './SmallNNotice';
 import './instructorReportComments.css';
-import { copy } from '../copy/instructorReportCommentCopy';
+import { copy, fillCopy } from '../copy/instructorReportCommentCopy';
+import { copy as studentCopy } from '../copy/studentResults';
 
 /**
  * One comment stream as SPEC §5.1 lays it out: comments "grouped under 'About
@@ -64,33 +65,40 @@ import { copy } from '../copy/instructorReportCommentCopy';
  * `decide` bound to that handle; the card itself never holds the handle, so it
  * still has nothing it could render one from.
  *
+ * **The student audience is the same group without the report's machinery.** A
+ * student's page carries no AI summary, no moderation controls and no threshold:
+ * the group is its heading and its cards, or the student `SmallNNotice` in their
+ * place, or one line when the stream simply had no comments. It takes no
+ * threshold because the student's notice states no number.
+ *
  * **Order is the order given.** The randomization SPEC §4 requires is the
  * server's; nothing here sorts, shuffles, groups or numbers, and the cards
  * carry no position a reader could read submission order out of.
  */
-export function CommentGroup({
-  stream,
-  summary,
-  comments,
-  suppressed,
-  threshold,
-  decide,
-}: {
-  readonly stream: 'instructor' | 'course';
-  /** The stream's generated summary, or `null` for a week none was written for. */
-  readonly summary: {
-    readonly text: string;
-    readonly responseCount: number;
-    readonly heldNote: string | null;
-  } | null;
-  readonly comments: readonly GroupComment[];
-  /** Sends one decision on the comment with this handle. Absent, the cards are read-only. */
-  readonly decide?: (answerId: string, decision: CommentDecision) => Promise<DecisionAnswer>;
-  /** Whether this stream is below SPEC §4's threshold this week, as the payload declares it. */
-  readonly suppressed: boolean;
-  /** The configured threshold the payload compared this stream with. */
-  readonly threshold: number;
-}): JSX.Element {
+export function CommentGroup(
+  props: {
+    readonly stream: 'instructor' | 'course';
+    readonly comments: readonly GroupComment[];
+    /** Whether this stream is below SPEC §4's threshold this week, as the payload declares it. */
+    readonly suppressed: boolean;
+  } & (
+    | {
+        readonly audience?: 'instructor';
+        /** The stream's generated summary, or `null` for a week none was written for. */
+        readonly summary: {
+          readonly text: string;
+          readonly responseCount: number;
+          readonly heldNote: string | null;
+        } | null;
+        /** Sends one decision on the comment with this handle. Absent, the cards are read-only. */
+        readonly decide?: (answerId: string, decision: CommentDecision) => Promise<DecisionAnswer>;
+        /** The configured threshold the payload compared this stream with. */
+        readonly threshold: number;
+      }
+    | { readonly audience: 'student' }
+  ),
+): JSX.Element {
+  const { stream, comments, suppressed } = props;
   const headingId = useId();
   const instructorStream = stream === 'instructor';
 
@@ -103,7 +111,7 @@ export function CommentGroup({
             : 'instructor_report_comments.group.course_heading',
         )}
       </h3>
-      {summary === null ? (
+      {props.audience === 'student' ? null : props.summary === null ? (
         <p className="pulse-comment-group__absent-summary">
           {copy('instructor_report_comments.ai.absent')}
         </p>
@@ -114,8 +122,8 @@ export function CommentGroup({
               ? 'instructor_report_comments.ai.instructor_heading'
               : 'instructor_report_comments.ai.course_heading',
           )}
-          text={summary.text}
-          responseCount={summary.responseCount}
+          text={props.summary.text}
+          responseCount={props.summary.responseCount}
           // The held note names a flag type, and §5.2 hides flagged comments
           // from the instructor entirely below the threshold — "no chip, no
           // count, no flag-type hint" — while §5.1 permits the note only above
@@ -124,15 +132,35 @@ export function CommentGroup({
           // one other thing on this panel that could carry a hint: it obeys the
           // suppression the payload already declared, and decides no threshold
           // of its own.
-          heldNote={suppressed ? null : summary.heldNote}
+          heldNote={suppressed ? null : props.summary.heldNote}
         />
       )}
       {suppressed ? (
         <div className="pulse-comment-group__small-n">
-          <SmallNNotice threshold={threshold} />
+          {props.audience === 'student' ? (
+            <SmallNNotice
+              title={studentCopy('student_results.small_n_title')}
+              body={studentCopy('student_results.small_n_body')}
+            />
+          ) : (
+            <SmallNNotice
+              title={copy('instructor_report_comments.small_n.title')}
+              body={fillCopy('instructor_report_comments.small_n.body', {
+                threshold: String(props.threshold),
+              })}
+            />
+          )}
         </div>
       ) : (
-        <GroupComments comments={comments} decide={decide} />
+        <GroupComments
+          comments={comments}
+          decide={props.audience === 'student' ? undefined : props.decide}
+          emptyNotice={
+            props.audience === 'student'
+              ? studentCopy('student_results.comments_none')
+              : copy('instructor_report_comments.group.empty_notice')
+          }
+        />
       )}
     </section>
   );
@@ -145,17 +173,18 @@ export type GroupComment = ReportComment & { readonly answerId?: string };
 function GroupComments({
   comments,
   decide,
+  emptyNotice,
 }: {
   readonly comments: readonly GroupComment[];
+  /** The one line shown when the stream had no comments. */
+  readonly emptyNotice: string;
   readonly decide:
     | ((answerId: string, decision: CommentDecision) => Promise<DecisionAnswer>)
     | undefined;
 }): JSX.Element {
   if (comments.length === 0) {
     return (
-      <p className="pulse-comment-group__empty">
-        {copy('instructor_report_comments.group.empty_notice')}
-      </p>
+      <p className="pulse-comment-group__empty">{emptyNotice}</p>
     );
   }
 

@@ -112,7 +112,7 @@ from app.lti.ags import (
     post_score,
 )
 from app.models.ai import Classification, ClassificationTask
-from app.models.grades import GradeSync, GradeSyncOutcome
+from app.models.grades import GradeSync, GradeSyncOutcome, latest_grade_sync
 from app.models.identity import Enrollment
 from app.models.lti import (
     AGS_LINE_ITEM_ADDRESS_COLUMN,
@@ -1056,12 +1056,7 @@ def _delivery_for(
     behind it different, and SPEC §3.4 puts that arithmetic in the comment beside
     the score (ADR 0125).
     """
-    latest = session.scalars(
-        select(GradeSync)
-        .where(GradeSync.section_id == section.id, GradeSync.user_id == user_id)
-        .order_by(GradeSync.created_at.desc())
-        .limit(1)
-    ).first()
+    latest = latest_grade_sync(session, section_id=section.id, user_id=user_id)
     if latest is not None and (latest.score_text, latest.ledger_text) == (
         score.percentage,
         score.ledger,

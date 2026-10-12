@@ -67,7 +67,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
-from sqlalchemy import column, func, or_, select, table
+from sqlalchemy import and_, column, distinct, func, or_, select, table
 from sqlalchemy.orm import Session
 
 from app.ai.contracts import (
@@ -139,7 +139,7 @@ if TYPE_CHECKING:  # pragma: no cover - imported for annotations only
         WorkloadBenchmarkFigures,
         WorkloadBenchmarkView,
     )
-    from app.schemas.response_loop import OnBehalfStream
+    from app.schemas.response_loop import OnBehalfStream, StudentStream
     from app.services.benchmarks import BenchmarkPoint, WorkloadComparison
 
 logger = logging.getLogger(__name__)
@@ -1972,6 +1972,141 @@ def on_behalf_streams(
         )
         for token in REPORT_STREAMS
     ]
+
+
+def student_streams(
+    session: Session,
+    *,
+    section_id: UUID,
+    week_id: UUID,
+    trend: Sequence[tuple[int, UUID]],
+    comments: Mapping[str, Sequence[str]],
+) -> tuple[list["StudentStream"], float | None]:
+    """One released section-week's two streams and its workload median, as its students read them.
+
+    SPEC §5.4. The streams and the median share one count of who answered, so
+    the threshold is read once for both.
+
+    Per stream, in the report's order (instructor, then course): the trend over
+    `trend`, the `(course_week, week_id)` pairs the caller may show; this week's
+    ratings as shares; and either `comments` for the stream or the small-N
+    state.
+
+    **Ruling 8 (SPEC §5.4, ADR 0197): a student never reads a count, and never a
+    figure of a small stream-week.** The shares are whole percentages keyed "1"
+    to "5" (`_shares_of`), never the counts the instructor reads: counts sum to
+    the number of classmates who rated. A stream-week with fewer distinct raters
+    than `n_threshold()` gives no shares and a trend point with no mean, on its
+    own page and on every later one: in a tiny week a student who knows her own
+    rating can subtract it from a mean or a histogram and read a classmate's.
+    The point stays, so a small week and a held one never look alike.
+
+    The small-N state is `_held_streams`' answer, the report's own comment rule,
+    so a stream below the threshold or a week still awaiting a verdict carries
+    no comment here whatever the caller passed.
+
+    **Who may read, and which weeks, is the caller's.**
+    `app.services.response_loop.student_week_results` checks the reader, leaves
+    every `awaiting` week out of `trend`, and reads `comments` through the
+    student comment reads (ADR 0197). Nothing here returns a count of anybody or
+    a benchmark.
+    """
+    from app.schemas.response_loop import StudentComment, StudentStream, StudentTrendPoint
+
+    week_ids = [week_id, *(trend_week_id for _course_week, trend_week_id in trend)]
+    ratings = _rating_counts(session, section_id=section_id, week_ids=week_ids)
+    answered = _people_who_answered(session, section_id=section_id, week_ids=week_ids)
+    threshold = n_threshold()
+
+    def shown(week: UUID, token: str) -> bool:
+        return answered.get((week, token), 0) >= threshold
+
+    held = _held_streams(session, section_id=section_id, week_id=week_id)
+    streams = [
+        StudentStream(
+            # Spelled as the on-behalf read spells a stream: the stored token,
+            # lower-cased. `StudentStream` refuses any other spelling.
+            stream=token.lower(),
+            trend=[
+                StudentTrendPoint(
+                    course_week=course_week,
+                    mean=_to_one_decimal(_mean_of(ratings.get((trend_week_id, token), {})))
+                    if shown(trend_week_id, token)
+                    else None,
+                )
+                for course_week, trend_week_id in trend
+            ],
+            shares=_shares_of(ratings.get((week_id, token), {})) if shown(week_id, token) else None,
+            small_n=held[token],
+            comments=[] if held[token] else [StudentComment(text=text) for text in comments[token]],
+        )
+        for token in REPORT_STREAMS
+    ]
+    # The median is `None` when fewer than the threshold of distinct students
+    # answered the workload question (ruling 8): a student who knows her own hours
+    # could read a classmate's from a median of two or three. Never the mean.
+    median = None
+    if answered.get((week_id, None), 0) >= threshold:
+        _mean, median = _workload(session, section_id=section_id, week_id=week_id)
+    return streams, _to_one_decimal(median)
+
+
+def _to_one_decimal(figure: float | None) -> float | None:
+    """A student figure to the one decimal the page shows, on the server (ADR 0197).
+
+    Beside whole-number shares, an exact mean such as 30/7 names how many
+    classmates rated, so no student figure leaves with more precision than the
+    page prints. Python's `round`, half to even. The instructor's figures do not
+    pass through here.
+    """
+    return None if figure is None else round(figure, 1)
+
+
+def _people_who_answered(
+    session: Session, *, section_id: UUID, week_ids: Sequence[UUID]
+) -> dict[tuple[UUID, str | None], int]:
+    """Distinct students who answered each rating stream, and the workload, per week.
+
+    Keyed `(week_id, stream token)` for a rating and `(week_id, None)` for the
+    workload question (it has no stream). People, not answers or responses
+    (`docs/MISTAKES.md` entry 50): ruling 8's threshold is a promise about how
+    many classmates stand behind a figure. `response.user_id` is counted and
+    grouped away here; it is never returned.
+    """
+    rows = session.execute(
+        select(Response.week_id, Question.stream, func.count(distinct(Response.user_id)))
+        .join_from(Answer, Question, Question.id == Answer.question_id)
+        .join(Response, Response.id == Answer.response_id)
+        .where(
+            Response.section_id == section_id,
+            Response.week_id.in_(list(week_ids)),
+            or_(
+                and_(Question.kind == QuestionKind.LIKERT, Answer.rating.is_not(None)),
+                and_(Question.kind == QuestionKind.WORKLOAD, Answer.workload_hours.is_not(None)),
+            ),
+        )
+        .group_by(Response.week_id, Question.stream)
+    ).all()
+    return {(week, stream): int(people) for week, stream, people in rows}
+
+
+def _shares_of(counts: Mapping[int, int]) -> dict[str, int]:
+    """Rating counts as whole percentages keyed "1" to "5", summing to exactly 100.
+
+    Largest-remainder rounding: each share is floored, and the points left over
+    go one each to the largest remainders, ties to the lower rating. Integer
+    arithmetic throughout, so no float decides a tie. The caller withholds the
+    shares of a stream-week below the threshold, so `counts` is never empty here.
+    """
+    total = sum(counts.get(value, 0) for value in LIKERT_VALUES)
+    if total == 0:  # pragma: no cover - the caller's threshold is at least one rater
+        raise ValueError("No ratings to share out.")
+    floors = {value: 100 * counts.get(value, 0) // total for value in LIKERT_VALUES}
+    remainders = {value: 100 * counts.get(value, 0) % total for value in LIKERT_VALUES}
+    left = 100 - sum(floors.values())
+    for value in sorted(LIKERT_VALUES, key=lambda v: (-remainders[v], v))[:left]:
+        floors[value] += 1
+    return {str(value): floors[value] for value in LIKERT_VALUES}
 
 
 def _enrolled_students(
