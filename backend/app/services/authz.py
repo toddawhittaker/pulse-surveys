@@ -522,7 +522,14 @@ _SECTION_SCOPED_ASSIGNEES = text(
 # measured that `role_assignment` accepts two `LEAD_FACULTY` rows on one course
 # and a `LEAD_FACULTY` row on a course whose mapping names somebody else, so the
 # assignment's own `course_id` is not an answer to "which courses do they lead".
-_LED_COURSES = text("SELECT course_id FROM public.lead_faculty_course WHERE person_id = :person_id")
+#
+# Bound as a set of people so that a supervision walk reads every lead it reached
+# in one statement. The answer is the union of what each of them leads, which is
+# exactly the term a walk unions in; nothing asks it about two people and then
+# treats the answer as one person's.
+_LED_COURSES = text(
+    "SELECT course_id FROM public.lead_faculty_course WHERE person_id = ANY(:person_ids)"
+)
 
 # Which of a set of courses anybody leads — the other question the same mapping
 # answers. A chair reviews only the courses of their department that nobody
@@ -532,7 +539,10 @@ _COURSES_WITH_A_LEAD = text(
     "SELECT DISTINCT course_id FROM public.lead_faculty_course WHERE course_id = ANY(:course_ids)"
 )
 
-# Every node beneath one node, at every level. Built from one template over
+# Every node beneath a set of nodes of one level, at every level. Bound as a set
+# so that a supervision walk reads every chair's department (or every dean's
+# college) it reached in one statement rather than one per assignment. Built from
+# one template over
 # `CONTAINMENT_LEVELS` so the projection is written once; nothing a caller
 # supplies is interpolated — the level names are literals in this module and the
 # node key is always bound. `prefix` is in the mapping for completeness and is
@@ -541,7 +551,7 @@ _COURSES_WITH_A_LEAD = text(
 _DESCENDANTS_TEMPLATE = (
     "SELECT institution_id, college_id, department_id, prefix_id, course_id, section_id"
     " FROM public.containment_path"
-    " WHERE {level}_id = :node_id"
+    " WHERE {level}_id = ANY(:node_ids)"
 )
 
 _DESCENDANTS: Final[Mapping[str, TextClause]] = {
@@ -674,19 +684,26 @@ def _scope_node(assignment: _Assignment, level: str) -> UUID | None:
     }[level]
 
 
-def _nodes_beneath(session: Session, level: str, node_id: UUID) -> Mapping[str, frozenset[UUID]]:
-    """Every node strictly below `node_id`, by level, out of `public.containment_path`.
+def _nodes_beneath(
+    session: Session, level: str, node_ids: Collection[UUID]
+) -> Mapping[str, frozenset[UUID]]:
+    """Every node strictly below any of `node_ids`, by level, out of `public.containment_path`.
 
     The view holds one row per org node with its ancestors filled in, so the rows
-    whose `<level>_id` is this node are the node itself and everything under it.
+    whose `<level>_id` is one of these nodes are those nodes and everything under
+    them. Every node in `node_ids` is at `level`; the answer is the union of their
+    subtrees, and no caller reads it as one node's.
     Only the levels *below* `level` are collected: an own grant is the scope node
     and its subtree, and a level above it is somebody else's grant. A chair who
     also held `college_ids` would hold every sibling department in that college,
     which is a widening nobody it happens to can detect.
     """
     below = CONTAINMENT_LEVELS[CONTAINMENT_LEVELS.index(level) + 1 :]
+    if not below or not node_ids:
+        # A section has nothing beneath it, and no nodes have no subtree.
+        return {name: frozenset() for name in below}
     found: dict[str, set[UUID]] = {name: set() for name in below}
-    rows = session.execute(_DESCENDANTS[level], {"node_id": node_id}).mappings()
+    rows = session.execute(_DESCENDANTS[level], {"node_ids": list(node_ids)}).mappings()
     for row in rows:
         for name in below:
             key: UUID | None = row[f"{name}_id"]
@@ -695,8 +712,11 @@ def _nodes_beneath(session: Session, level: str, node_id: UUID) -> Mapping[str, 
     return {name: frozenset(keys) for name, keys in found.items()}
 
 
-def _lead_faculty_grant(session: Session, person_id: UUID) -> Purview:
-    """The courses one lead leads, and their sections. SPEC §2.1's role grain for a lead.
+def _lead_faculty_grant(session: Session, person_ids: Collection[UUID]) -> Purview:
+    """The courses these leads lead, and their sections. SPEC §2.1's role grain for a lead.
+
+    A set of people because a supervision walk unions every lead it reaches; a
+    caller asking about one lead passes one person.
 
     "A Lead Faculty's grant is only the courses they lead (never sibling leads'
     courses, at any point in the union)." The courses come from
@@ -716,7 +736,9 @@ def _lead_faculty_grant(session: Session, person_id: UUID) -> Purview:
     A lead with no mapping rows holds nothing, which is a real state rather than a
     deferral: §2.1 says a course with no mapping "falls to its department chair".
     """
-    courses = frozenset(session.execute(_LED_COURSES, {"person_id": person_id}).scalars())
+    if not person_ids:
+        return Purview.empty()
+    courses = frozenset(session.execute(_LED_COURSES, {"person_ids": list(person_ids)}).scalars())
     if not courses:
         return Purview.empty()
     sections = frozenset(
@@ -728,42 +750,72 @@ def _lead_faculty_grant(session: Session, person_id: UUID) -> Purview:
 def _own_grant_of(session: Session, assignment: _Assignment) -> Purview:
     """One assignment's own grant, with the role grain already applied.
 
-    Split out from `own_grant` because `resolve_scope` has the rows in hand
-    already and re-reading each one by key would be a second answer to a question
-    just asked.
+    Split out from `own_grant` because callers that have the row in hand already
+    would otherwise re-read it by key, a second answer to a question just asked.
+    It is `_own_grants_of` over one row, so the role grain is written once.
     """
-    if assignment.role is AssignmentRole.CARE:
-        raise CareIsNotComposableError(
-            f"assignment {assignment.assignment_id} is a CARE assignment and has no reporting "
-            "purview. SPEC 2: Care is deliberately not composable with reporting roles — its sole "
-            "power is the threat queue, kept isolated so safety re-identification never rides "
-            "alongside routine oversight access. Ask holds_care() instead."
-        )
+    return _own_grants_of(session, (assignment,))
 
-    if assignment.role in _GRANT_ARRIVES_THROUGH_THE_GRAPH:
-        return Purview.empty()
 
-    level = _OWN_GRANT_ROOT.get(assignment.role)
-    if level is None:
-        raise NoReportingPurviewError(
-            f"assignment {assignment.assignment_id} holds the {assignment.role.value} role, which "
-            "SPEC 2.1's supervision chain does not contain and SPEC 2's table gives no reporting "
-            "access. A role with no grain written down holds nothing here until somebody writes "
-            "one, which is the same fail-closed choice as the scope grain rule's ELSE false."
-        )
+def _own_grants_of(session: Session, assignments: Collection[_Assignment]) -> Purview:
+    """The union of these assignments' own grants, with the role grain applied to each.
 
-    if assignment.role is AssignmentRole.LEAD_FACULTY:
-        return _lead_faculty_grant(session, assignment.person_id)
+    The one place SPEC §2.1's role grain is written. It reads in a number of
+    statements fixed by which grains are present — one per containment level that
+    some assignment is rooted at, and two for every lead together — and never one
+    per assignment, which is what lets `transitive_purview` read a whole level of
+    the supervision graph at once.
 
-    node_id = _scope_node(assignment, level)
-    if node_id is None:
-        raise UnknownAssignmentError(
-            f"assignment {assignment.assignment_id} holds the {assignment.role.value} role and "
-            f"carries no {level} scope reference. SPEC 2.1's scope table and the schema's scope "
-            "grain rule both say it must, so this row was written past the constraint that refuses "
-            "it."
-        )
-    return Purview.of({level: frozenset({node_id}), **_nodes_beneath(session, level, node_id)})
+    Every assignment is checked before anything is read, so a `CARE` or `ADMIN`
+    row anywhere in `assignments` refuses the whole question rather than a part of
+    it.
+    """
+    rooted: dict[str, set[UUID]] = {level: set() for level in CONTAINMENT_LEVELS}
+    leads: set[UUID] = set()
+    for assignment in assignments:
+        if assignment.role is AssignmentRole.CARE:
+            raise CareIsNotComposableError(
+                f"assignment {assignment.assignment_id} is a CARE assignment and has no reporting "
+                "purview. SPEC 2: Care is deliberately not composable with reporting roles — its "
+                "sole power is the threat queue, kept isolated so safety re-identification never "
+                "rides alongside routine oversight access. Ask holds_care() instead."
+            )
+
+        if assignment.role in _GRANT_ARRIVES_THROUGH_THE_GRAPH:
+            continue
+
+        level = _OWN_GRANT_ROOT.get(assignment.role)
+        if level is None:
+            raise NoReportingPurviewError(
+                f"assignment {assignment.assignment_id} holds the {assignment.role.value} role, "
+                "which SPEC 2.1's supervision chain does not contain and SPEC 2's table gives no "
+                "reporting access. A role with no grain written down holds nothing here until "
+                "somebody writes one, which is the same fail-closed choice as the scope grain "
+                "rule's ELSE false."
+            )
+
+        if assignment.role is AssignmentRole.LEAD_FACULTY:
+            leads.add(assignment.person_id)
+            continue
+
+        node_id = _scope_node(assignment, level)
+        if node_id is None:
+            raise UnknownAssignmentError(
+                f"assignment {assignment.assignment_id} holds the {assignment.role.value} role and "
+                f"carries no {level} scope reference. SPEC 2.1's scope table and the schema's "
+                "scope grain rule both say it must, so this row was written past the constraint "
+                "that refuses it."
+            )
+        rooted[level].add(node_id)
+
+    granted = _lead_faculty_grant(session, leads)
+    for level, node_ids in rooted.items():
+        if node_ids:
+            subtree = Purview.of(
+                {level: frozenset(node_ids), **_nodes_beneath(session, level, node_ids)}
+            )
+            granted = granted.union(subtree)
+    return granted
 
 
 def own_grant(session: Session, *, assignment_id: UUID) -> Purview:
@@ -808,14 +860,16 @@ def _chaired_courses_and_those_with_a_lead(
     ignored, and a chair row with no department is a row the scope grain rule
     refuses, so it contributes nothing rather than raising.
     """
-    chaired: set[UUID] = set()
-    for held in assignments:
-        if held.role is AssignmentRole.CHAIR and held.department_id is not None:
-            chaired |= _nodes_beneath(session, "department", held.department_id)["course"]
+    departments = {
+        held.department_id
+        for held in assignments
+        if held.role is AssignmentRole.CHAIR and held.department_id is not None
+    }
+    chaired = _nodes_beneath(session, "department", departments)["course"]
     if not chaired:
         return frozenset(), frozenset()
     led = frozenset(session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars())
-    return frozenset(chaired), led
+    return chaired, led
 
 
 def lead_review_courses(session: Session, *, person_id: UUID) -> Mapping[UUID, AssignmentRole]:
@@ -848,7 +902,7 @@ def lead_review_courses(session: Session, *, person_id: UUID) -> Mapping[UUID, A
     assignments = _assignments_of(session, person_id)
     covered: dict[UUID, AssignmentRole] = {}
     if any(held.role is AssignmentRole.LEAD_FACULTY for held in assignments):
-        for course_id in _lead_faculty_grant(session, person_id).course_ids:
+        for course_id in _lead_faculty_grant(session, {person_id}).course_ids:
             covered[course_id] = AssignmentRole.LEAD_FACULTY
     chaired, led_by_somebody = _chaired_courses_and_those_with_a_lead(session, assignments)
     for course_id in chaired - led_by_somebody:
