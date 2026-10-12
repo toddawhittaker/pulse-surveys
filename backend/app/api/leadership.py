@@ -137,6 +137,7 @@ from app.schemas.report import (
     DraftCheckRequest,
     DraftCheckView,
     InstructorReport,
+    PublishedWeeks,
     ResponseDraftView,
 )
 from app.schemas.response_loop import (
@@ -179,6 +180,7 @@ from app.services.reporting import (
     CourseWeekUnavailableError,
     SectionUnavailableError,
     UnusableAnswerError,
+    leadership_published_course_weeks,
     leadership_report,
     one_assistant_call_at_a_time,
 )
@@ -891,6 +893,7 @@ def _on_behalf_unavailable() -> HTTPException:
 # ---------------------------------------------------------------------------
 
 DRILL_DOWN_PATH = "/leadership/sections/{section_id}/weeks/{course_week}/report"
+DRILL_DOWN_WEEKS_PATH = "/leadership/sections/{section_id}/published-weeks"
 DRILL_DOWN_UNAVAILABLE_STATUS = 404
 
 
@@ -929,3 +932,30 @@ def read_drill_down(
         raise HTTPException(
             status_code=DRILL_DOWN_UNAVAILABLE_STATUS, detail=WEEK_UNAVAILABLE.text
         ) from None
+
+
+@router.get(
+    DRILL_DOWN_WEEKS_PATH, summary="The course weeks of a section in my purview with a report"
+)
+def read_drill_down_weeks(
+    section_id: UUID,
+    request: Request,
+    response: Response,
+    scope: ActorScope = Depends(leadership_scope),
+    session: Session = Depends(get_session),
+) -> PublishedWeeks:
+    """The published course weeks of one section, for the drill-down to open its latest.
+
+    Behind the same purview as the drill-down itself, with the same 404 and
+    sentence for a section outside it and a section that does not exist.
+    """
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        weeks = leadership_published_course_weeks(
+            session, scope=scope, section_id=section_id, settings=request.app.state.settings
+        )
+    except SectionUnavailableError:
+        raise HTTPException(
+            status_code=DRILL_DOWN_UNAVAILABLE_STATUS, detail=SECTION_UNAVAILABLE.text
+        ) from None
+    return PublishedWeeks(published_weeks=weeks)
