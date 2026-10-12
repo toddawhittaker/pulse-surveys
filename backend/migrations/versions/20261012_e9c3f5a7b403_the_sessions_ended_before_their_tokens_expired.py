@@ -1,7 +1,7 @@
 """the sessions ended before their tokens expired
 
 Revision ID: e9c3f5a7b403
-Revises: e9b2c4d6a802
+Revises: e9a1d0c3f201
 Create Date: 2026-10-12 00:00:00.000000
 
 E9-04, ADR 0202. A session is a signed token that verified until its `exp`, and
@@ -20,11 +20,11 @@ at most an hour of revocations, because every token lives an hour (ADR 0089).
 
 **`downgrade()` drops the table**, which takes its privileges with it.
 
-**Chained after `e9b2c4d6a802`, not after `7f679faf4b8d`.** Both this revision
-and `e9b2c4d6a802` (E9-03) were written in parallel worktrees off
-`7f679faf4b8d`; once E9-03 merged into the epic branch, this revision's
-`down_revision` moved onto it so the chain stays linear, with no change to what
-either revision does.
+**Chained after `e9a1d0c3f201`, not after `7f679faf4b8d`.** This revision was
+written in a parallel worktree off `7f679faf4b8d`, alongside `e9b2c4d6a802`
+(E9-03) and `e9a1d0c3f201` (E9-02). As each of those merged into the epic
+branch, this revision's `down_revision` moved onto the newest, so the chain
+stays linear, with no change to what any revision does.
 """
 
 from collections.abc import Sequence
@@ -36,7 +36,7 @@ from app.views_sql import read_sql
 
 # revision identifiers, used by Alembic.
 revision: str = "e9c3f5a7b403"
-down_revision: str | Sequence[str] | None = "e9b2c4d6a802"
+down_revision: str | Sequence[str] | None = "e9a1d0c3f201"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
