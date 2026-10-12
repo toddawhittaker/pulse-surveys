@@ -891,8 +891,11 @@ export interface paths {
             readonly cookie?: never;
         };
         /**
-         * The exclusion log inside my own grant
-         * @description Every exclusion, keep and undo a person made inside the reader's own grant, newest first.
+         * The exclusion log inside my own grant or purview
+         * @description Every exclusion, keep and undo a person made inside the reader's reach, newest first.
+         *
+         *     A lead's or chair's own grant, and an assistant dean's, dean's or vice
+         *     president's purview (ADR 0206); the scope is the session's own.
          */
         readonly get: operations["read_exclusion_log_leadership_moderation_log_get"];
         readonly put?: never;
@@ -912,7 +915,8 @@ export interface paths {
         };
         /**
          * The response policy of every course I set or read it for
-         * @description The courses the reader sets the policy for, and a chair's led courses, which they read.
+         * @description The courses the reader sets the policy for, and those they read: a chair's led
+         *     courses, and every course of an assistant dean's, dean's or vice president's purview.
          */
         readonly get: operations["read_response_policy_leadership_response_policy_get"];
         readonly put?: never;
@@ -934,6 +938,8 @@ export interface paths {
         /**
          * Switch the response policy for my courses in one prefix
          * @description One row per course of the prefix the reader sets the policy for; answered with the new read.
+         *
+         *     `claims` is the CSRF-checked gate; the reader is the same session's `scope`.
          */
         readonly put: operations["switch_response_policy_leadership_response_policy__prefix_id__put"];
         readonly post?: never;
@@ -1041,6 +1047,32 @@ export interface paths {
          * @description Under the reader's own name and the role they answer for the course under.
          */
         readonly post: operations["publish_on_behalf_response_leadership_sections__section_id__weeks__course_week__on_behalf_response_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/sections/{section_id}/weeks/{course_week}/report": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One section's Monday report, read-only, inside my purview
+         * @description The instructor's report of one section-week, as a leader reads it (SPEC §5.5).
+         *
+         *     The scope comes from `leadership_scope` and from nothing in the request
+         *     (ADR 0199). Comments show under the section's own per-stream threshold and
+         *     release batches, exactly as its instructor reads them; no comment is marked
+         *     as the reader's decision, and the benchmark lines are sealed against the
+         *     reader (SPEC §5.1).
+         */
+        readonly get: operations["read_drill_down_leadership_sections__section_id__weeks__course_week__report_get"];
+        readonly put?: never;
+        readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -3843,6 +3875,38 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["WeekResponseView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_drill_down_leadership_sections__section_id__weeks__course_week__report_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["InstructorReport"];
                 };
             };
             /** @description Validation Error */
