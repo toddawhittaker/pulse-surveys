@@ -113,3 +113,7 @@ invisible to the whole suite and waiting for the first Monday of a term.
 
 Counted as a catch: two grant-shaped failures with no test between them and the
 scheduled job, both of them green under every other module in the ticket.
+
+## A catch: E9-01's worked example is read as the runtime role (2026-10-12)
+
+`test_the_worked_example_resolves_on_the_seeded_graph.py` reads the seeded assistant dean's purview on `pulse_app`'s connection, finding names on the bootstrap identity only, and E9-13's two-door test does the same. What would have shipped: a purview read green as the superuser and refused, or answered differently, under the role production uses.

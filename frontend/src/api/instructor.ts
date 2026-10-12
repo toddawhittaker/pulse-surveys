@@ -1,12 +1,12 @@
 /**
  * The calls the instructor's Monday report is built on — SPEC §13's
- * `frontend/src/api/`, ticket E4-11.
+ * `frontend/src/api/`.
  *
- * `GET /instructor/sections` (E4-18) answers the sections this session's person
+ * `GET /instructor/sections` answers the sections this session's person
  * teaches, `GET /instructor/sections/{id}/published-weeks` answers the course
  * weeks a report may be read for,
  * `GET /instructor/sections/{id}/report/{week}` answers SPEC §5.1's whole
- * report, and `POST /instructor/comments/{answer_id}/decisions` (E6-03)
+ * report, and `POST /instructor/comments/{answer_id}/decisions`
  * records one moderation decision. `app.api.instructor` is the module all four
  * come from, and its
  * docstring is the authority on what each refuses and why.
@@ -29,13 +29,12 @@
  * the double-submit token the way the leadership pages' writes do.
  *
  * **Every type below is the wire's own**, aliased from `wire.gen.ts`, which
- * describes `backend/app/schemas/report.py`. Two departures from the generated
- * shape, both deliberate:
+ * describes `backend/app/schemas/report.py`. One departure from the generated
+ * shape, and it is deliberate:
  *
- *   - **The top-level `comparison` is not here, and the benchmark members are**
- *     — ticket E5-10. SPEC §4.1 item 7's `comparison` member exists on the wire
- *     from day one so E5's benchmarks have a chokepoint to pass through, and the
- *     report page renders the benchmarks through `workload_benchmark` and the
+ *   - **The top-level `comparison` is not here, and the benchmark members are.**
+ *     SPEC §4.1 item 7's `comparison` member is on the wire as a chokepoint
+ *     every benchmark passes through, and the report page renders the benchmarks through `workload_benchmark` and the
  *     per-stream `benchmark` members below. The top-level member carries the
  *     same sealed figure `workload_benchmark.comparison.mean` carries
  *     (`app.schemas.report.InstructorReport`'s own docstring says so), so
@@ -44,10 +43,11 @@
  *     structural version of that rule — the same move `CommentCard` makes by
  *     having no prop for a timestamp — so no future edit can start reading it
  *     without saying so in this file.
- *   - **The members a later epic added to the payload may be absent** —
- *     `AddedLater` below. The server requires them; an answer cached before it
- *     wrote them, or a fixture built before then, has none, and the page
- *     renders without them rather than crashing.
+ *
+ * **Every other member is as the server requires it.** The page still renders
+ * an answer missing a later member (the close note, the question wording, the
+ * benchmarks, the time zone) rather than crashing, because the answer is cast;
+ * the report fixtures type such answers separately.
  *
  * **The answers are cast rather than validated field by field**, and each cast
  * is bounded by one check: the member every render walks has to be there.
@@ -62,15 +62,6 @@ import { jsonBody, readHeaders, refusalSentence, writeHeaders } from '../lib/htt
 
 /** The generated wire schemas (ADR 0185); every wire type below is one of these. */
 type Schemas = components['schemas'];
-
-/**
- * `T` with the members `K` allowed to be absent.
- *
- * A member added to a live payload is required on the server and optional here:
- * an answer cached before the server wrote it, or a fixture built before then,
- * has none, and the page renders without it rather than crashing.
- */
-type AddedLater<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
 
 /** `app.api.instructor.SECTIONS_PATH` — the menu, which takes no parameter. */
 export const SECTIONS_PATH = '/instructor/sections';
@@ -100,11 +91,11 @@ export type SectionView = Schemas['SectionView'];
 /**
  * Where on SPEC §2.2's two axes this report sits, and where navigation may go.
  *
- * `closes_at` (E5-02) is the week's own close, read in `institution_timezone`
+ * `closes_at` is the week's own close, read in `institution_timezone`
  * and never in the browser's zone; a report without it renders the eyebrow
  * without the note.
  */
-export type WeekView = AddedLater<Schemas['WeekView'], 'closes_at'>;
+export type WeekView = Schemas['WeekView'];
 
 /**
  * SPEC §5.1's two rates and the counts they are ratios of.
@@ -187,7 +178,7 @@ export type WorkloadBenchmarkView = Schemas['WorkloadBenchmarkView'];
 export type SummaryView = Schemas['SummaryView'];
 
 /**
- * One comment: the comment service's three fields, and since E6-03 its handle
+ * One comment: the comment service's three fields, its handle
  * (`answer_id`), its flag class (`harmful`, `privacy` or null) and whether the
  * latest decision on it was the reader's (`decided_by_you`).
  *
@@ -202,17 +193,14 @@ export type CommentView = Schemas['CommentView'];
 /**
  * One of §5.1's two comment groups: its numbers, its summary and its words.
  *
- * `question_text` (E5-02) and `benchmark` (E5-05) may be absent. Without the
- * first the histogram keeps its stream-label title; without the second SPEC
- * §4.1 item 1 is why the stream renders no comparison at all rather than an
- * empty one.
+ * Where an answer arrives without `question_text`, the histogram keeps its
+ * stream-label title; without `benchmark`, SPEC §4.1 item 1 is why the stream
+ * renders no comparison at all rather than an empty one.
  */
-export type StreamReportView = AddedLater<Schemas['StreamReport'], 'question_text' | 'benchmark'>;
+export type StreamReportView = Schemas['StreamReport'];
 
 /** The two groups §5.1 heads separately, never pooled into one. */
-export type StreamsView = {
-  readonly [Stream in keyof Schemas['StreamsView']]: StreamReportView;
-};
+export type StreamsView = Schemas['StreamsView'];
 
 /** SPEC §3.2's workload figure for this week. Both members absent together. */
 export type WorkloadView = Schemas['WorkloadView'];
@@ -224,13 +212,7 @@ export type WorkloadView = Schemas['WorkloadView'];
 export type SmallNView = Schemas['SmallNView'];
 
 /** One instructor's Monday report, for one of her own sections and one course week. */
-export type InstructorReportView = AddedLater<
-  Omit<Schemas['InstructorReport'], 'comparison' | 'week' | 'streams'>,
-  'workload_benchmark' | 'institution_timezone'
-> & {
-  readonly week: WeekView;
-  readonly streams: StreamsView;
-};
+export type InstructorReportView = Omit<Schemas['InstructorReport'], 'comparison'>;
 
 /**
  * What a read of the report answered.
@@ -243,7 +225,7 @@ export type InstructorReportView = AddedLater<
  * to answer for this section or this week, and it carries the server's own
  * sentence: `app.api.instructor` writes two of them, and a second wording here
  * would be a second statement of the same refusal for the two to drift apart in.
- * Both are entries in `app.copy.instructor_report` since E4-12, so both are
+ * Both are entries in `app.copy.instructor_report`, so both are
  * collected and swept where they are written. `unavailable` is
  * every other failure, including a network one, where there may be no sentence
  * at all and the page falls back to its own.

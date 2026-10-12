@@ -127,16 +127,37 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.responses import Response
 
-from app.api.deps import FOUND, cancelled, landing_with_session, refused
+from app.api.deps import (
+    FOUND,
+    cancelled,
+    csrf_verified_session,
+    ending_session,
+    landing_with_session,
+    no_live_session,
+    person_of,
+    refused,
+    require_session,
+    user_of,
+)
 from app.config import Settings, is_development
+from app.copy.landing import SWITCH_REFUSED
 from app.db import get_session
-from app.services.authz import Door
+from app.schemas.session import (
+    SessionLandings,
+    SessionSwitch,
+    SessionSwitched,
+    landing_name,
+    landing_role,
+)
+from app.services import session as sessions
+from app.services.authz import Door, resolve_landings
+from app.services.session import SessionAlreadyEndedError, SessionClaims
 from app.services.tokens import TokenVerificationError, same_opaque_value, verified_claims
 
 router = APIRouter(tags=["auth"])
@@ -150,6 +171,26 @@ logger = logging.getLogger(__name__)
 # to the same path, which is what makes the stack work unconfigured.
 LOGIN_PATH = "/auth/oidc/login"
 CALLBACK_PATH = "/auth/oidc/callback"
+
+# The role switcher and logout (E9-04). Here rather than in a module of their
+# own because they act on the session both doors issue, and this is the module
+# that already issues one at the door that is not LTI; see the paragraph on them
+# in this module's docstring.
+SESSION_LANDINGS_PATH = "/session/landings"
+SESSION_SWITCH_PATH = "/session/switch"
+LOGOUT_PATH = "/session/logout"
+
+# What a switch to a view the person does not hold at this door is answered
+# with: **403 and no challenge**. The session is real and stays live, so a 401
+# would tell the SPA it had ended; the request is what is refused.
+SWITCH_REFUSED_STATUS = 403
+
+# Logout's answer whatever it found: no body, the cookies cleared.
+LOGGED_OUT_STATUS = 204
+
+# A switch answers with a session token and the landings list names a person's
+# views, so neither may sit in a cache.
+NO_STORE = "no-store"
 
 # What the tool asks the provider for. `code` because a code flow is the only one
 # that keeps the token off the browser's URL bar and out of its history;
@@ -585,3 +626,104 @@ async def finish_web_login(request: Request, session: Session = Depends(get_sess
     )
     clear_carried(landed, OIDC_LOGIN_COOKIE)
     return landed
+
+
+# ---------------------------------------------------------------------------
+# The role switcher and logout (E9-04, ADR 0202).
+# ---------------------------------------------------------------------------
+
+
+@router.get(SESSION_LANDINGS_PATH, summary="The views this session may switch to")
+def read_session_landings(
+    request: Request,
+    response: Response,
+    claims: SessionClaims = Depends(require_session),
+    session: Session = Depends(get_session),
+) -> SessionLandings:
+    """The session's own view and every view its person holds at its door, read now.
+
+    SPEC §2.1's door rules come from `app.services.authz.resolve_landings`, over
+    the assignments' own door columns: a web session is never offered the
+    instructor or student view, and a launch session never Care or Admin.
+    """
+    response.headers["Cache-Control"] = NO_STORE
+    held = resolve_landings(
+        session,
+        door=claims.door,
+        person_id=person_of(claims),
+        user_id=user_of(claims),
+        settings=request.app.state.settings,
+    )
+    return SessionLandings(
+        current=landing_name(claims.role), landings=[landing_name(role) for role in held]
+    )
+
+
+@router.post(
+    SESSION_SWITCH_PATH,
+    summary="Switch to another view this session's person holds",
+    response_model=SessionSwitched,
+)
+def switch_session(
+    body: SessionSwitch,
+    request: Request,
+    claims: SessionClaims = Depends(csrf_verified_session),
+    session: Session = Depends(get_session),
+) -> Response:
+    """A new session in the asked view, the old one revoked; or a 403 that changes nothing.
+
+    `app.services.session.switch_session` re-reads the person's views at this
+    door and decides. On success the new token is answered in the body, for the
+    SPA's Bearer carrier, and set as the session cookie beside a fresh CSRF
+    token bound to it; it keeps the old token's expiry. A refusal, including a
+    switch to the session's own role, sets no cookie and leaves the old session
+    live. A token another switch spent first gets the expired-token 401.
+    """
+    settings: Settings = request.app.state.settings
+    secret: bytes = request.app.state.session_secret
+    role = landing_role(body.role)
+    try:
+        token = sessions.switch_session(session, claims, to=role, secret=secret, settings=settings)
+    except SessionAlreadyEndedError:
+        raise no_live_session() from None
+    if token is None:
+        raise HTTPException(status_code=SWITCH_REFUSED_STATUS, detail=SWITCH_REFUSED.text)
+    session.commit()
+
+    issued = sessions.verified_session(token, secret)
+    if issued is None:
+        # A token issued with `secret` and read back with it verifies by
+        # construction; this guards the type, as `landing_with_session` does.
+        raise RuntimeError("A session the switch just issued failed to verify against its own key.")
+    answer = JSONResponse(
+        SessionSwitched(role=landing_name(role), session=token).model_dump(),
+        headers={"Cache-Control": NO_STORE},
+    )
+    sessions.set_session_cookie(answer, token, settings)
+    sessions.set_csrf_cookie(answer, sessions.issue_csrf_token(issued.jti, secret), settings)
+    return answer
+
+
+@router.post(LOGOUT_PATH, status_code=LOGGED_OUT_STATUS, summary="End this session")
+def log_out(request: Request, session: Session = Depends(get_session)) -> Response:
+    """Revoke this session and clear both cookies: 204, whatever was presented.
+
+    The session is read by `app.api.deps.ending_session`, which checks the
+    signature and expiry but not revocation, so a second logout with the same
+    token answers exactly as the first did; the revocation is an insert that
+    does nothing on conflict. That read also applies the double-submit check
+    when the session rides the cookie, and a refusal there is a 403 that ends
+    nothing. With no valid session at all, the cookies are still cleared, so a
+    browser holding a cookie the server no longer accepts is not stranded.
+
+    Back-channel logout from the identity provider is E13's (ruling 8).
+    """
+    settings: Settings = request.app.state.settings
+    claims = ending_session(request)
+    if claims is not None:
+        sessions.revoke_session(session, claims)
+        session.commit()
+    answer = Response(status_code=LOGGED_OUT_STATUS)
+    sessions.clear_session_cookie(answer, settings)
+    sessions.clear_csrf_cookie(answer, settings)
+    return answer

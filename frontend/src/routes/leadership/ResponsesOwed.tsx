@@ -8,9 +8,8 @@ import { copy, fillCopy } from '../../copy/leadershipResponseCopy';
 import { ResponseRefusal } from './ResponseRefusal';
 import './leadershipComparisonSets.css';
 import './leadershipResponse.css';
+import { ON_BEHALF_ROUTE } from '../paths';
 
-/** The address of the responses-owed list, under the leadership area. */
-export const RESPONSES_OWED_ROUTE = '/leadership/responses-owed';
 
 /** Where a spec finds the page. */
 export const RESPONSES_OWED_TESTID = 'pulse-leadership-responses-owed';
@@ -18,8 +17,6 @@ export const RESPONSES_OWED_TESTID = 'pulse-leadership-responses-owed';
 /** Where a spec finds the list itself, as opposed to one of the page's states. */
 export const RESPONSES_OWED_LIST_TESTID = 'pulse-leadership-responses-owed-list';
 
-/** The on-behalf page's address, as the route table declares it. */
-export const ON_BEHALF_ROUTE = '/leadership/sections/$sectionId/weeks/$courseWeek/on-behalf';
 
 const HEADING_ID = 'pulse-responses-owed-heading';
 

@@ -91,6 +91,15 @@
     display: block;
     margin: var(--space-4) 0;
   }
+
+  /* The line a page loaded on first visit shows while its code arrives. */
+  .pulse-route-pending {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: var(--space-6) var(--space-5);
+    font-size: var(--text-1);
+    color: var(--spruce-60);
+  }
 }
 
 /* ==========================================================================
@@ -703,6 +712,13 @@
     font-family: var(--font-body);
     font-size: var(--text-2);
     font-weight: 500;
+  }
+
+  /* The course's Lead Faculty under the course label (design/StudentResults.dc.html). */
+  .pulse-results-lead {
+    margin: 2px 0 0;
+    font-size: var(--text-1);
+    color: var(--spruce-60);
   }
 
   .pulse-results-figures {

@@ -79,9 +79,15 @@ from `report_comment` v004, so the Care-class exclusion has one home. It shows
 the text and the section at any threshold (ruling 1), with no week, time or
 count, in a fresh order on every read. `decide_as_leader` is the second door into
 the shared write, with its own check: the comment is in this reader's queue now,
-asked under the comment's lock. `exclusion_log` lists every exclusion and keep a
-person made inside the same grant, quoting a comment only where its own
-instructor's report shows it under its week (ADR 0190).
+asked under the comment's lock.
+
+`exclusion_log` lists every exclusion and keep a person made inside the reader's
+reach, which has two parts, unioned: the lead's or chair's own grant, as the
+queue reads it, and the purview of the reader's assistant dean, dean and vice
+president grants (`purview_read`, ADR 0206), who read the log and review
+nothing. It quotes a comment only where its own instructor's report shows it
+under its week (ADR 0190); on a row whose quote is withheld, only the person who
+made the decision reads its reason and date (ADR 0206's E9-14 amendment).
 """
 
 import logging
@@ -114,7 +120,12 @@ from app.models.report import REASON_BOUND, DeciderRole, ModerationState
 from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Term
 from app.services import clock
-from app.services.authz import lead_review_courses, taught_or_once_taught_section_ids
+from app.services.authz import (
+    ActorScope,
+    Purview,
+    lead_review_courses,
+    taught_or_once_taught_section_ids,
+)
 from app.services.section_codes import course_label
 from app.services.survey_windows import closed_by
 
@@ -671,11 +682,13 @@ DECIDED_AS_FOR_GRANT = {
 
 
 class NoReviewGrantError(LookupError):
-    """The reader's own leadership grants put no course under review; nothing was read or written.
+    """The reader's own grants put nothing under review or in the log; nothing was read or written.
 
-    An assistant dean until E9 (ADR 0108), a dean, a vice president, a lead with
-    no mapped course, or a leadership session naming somebody who holds only an
-    instructor grant.
+    For the queue and its door: an assistant dean, a dean or a vice president
+    (they read the log and review nothing, ADR 0206), a lead with no mapped
+    course, or a leadership session naming somebody who holds only an instructor
+    grant. For the log: a reader whose lead or chair grant covers no course and
+    whose assistant dean, dean and vice president grants cover no section.
     """
 
 
@@ -705,7 +718,9 @@ class ExclusionLogRow:
     """One decision in a reader's exclusion log (E6-05, decision 1).
 
     `excerpt` is `None` whenever the comment's own instructor's report does not
-    show it under its week; see `exclusion_log`. `decision` is the stored state
+    show it under its week, and on such a row `reason` and `decided_on` are
+    `None` too unless the reader made the decision; see `exclusion_log`.
+    `decision` is the stored state
     the row left; `is_undo` says the row reverses the decision before it, so the
     state is the one restored (E6-09).
     """
@@ -715,7 +730,7 @@ class ExclusionLogRow:
     decided_as: DeciderRole
     flagged: bool
     reason: str | None
-    decided_on: date
+    decided_on: date | None
     excerpt: str | None
     is_undo: bool
 
@@ -805,16 +820,39 @@ def decide_as_leader(
     session.commit()
 
 
+# The three roles that read the exclusion log and the response policy over their
+# purview and review nothing (SPEC §5.2, §5.3; ADR 0206). The queue and the
+# on-behalf doors stay with the lead and, for an unled course, the chair.
+PURVIEW_READERS: frozenset[AssignmentRole] = frozenset(
+    {AssignmentRole.ASSISTANT_DEAN, AssignmentRole.DEAN, AssignmentRole.VP_ACADEMICS}
+)
+
+
+def purview_read(scope: ActorScope) -> Purview:
+    """The union of the reader's `PURVIEW_READERS` grants: what the log and policy read over.
+
+    Only those grants: a lead's or chair's grant reaches the log and the policy
+    through `authz.lead_review_courses`, as before, so a chair does not read a
+    led course's log by holding its department.
+    """
+    read = Purview.empty()
+    for grant in scope.grants:
+        if grant.role in PURVIEW_READERS:
+            read = read.union(grant.purview)
+    return read
+
+
 def exclusion_log(
-    session: Session, *, person_id: UUID | None, settings: Settings
+    session: Session, *, scope: ActorScope, settings: Settings
 ) -> list[ExclusionLogRow]:
-    """Every exclusion, keep and undo a person made inside this reader's own grant, newest first.
+    """Every exclusion, keep and undo a person made inside this reader's reach; dated rows first.
 
     SPEC §5.2's anti-cherry-picking trail, in both directions (§11 question 5,
-    settled). The rows are `report_comments.logged_decisions` over the courses
-    `authz.lead_review_courses` gives this reader, so a Care-class comment's
-    decision is never a row (view v004 leaves it out) and a sibling lead's
-    course is never read.
+    settled). The rows are `report_comments.logged_decisions` over two reaches,
+    unioned: the courses `authz.lead_review_courses` gives a lead or chair, and
+    the sections of an assistant dean's, dean's or vice president's purview
+    (`purview_read`, ADR 0206). A Care-class comment's decision is never a row
+    (view v004 leaves it out), and a sibling lead's course is never read.
 
     **The excerpt is withheld when the comment's own instructor's report does
     not show it under its week**: the comment is in a held stream, its week is
@@ -825,50 +863,80 @@ def exclusion_log(
     the instructor's report's own rule (`visible_cards`) asked once for every
     decision in the log.
 
+    **On a withheld row, the reason and the date go too, for every reader but
+    the decider.** A reason is free text and may paraphrase the comment, and the
+    wider roles read the same section's drill-down, which shows a release
+    batch's comments; a paraphrase beside a date would put a released comment
+    back in its week (SPEC §5.2, ADR 0206). So a reader who did not make the
+    decision, a lead reading an instructor's row as much as a dean reading a
+    lead's, gets the row with `reason` and `decided_on` `None`. The decider
+    keeps both: the row is their own accountability record, and they already
+    know what they decided and when. A row whose excerpt is shown keeps every
+    member for every reader.
+
+    **An undated row sits in no time order.** Left in the newest-first run, an
+    undated row's date would be bracketed by its dated neighbours'. So the dated
+    rows come first, newest first, and the undated rows follow as one group
+    ordered by section label, then decision, then the comment's random key,
+    none of which follows time (the E9-14 fix round, ADR 0206).
+
     The date is the decision's instant in the institution's zone, and no time.
 
-    **No row from a section the reader teaches** (E6-08, after ruling 7). A row
-    names the section, the date, the role, the flag and another reviewer's
-    reason, so it would tell a reader who teaches that section that it held a
-    flagged comment, and roughly when, which their own report hides. The row is
-    removed, not redacted; the filter is `authz.taught_or_once_taught_section_ids`,
-    the same one `_queue_select` applies, so a section whose teaching grant the
-    roster ended stays out too (E6-09).
+    **No row from a section the reader teaches or once taught**, whichever role
+    they read under. A row names the section, the date, the role, the flag and
+    another reviewer's reason, so it would tell a reader who teaches that
+    section that it held a flagged comment, and roughly when, which their own
+    report hides. The row is removed, not redacted; the filter is
+    `authz.taught_or_once_taught_section_ids`, the same one `_queue_select`
+    applies.
 
-    Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
+    Raises `NoReviewGrantError` for a reader whose reach covers nothing.
     """
     from app.services.report_comments import logged_decisions, shown_under_their_week
 
-    if person_id is None:
+    person_id = scope.person_id
+    courses = lead_review_courses(session, person_id=person_id)
+    purview = purview_read(scope)
+    if not courses and not purview.section_ids:
         raise NoReviewGrantError
-    courses = _review_courses(session, person_id)
     taught = taught_or_once_taught_section_ids(session, person_id=person_id)
     decisions = [
         decision
-        for decision in logged_decisions(session, course_ids=courses.keys())
+        for decision in logged_decisions(
+            session, course_ids=courses.keys(), section_ids=purview.section_ids
+        )
         if decision.section_id not in taught
     ]
     labels = _section_labels(session, {decision.section_id for decision in decisions})
     # Once for every decision, in a fixed number of statements, so a log over a
-    # term costs what a log over one week costs (E6-09).
+    # term costs what a log over one week costs.
     shown = shown_under_their_week(
         session,
         {(decision.answer_id, decision.section_id, decision.week_id) for decision in decisions},
     )
     zone = ZoneInfo(settings.institution_timezone)
-    return [
-        ExclusionLogRow(
+    dated_rows: list[ExclusionLogRow] = []
+    undated_rows: list[tuple[str, str, str, ExclusionLogRow]] = []
+    for decision in decisions:
+        quoted = decision.answer_id in shown
+        dated = quoted or decision.decided_by == person_id
+        row = ExclusionLogRow(
             section_label=labels[decision.section_id],
             decision=decision.state,
             decided_as=DeciderRole(decision.decided_as),
             flagged=decision.flagged,
-            reason=decision.reason,
-            decided_on=decision.decided_at.astimezone(zone).date(),
-            excerpt=decision.text[:EXCERPT_LENGTH] if decision.answer_id in shown else None,
+            reason=decision.reason if dated else None,
+            decided_on=decision.decided_at.astimezone(zone).date() if dated else None,
+            excerpt=decision.text[:EXCERPT_LENGTH] if quoted else None,
             is_undo=decision.is_undo,
         )
-        for decision in decisions
-    ]
+        if dated:
+            dated_rows.append(row)
+        else:
+            # The answer's key is `gen_random_uuid()`, so it orders nothing by time.
+            undated_rows.append((row.section_label, row.decision, str(decision.answer_id), row))
+    undated_rows.sort(key=lambda keyed: keyed[:3])
+    return dated_rows + [keyed[3] for keyed in undated_rows]
 
 
 def _review_courses(session: Session, person_id: UUID | None) -> Mapping[UUID, AssignmentRole]:

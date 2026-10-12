@@ -41,6 +41,7 @@ FAILED naming `app.services.benchmarks` (`docs/MISTAKES.md` entry 44).
 """
 
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -48,9 +49,7 @@ from fixtures.benchmark_views import (
     BENCHMARK_WORKLOAD,
     CURRENT_TERM,
     DEFAULT_SET_POPULATION,
-    INSTRUCTOR_STREAM,
-    NAMED_SET_TREND,
-    NAMED_SET_WORKLOAD,
+    NAMED_SET_SERIES,
     PRIOR_TERM,
     RESOLVE_DEFAULT_SET,
     RESOLVE_NAMED_SET,
@@ -71,7 +70,15 @@ from fixtures.benchmark_views import (
 from fixtures.benchmark_views import (
     COMPARISON_FIGURE_TYPE as FIGURE_TYPE_NAME,
 )
+from fixtures.named_set_figures import (
+    INSTRUCTOR_FIGURE,
+    WORKLOAD_MEAN,
+    WORKLOAD_MEDIAN,
+    the_week,
+    week_figures,
+)
 from fixtures.report_benchmarks import FIGURE_FIELD, REASON_FIELD, SUPPRESSED_FIELD
+from fixtures.survey_windows import SEEDED_COHORTS
 
 pytestmark = [pytest.mark.integration, pytest.mark.invariant]
 
@@ -487,6 +494,14 @@ def a_named_set_world(world: BenchmarkWorld, *, sections: int, respondents: int)
     world.comparison_set("empty", length_weeks=TWELVE_WEEKS, level=LEVEL)
     world.comparison_set("wrong-length", length_weeks=EIGHT_WEEKS, level=LEVEL, courses_of=members)
 
+    # Since E9-05 a named set is read through `named_set_series`, whose cohorts come
+    # from the reader's purview: an eight-week section in it (unanswered, with a
+    # window at course week 2) is what gives the eight-week set a cohort and a
+    # week to answer at all, so its suppression is asserted over a week rather
+    # than over an empty list.
+    world.plant_section(EIGHT_WEEK_SECTION, cohort=EIGHT_WEEK_COHORT, level=LEVEL)
+    world.window(EIGHT_WEEK_SECTION, world.term_week_of(EIGHT_WEEK_SECTION, THE_COURSE_WEEK))
+
     world.answer_the_plan(
         dict(spread(members, respondents=respondents, subject_prefix="e5-04-named")),
         course_week=THE_COURSE_WEEK,
@@ -497,8 +512,54 @@ def a_named_set_world(world: BenchmarkWorld, *, sections: int, respondents: int)
     return members
 
 
+EIGHT_WEEK_SECTION = "eight-week"
+EIGHT_WEEK_COHORT = "X"
+
+
+def a_reader_over_every_section(
+    world: BenchmarkWorld, graph: Any, authz: Any, settings: Any
+) -> SimpleNamespace:
+    """A chair of the one department every section here hangs under: her scope, and settings.
+
+    E9-05 replaced E5's reader-less named-set doors with `named_set_series`, which
+    takes the reader's `ActorScope` (resolved by E9-01's chokepoint). A chair of
+    `BenchmarkWorld`'s one department holds every section this world plants, so
+    the populations these tests are about are the sets' whole populations.
+    """
+    department = world.spine()["department"]
+    person = graph.person()
+    graph.assign("CHAIR", scope=department[world.key_of("department")], person=person)
+    world.session.flush()
+    return SimpleNamespace(
+        scope=authz.resolve_scope(world.session, person_id=person), settings=settings
+    )
+
+
+def a_named_set_series(world: BenchmarkWorld, set_name: str, reader: SimpleNamespace) -> Any:
+    """`named_set_series` for one set, read by `reader`, in this world's term."""
+    api = benchmarks_api()
+    return api[NAMED_SET_SERIES](
+        world.session,
+        set_id=world.comparison_set_id(set_name),
+        scope=reader.scope,
+        term_id=world.term_id(),
+        settings=reader.settings,
+    )
+
+
+def course_week_two_of(series: Any, cohort: str) -> dict[str, Any]:
+    """The four figures of one cohort's course week 2, by name."""
+    start = SEEDED_COHORTS[cohort][2]
+    return week_figures(the_week(series, start=start, course_week=THE_COURSE_WEEK))
+
+
 def test_an_empty_named_set_answers_suppressed_figures_rather_than_an_error(
-    benchmark_world: BenchmarkWorld, report_api_contract: Any, pinned_benchmark_clock: Any
+    benchmark_world: BenchmarkWorld,
+    report_api_contract: Any,
+    pinned_benchmark_clock: Any,
+    supervision_graph: Any,
+    authz: Any,
+    window_settings: Any,
 ) -> None:
     """Criterion 6: "never an error and never an absent member".
 
@@ -532,9 +593,8 @@ def test_an_empty_named_set_answers_suppressed_figures_rather_than_an_error(
         respondents=respondents,
     )
 
-    api = benchmarks_api()
     empty_id = benchmark_world.comparison_set_id("empty")
-    resolvable_id = benchmark_world.comparison_set_id("resolvable")
+    reader = a_reader_over_every_section(benchmark_world, supervision_graph, authz, window_settings)
 
     assert resolved(benchmark_world, RESOLVE_NAMED_SET, set_id=empty_id) == [], (
         "A comparison set with no member courses resolves to sections. ADR 0164 makes membership "
@@ -543,26 +603,20 @@ def test_an_empty_named_set_answers_suppressed_figures_rather_than_an_error(
         "defined."
     )
 
-    control = api[NAMED_SET_WORKLOAD](
-        benchmark_world.session,
-        set_id=resolvable_id,
-        course_week=THE_COURSE_WEEK,
-        cutoffs=THE_CUTOFFS,
+    control = course_week_two_of(
+        a_named_set_series(benchmark_world, "resolvable", reader), EARLY_COHORT
     )
-    control_mean, _control_median = mean_and_median(control)
+    control_mean = control[WORKLOAD_MEAN]
     assert carries(control_mean, SET_HOURS), (
         f"The control failed before the assertion it protects: the populated set in the same "
         f"world does not carry {SET_HOURS}: {serialized_figure(control_mean)}. Until it does, the "
         "suppression below is satisfied by a service that answers nothing to every named set."
     )
 
-    empty_workload = api[NAMED_SET_WORKLOAD](
-        benchmark_world.session,
-        set_id=empty_id,
-        course_week=THE_COURSE_WEEK,
-        cutoffs=THE_CUTOFFS,
+    empty_week = course_week_two_of(
+        a_named_set_series(benchmark_world, "empty", reader), EARLY_COHORT
     )
-    empty_mean, empty_median = mean_and_median(empty_workload)
+    empty_mean, empty_median = empty_week[WORKLOAD_MEAN], empty_week[WORKLOAD_MEDIAN]
     assert not carries(empty_mean, SET_HOURS), (
         f"The workload mean over an empty comparison set carries {SET_HOURS}: "
         f"{serialized_figure(empty_mean)} — which is the figure the *populated* set answers. A set "
@@ -585,7 +639,12 @@ def test_an_empty_named_set_answers_suppressed_figures_rather_than_an_error(
 
 
 def test_a_named_set_declaring_a_length_none_of_its_courses_runs_is_suppressed(
-    benchmark_world: BenchmarkWorld, report_api_contract: Any, pinned_benchmark_clock: Any
+    benchmark_world: BenchmarkWorld,
+    report_api_contract: Any,
+    pinned_benchmark_clock: Any,
+    supervision_graph: Any,
+    authz: Any,
+    window_settings: Any,
 ) -> None:
     """Criterion 6's other half: unresolvable, not empty.
 
@@ -613,9 +672,9 @@ def test_a_named_set_declaring_a_length_none_of_its_courses_runs_is_suppressed(
         respondents=respondents,
     )
 
-    api = benchmarks_api()
     wrong_length = benchmark_world.comparison_set_id("wrong-length")
     resolvable = benchmark_world.comparison_set_id("resolvable")
+    reader = a_reader_over_every_section(benchmark_world, supervision_graph, authz, window_settings)
 
     assert resolved(benchmark_world, RESOLVE_NAMED_SET, set_id=wrong_length) == [], (
         "A set declaring eight weeks resolves to sections whose courses run twelve. §5.1: "
@@ -628,22 +687,15 @@ def test_a_named_set_declaring_a_length_none_of_its_courses_runs_is_suppressed(
         "of nothing above says nothing about the declared length."
     )
 
-    mean, median = mean_and_median(
-        api[NAMED_SET_WORKLOAD](
-            benchmark_world.session,
-            set_id=wrong_length,
-            course_week=THE_COURSE_WEEK,
-            cutoffs=THE_CUTOFFS,
-        )
+    # The eight-week set's own cohort is the eight-week section in the reader's
+    # purview; the control is the twelve-week set's.
+    wrong = course_week_two_of(
+        a_named_set_series(benchmark_world, "wrong-length", reader), EIGHT_WEEK_COHORT
     )
-    control_mean, _control_median = mean_and_median(
-        api[NAMED_SET_WORKLOAD](
-            benchmark_world.session,
-            set_id=resolvable,
-            course_week=THE_COURSE_WEEK,
-            cutoffs=THE_CUTOFFS,
-        )
-    )
+    mean, median = wrong[WORKLOAD_MEAN], wrong[WORKLOAD_MEDIAN]
+    control_mean = course_week_two_of(
+        a_named_set_series(benchmark_world, "resolvable", reader), EARLY_COHORT
+    )[WORKLOAD_MEAN]
 
     assert carries(control_mean, SET_HOURS), (
         f"The twelve-week set over the same courses does not carry {SET_HOURS}: "
@@ -658,18 +710,25 @@ def test_a_named_set_declaring_a_length_none_of_its_courses_runs_is_suppressed(
     assert not carries(
         median, SET_HOURS
     ), f"The median over the same set carries {SET_HOURS}: {serialized_figure(median)}."
+    reason = the_chokepoints_reason(report_api_contract)
+    assert_suppressed_by_the_chokepoint(mean, "The workload mean over the eight-week set", reason)
+    assert_suppressed_by_the_chokepoint(median, "The workload median over the same set", reason)
 
 
-def test_a_named_sets_trend_over_an_empty_set_answers_suppressed_points_without_raising(
-    benchmark_world: BenchmarkWorld, report_api_contract: Any, pinned_benchmark_clock: Any
+def test_a_named_sets_series_over_an_empty_set_answers_suppressed_points_without_raising(
+    benchmark_world: BenchmarkWorld,
+    report_api_contract: Any,
+    pinned_benchmark_clock: Any,
+    supervision_graph: Any,
+    authz: Any,
+    window_settings: Any,
 ) -> None:
-    """Criterion 6 on the trend door, which is the one a preview draws.
+    """Criterion 6 on the series' drawn point, which is the one a roll-up draws.
 
-    The workload test above drives one of the two named-set entry points; this
-    drives the other, because "never an error" is a promise about the door a
-    caller uses and E5-06's preview asks for a series. Whatever the series holds
-    — no points at all, or a point per week carrying nothing — every figure in it
-    must be empty, and the call must return.
+    Written for E5's trend door; since E9-05 the one named-set door is
+    `named_set_series`, and the point is its instructor rating at course week 2.
+    "Never an error" is a promise about the door a caller uses: every figure in
+    the empty set's series must be empty, and the call must return.
 
     **The control is the populated set's own trend in the same world**, which has
     to carry the rating the three sections reported. An empty answer from both
@@ -688,45 +747,28 @@ def test_a_named_sets_trend_over_an_empty_set_answers_suppressed_points_without_
         respondents=respondents,
     )
 
-    api = benchmarks_api()
     figure_type = reporting_symbol(FIGURE_TYPE_NAME)
+    reader = a_reader_over_every_section(benchmark_world, supervision_graph, authz, window_settings)
 
-    control = api[NAMED_SET_TREND](
-        benchmark_world.session,
-        set_id=benchmark_world.comparison_set_id("resolvable"),
-        stream=INSTRUCTOR_STREAM,
-        cutoffs=THE_CUTOFFS,
-    )
+    control = a_named_set_series(benchmark_world, "resolvable", reader)
     shown = [figure for figure in figures_in(control, figure_type) if carries(figure, A_RATING)]
     assert shown, (
-        f"The control failed before the assertion it protects: the populated set's trend carries "
+        f"The control failed before the assertion it protects: the populated set's series carries "
         f"no figure holding {A_RATING}, which is what all {respondents} responses rated the "
         f"instructor. What it answered: {control!r}."
     )
 
-    empty = api[NAMED_SET_TREND](
-        benchmark_world.session,
-        set_id=benchmark_world.comparison_set_id("empty"),
-        stream=INSTRUCTOR_STREAM,
-        cutoffs=THE_CUTOFFS,
-    )
+    empty = a_named_set_series(benchmark_world, "empty", reader)
     leaked = [figure for figure in figures_in(empty, figure_type) if carries(figure, A_RATING)]
     assert not leaked, (
-        f"The trend over an empty comparison set carries the populated set's rating {A_RATING} in "
-        f"{len(leaked)} of its figures: {empty!r}. A set with no members has no sections, and "
+        f"The series over an empty comparison set carries the populated set's rating {A_RATING} "
+        f"in {len(leaked)} of its figures: {empty!r}. A set with no members has no sections, and "
         "every figure over it is suppressed rather than borrowed."
     )
 
-    # The boundary's spec-conformance LOW (E5-14), on the trend door: asked for one
-    # course week, the series answers one point for it (the assumed `cutoffs`
-    # interface: one point per week named), and that point is the chokepoint's own
-    # suppressed state with the chokepoint's own reason — not merely "not 4".
-    points = figures_in(empty, figure_type)
-    assert len(points) == len(THE_CUTOFFS), (
-        f"The trend over an empty set, asked for course weeks {sorted(THE_CUTOFFS)}, answered "
-        f"{len(points)} figures: {empty!r}. A week asked for is a point shown or suppressed, never "
-        "an absent one — 'never an error and never an absent member'."
-    )
+    # The boundary's spec-conformance LOW (E5-14): the point at a published week is
+    # present — the series answers the week — and it is the chokepoint's own
+    # suppressed state with the chokepoint's own reason, not merely "not 4".
+    point = course_week_two_of(empty, EARLY_COHORT)[INSTRUCTOR_FIGURE]
     reason = the_chokepoints_reason(report_api_contract)
-    for point in points:
-        assert_suppressed_by_the_chokepoint(point, "A trend point over an empty set", reason)
+    assert_suppressed_by_the_chokepoint(point, "A series point over an empty set", reason)

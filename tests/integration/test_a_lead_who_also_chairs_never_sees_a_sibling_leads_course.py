@@ -35,7 +35,7 @@ from fixtures.lead_review import (
     AS_INSTRUCTOR,
     CHAIR_ROLE,
     EXCLUDE,
-    LOG_REASON,
+    LOG_SECTION_LABEL,
     NOT_IN_QUEUE,
     SIBLING_COHORT,
     UNMAPPED_COHORT,
@@ -155,21 +155,32 @@ def test_a_lead_who_also_chairs_never_sees_a_sibling_leads_row_in_the_log(
             reason=reason,
         )
 
-    siblings = [row.get(LOG_REASON) for row in review.log_rows(review.sibling_lead)]
-    assert SIBLING_REASON in siblings, (
+    # E9-14 item 1: a held row's reason is blank to a reader who did not decide
+    # it, and the unled and sibling comments here are held, so each row is found
+    # by the section its label names rather than by its reason.
+    def cohorts_in(rows: list[dict[str, Any]]) -> set[str]:
+        labels = [str(row.get(LOG_SECTION_LABEL)) for row in rows]
+        return {
+            cohort
+            for cohort in (TAUGHT_COHORT, UNMAPPED_COHORT, SIBLING_COHORT)
+            if any(review.code_of(cohort) in label for label in labels)
+        }
+
+    siblings = cohorts_in(review.log_rows(review.sibling_lead))
+    assert SIBLING_COHORT in siblings, (
         "The sibling lead's own log lacks the sibling course's row, so its absence below would "
         "prove nothing."
     )
     answered = review.log(reader)
     assert answered.status_code == 200, f"The log answered {answered.status_code}."
-    reasons = [row.get(LOG_REASON) for row in review.log_rows(reader)]
-    assert OWN_REASON in reasons and UNLED_REASON in reasons, (
-        f"The canaries: the lead-and-chair's log carries the reasons {reasons}; it must carry both "
-        f"{OWN_REASON!r} (their led course) and {UNLED_REASON!r} (their unled course)."
+    cohorts = cohorts_in(review.log_rows(reader))
+    assert {TAUGHT_COHORT, UNMAPPED_COHORT} <= cohorts, (
+        f"The canaries: the lead-and-chair's log carries rows of {cohorts}; it must carry both "
+        f"the led course's section ({OWN_REASON!r}) and the unled course's ({UNLED_REASON!r})."
     )
-    assert SIBLING_REASON not in reasons, (
+    assert SIBLING_COHORT not in cohorts, (
         "The lead-and-chair's log carries a row from the course another lead leads. SPEC §4.1 "
-        "item 2 and §5.2: a leader reads the log over their own grant."
+        f"item 2 and §5.2: a leader reads the log over their own grant ({SIBLING_REASON!r})."
     )
     assert not [
         value for value in strings_in(answered.json()) if SIBLING_LOGGED_TEXT[:FRAGMENT] in value

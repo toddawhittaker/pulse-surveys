@@ -6,10 +6,11 @@ role grain: a Lead Faculty's grant is only the courses they lead (never sibling
 leads' courses, at any point in the union); a chair's is the department subtree;
 a dean's the college."
 
-The union is E9's and raises here (ADR 0003,
-`tests/unit/test_deferred_authz_seams_fail_closed.py`). The own grant is E0-11's,
-and it is the whole of what this module asserts: the role grains, the lead's
-authority question, and §4.1 invariant 2 at the level it can already be broken.
+The union over reporting lines is `transitive_purview`'s, written by E9-01 (ADR
+0199) and asserted in `test_the_purview_walk_holds_over_generated_forests.py`;
+until E9-01 it raised (ADR 0003). The own grant is E0-11's, and it is the whole
+of what this module asserts: the role grains, the lead's authority question, and
+§4.1 invariant 2 at the level of a single grant.
 
 **The assistant dean was the grain with no test, and it is the one §2.1 argues
 about.** SPEC §2.1's canonical chain ranks six roles; the tests below covered the
@@ -25,10 +26,9 @@ pointedly does not name an assistant dean.
 
 So the own grant of an `ASSISTANT_DEAN` assignment is empty. Both halves of the
 set §2.1 describes arrive from somewhere else: the led courses from the person's
-own `LEAD_FACULTY` assignment, and the supervised chairs' departments from E9's
-transitive walk, which is the deferred seam that raises here. An assistant dean
-therefore sees nothing in E0, which is what ADR 0003 already says about
-leadership landing views in this epic. A security review of E0-11 measured the
+own `LEAD_FACULTY` assignment, and the supervised chairs' departments from the
+transitive walk (`transitive_purview`, E9-01). The own grant never supplies
+either. A security review of E0-11 measured the
 opposite — the college, a supervised department, an unsupervised department and
 an unsupervised section, all present in the own grant — and the tests under the
 last heading in this file are that gap closed.
@@ -646,8 +646,7 @@ def test_an_assistant_deans_own_grant_stays_empty_when_a_chair_reports_to_it(
     not. SPEC §2.1 defines `Purview(assignment) = own grant union the purviews of
     all assignments transitively reporting to it`, so a supervised chair's
     department enters through the **second** term, by the walk over reporting
-    lines that E9 implements and that raises here (ADR 0003,
-    `tests/unit/test_deferred_authz_seams_fail_closed.py`). Adding it to the own
+    lines that E9-01 writes (`transitive_purview`, ADR 0199). Adding it to the own
     grant would compute the right answer for this shape by the wrong route, and
     the route is the whole of what §2.1 argues: "a set no single containment node
     holds".
@@ -686,9 +685,7 @@ def test_an_assistant_deans_own_grant_stays_empty_when_a_chair_reports_to_it(
         "this assignment is scoped to, which is why reading the scope column hands over the "
         "second one along with the first. SPEC §2.1 computes the supervised half from the "
         "reporting lines: 'own grant union the purviews of all assignments transitively reporting "
-        "to it'. That union is E9's and raises here, so an assistant dean sees nothing in E0 — "
-        "which is what ADR 0003 says about leadership landing views in this epic, and is a "
-        "deliberate outcome rather than a missing feature."
+        "to it'. That union is `transitive_purview`'s, not the own grant's."
     )
 
 
@@ -707,10 +704,11 @@ def test_a_person_with_an_assistant_dean_and_a_lead_assignment_resolves_to_their
 
     **Nothing reports to either assignment here, deliberately.** The person in
     `test_an_assistant_deans_own_grant_stays_empty_when_a_chair_reports_to_it`
-    has supervised chairs, and a resolver that reached for §2.1's second term
-    would raise on them; this test is about which of the person's two assignments
-    the grant comes from, so the shape is built with no reporting lines and the
-    deferred union has nothing to be asked about.
+    has supervised chairs, whose departments arrive through §2.1's second term;
+    this test is about which of the person's two assignments the grant comes
+    from, so the shape is built with no reporting lines and the walk has nothing
+    to add. The supervised half is asserted on the seeded worked example
+    (`test_the_worked_example_resolves_on_the_seeded_graph.py`).
 
     **The control is inside the expectation.** The led course is not asserted
     absent from something — it is asserted present, exactly, with every other

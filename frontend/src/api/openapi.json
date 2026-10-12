@@ -132,6 +132,85 @@
         }
       }
     },
+    "/session/landings": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "The views this session may switch to",
+        "description": "The session's own view and every view its person holds at its door, read now.\n\nSPEC \u00a72.1's door rules come from `app.services.authz.resolve_landings`, over\nthe assignments' own door columns: a web session is never offered the\ninstructor or student view, and a launch session never Care or Admin.",
+        "operationId": "read_session_landings_session_landings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionLandings"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/switch": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Switch to another view this session's person holds",
+        "description": "A new session in the asked view, the old one revoked; or a 403 that changes nothing.\n\n`app.services.session.switch_session` re-reads the person's views at this\ndoor and decides. On success the new token is answered in the body, for the\nSPA's Bearer carrier, and set as the session cookie beside a fresh CSRF\ntoken bound to it; it keeps the old token's expiry. A refusal, including a\nswitch to the session's own role, sets no cookie and leaves the old session\nlive. A token another switch spent first gets the expired-token 401.",
+        "operationId": "switch_session_session_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionSwitch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSwitched"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "End this session",
+        "description": "Revoke this session and clear both cookies: 204, whatever was presented.\n\nThe session is read by `app.api.deps.ending_session`, which checks the\nsignature and expiry but not revocation, so a second logout with the same\ntoken answers exactly as the first did; the revocation is an insert that\ndoes nothing on conflict. That read also applies the double-submit check\nwhen the session rides the cookie, and a refusal there is a 403 that ends\nnothing. With no valid session at all, the cookies are still cleared, so a\nbrowser holding a cookie the server no longer accepts is not stranded.\n\nBack-channel logout from the identity provider is E13's (ruling 8).",
+        "operationId": "log_out_session_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
     "/student/survey": {
       "get": {
         "tags": [
@@ -202,7 +281,7 @@
           "student"
         ],
         "summary": "One week's results for one of my sections",
-        "description": "The week's state and the response published to it, for one of this student's sections.\n\n**This route takes a section and a week, which the survey read refuses to,\nand the check is what makes that safe.** The student's results page is one\nweek of one course, so it has to be named. The section is then looked for\namong the session's own live enrollments, never read by its key, so a\nsection the student is not in is not found, exactly as one that does not\nexist is not (`app.services.response_loop.student_week_results`).\n\n**Every refusal is one 404 with one sentence**, byte-identical: not enrolled,\nan ended enrollment, a week whose report has not opened, and a week or a\nsection that does not exist. A session with no `user`, or a `user_id` claim\nthat is not a uuid, is answered the same way, as the submission route does,\nso this route says nothing about which door a session came through.\n\n`Cache-Control: no-store`, as the survey read: the answer is about this\nreader, and an edit changes it.",
+        "description": "The week's state and the response published to it, for one of this student's sections.\n\n**This route takes a section and a week, which the survey read refuses to,\nand the check is what makes that safe.** The student's results page is one\nweek of one course, so it has to be named. The section is then looked for\namong the session's own live enrollments, never read by its key, so a\nsection the student is not in is not found, exactly as one that does not\nexist is not (`app.services.student_results.student_week_results`).\n\n**Every refusal is one 404 with one sentence**, byte-identical: not enrolled,\nan ended enrollment, a week whose report has not opened, and a week or a\nsection that does not exist. A session with no `user`, or a `user_id` claim\nthat is not a uuid, is answered the same way, as the submission route does,\nso this route says nothing about which door a session came through.\n\n`Cache-Control: no-store`, as the survey read: the answer is about this\nreader, and an edit changes it.",
         "operationId": "student_week_results_read_student_sections__section_id__weeks__course_week__results_get",
         "parameters": [
           {
@@ -972,6 +1051,60 @@
         }
       }
     },
+    "/leadership/comparison-sets/{set_id}/series": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "A comparison set's figures over my purview, one term",
+        "description": "One set's figures for the session's own reader, in the term asked for (E9-05).\n\n**The reader's scope comes from `leadership_scope` and from nothing in the\nrequest** (ADR 0199): a query string carrying another person's id is not\nread, so it is answered with the session's own scope. The figures are\ncomputed over the set's sections inside that purview, per start cohort, and\na set wholly outside it answers exactly what a thin set inside it does.\n\nTwo refusals past the gate, in order: a set id nothing defined is the 404\nevery keyed route here answers, and a term id no term carries is a 404 of its\nown. A `term_id` that is absent or not a uuid is FastAPI's own 422.",
+        "operationId": "read_set_series_leadership_comparison_sets__set_id__series_get",
+        "parameters": [
+          {
+            "name": "set_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Set Id"
+            }
+          },
+          {
+            "name": "term_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Term Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamedSetSeries"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/leadership/comparison-sets/{set_id}/preview": {
       "get": {
         "tags": [
@@ -999,6 +1132,143 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SetPreview"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/context": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "My leadership roles, the terms, and the current term",
+        "description": "What the roll-up pages read first: which term to open, and the reader's own roles.\n\nThe roles are the session's own (ADR 0199); the terms are every term, which\nis no secret.",
+        "operationId": "read_leadership_context_leadership_context_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadershipContext"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/rollup": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "The tree over my leadership purview, one term",
+        "description": "The whole tree in one payload: the hierarchy, and the by-lead pivot for chair and above.\n\nThe scope is the session's own (ADR 0199). A term id no term carries is the\n404 the named-set series route answers for it.",
+        "operationId": "read_rollup_tree_leadership_rollup_get",
+        "parameters": [
+          {
+            "name": "term_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Term Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollupTree"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/rollup/{kind}/{node_id}": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "One node's figures and attention cards, one term",
+        "description": "A node's line per start cohort, its participation, and \u00a75.6's cards.\n\n**A node outside the purview is answered exactly as a node that does not\nexist**: one 404, one sentence. So is a by-lead group asked by a reader who\nis not offered the pivot.",
+        "operationId": "read_rollup_figures_leadership_rollup__kind___node_id__get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "college",
+                "department",
+                "prefix",
+                "course",
+                "lead",
+                "no_lead"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "term_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Term Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollupFigures"
                 }
               }
             }
@@ -1090,8 +1360,8 @@
         "tags": [
           "leadership"
         ],
-        "summary": "The exclusion log inside my own grant",
-        "description": "Every exclusion, keep and undo a person made inside the reader's own grant, newest first.",
+        "summary": "The exclusion log inside my own grant or purview",
+        "description": "Every exclusion, keep and undo a person made inside the reader's reach; dated rows first.\n\nA lead's or chair's own grant, and an assistant dean's, dean's or vice\npresident's purview (ADR 0206); the scope is the session's own.",
         "operationId": "read_exclusion_log_leadership_moderation_log_get",
         "responses": {
           "200": {
@@ -1113,7 +1383,7 @@
           "leadership"
         ],
         "summary": "The response policy of every course I set or read it for",
-        "description": "The courses the reader sets the policy for, and a chair's led courses, which they read.",
+        "description": "The courses the reader sets the policy for, and those they read: a chair's led\ncourses, and every course of an assistant dean's, dean's or vice president's purview.",
         "operationId": "read_response_policy_leadership_response_policy_get",
         "responses": {
           "200": {
@@ -1135,7 +1405,7 @@
           "leadership"
         ],
         "summary": "Switch the response policy for my courses in one prefix",
-        "description": "One row per course of the prefix the reader sets the policy for; answered with the new read.",
+        "description": "One row per course of the prefix the reader sets the policy for; answered with the new read.\n\n`claims` is the CSRF-checked gate; the reader is the same session's `scope`.",
         "operationId": "switch_response_policy_leadership_response_policy__prefix_id__put",
         "parameters": [
           {
@@ -1502,6 +1772,947 @@
         }
       }
     },
+    "/leadership/sections/{section_id}/weeks/{course_week}/report": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "One section's Monday report, read-only, inside my purview",
+        "description": "The instructor's report of one section-week, as a leader reads it (SPEC \u00a75.5).\n\nThe scope comes from `leadership_scope` and from nothing in the request\n(ADR 0199). Comments show under the section's own per-stream threshold and\nrelease batches, exactly as its instructor reads them; no comment is marked\nas the reader's decision, and the benchmark lines are sealed against the\nreader (SPEC \u00a75.1).",
+        "operationId": "read_drill_down_leadership_sections__section_id__weeks__course_week__report_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructorReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/sections/{section_id}/published-weeks": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "The course weeks of a section in my purview with a report",
+        "description": "The published course weeks of one section, for the drill-down to open its latest.\n\nBehind the same purview as the drill-down itself, with the same 404 and\nsentence for a section outside it and a section that does not exist.",
+        "operationId": "read_drill_down_weeks_leadership_sections__section_id__published_weeks_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedWeeks"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/people": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The people graph, sorted and paged",
+        "description": "Every person, their assignments, and whom each assignment reports to.\n\nNames sort by last name with titles stripped; category sorts by hierarchy\nrank. A page past the end answers no people and the same total.",
+        "operationId": "read_people_admin_people_get",
+        "parameters": [
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "name",
+                "category"
+              ],
+              "type": "string",
+              "default": "name",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "asc",
+              "title": "Order"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeoplePage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Add a person",
+        "operationId": "add_person_admin_people_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PersonCreated"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/people/{person_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Edit a person's name and category",
+        "operationId": "edit_person_admin_people__person_id__put",
+        "parameters": [
+          {
+            "name": "person_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Person Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PersonWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/people/{person_id}/assignments": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Grant a person a role",
+        "description": "Any Pulse-owned role, Care and Admin included, to anyone, the acting admin included.\n\nA teaching assignment is the roster's, and the definer refuses it.",
+        "operationId": "grant_role_admin_people__person_id__assignments_post",
+        "parameters": [
+          {
+            "name": "person_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Person Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Granted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/assignments/{assignment_id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Revoke a role assignment",
+        "description": "Revoking deletes. An assignment others report to is refused, with how many.",
+        "operationId": "revoke_role_admin_assignments__assignment_id__delete",
+        "parameters": [
+          {
+            "name": "assignment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Assignment Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/assignments/{assignment_id}/reports-to": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Set or clear whom an assignment reports to",
+        "operationId": "set_reports_to_admin_assignments__assignment_id__reports_to_put",
+        "parameters": [
+          {
+            "name": "assignment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Assignment Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportsToWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/reports-to-options": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The assignments a new assignment may report to",
+        "description": "Only assignments whose role ranks above `role` (ADR 0044).",
+        "operationId": "read_reports_to_options_admin_reports_to_options_get",
+        "parameters": [
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssignmentRole"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportsToOptions"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/people/{person_id}/web-login": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Link a web-login subject to a person",
+        "operationId": "link_web_login_admin_people__person_id__web_login_put",
+        "parameters": [
+          {
+            "name": "person_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Person Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebLoginWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Unlink a person's web login",
+        "operationId": "unlink_web_login_admin_people__person_id__web_login_delete",
+        "parameters": [
+          {
+            "name": "person_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Person Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/people/export": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Export People",
+        "description": "The people as CSV, in the shape the import reads back.",
+        "operationId": "export_people_admin_people_export_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/people/import/dry-run": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "What a people file would change, changing nothing",
+        "operationId": "dry_run_people_admin_people_import_dry_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeopleDiff"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/people/import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Apply a people file its dry run approved",
+        "operationId": "apply_people_admin_people_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportApply"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PeopleDiff"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/lead-mappings": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The lead faculty mappings, sorted and paged",
+        "operationId": "read_mappings_admin_lead_mappings_get",
+        "parameters": [
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "name",
+                "course"
+              ],
+              "type": "string",
+              "default": "course",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string",
+              "default": "asc",
+              "title": "Order"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingPage"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/lead-mappings/{course_id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Map a course to a lead",
+        "description": "Replaces any current lead; the unmap and the map commit together.",
+        "operationId": "map_lead_admin_lead_mappings__course_id__put",
+        "parameters": [
+          {
+            "name": "course_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Course Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MappingWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Unmap a course's lead",
+        "operationId": "unmap_lead_admin_lead_mappings__course_id__delete",
+        "parameters": [
+          {
+            "name": "course_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Course Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/lead-mappings/export": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Export Mappings",
+        "description": "The mappings as CSV, in the shape the import reads back.",
+        "operationId": "export_mappings_admin_lead_mappings_export_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/csv": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/lead-mappings/import/dry-run": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "What a mapping file would change, changing nothing",
+        "operationId": "dry_run_mappings_admin_lead_mappings_import_dry_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportFile"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingDiff"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/lead-mappings/import": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Apply a mapping file its dry run approved",
+        "operationId": "apply_mappings_admin_lead_mappings_import_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportApply"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MappingDiff"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/org-nodes": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The organization nodes a role may be granted at",
+        "description": "Only nodes at the level `role` is granted at, sorted by name.",
+        "operationId": "read_org_nodes_admin_org_nodes_get",
+        "parameters": [
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssignmentRole"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgNodes"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/dev": {
       "get": {
         "tags": [
@@ -1525,6 +2736,144 @@
   },
   "components": {
     "schemas": {
+      "AssignmentLine": {
+        "properties": {
+          "assignment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assignment Id"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AssignmentRole"
+          },
+          "scope_node_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scope Node Id"
+          },
+          "reports_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reports To"
+          },
+          "reports_to_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reports To Name"
+          },
+          "reports_to_role": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssignmentRole"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "assignment_id",
+          "role",
+          "scope_node_id",
+          "reports_to",
+          "reports_to_name",
+          "reports_to_role"
+        ],
+        "title": "AssignmentLine",
+        "description": "One role assignment, and the assignment it reports to, if any.\n\n`reports_to_name` is the parent holder's name, so two lead assignments held\nby one person show both of their chairs (SPEC \u00a72.1)."
+      },
+      "AssignmentRole": {
+        "type": "string",
+        "enum": [
+          "INSTRUCTOR",
+          "LEAD_FACULTY",
+          "CHAIR",
+          "ASSISTANT_DEAN",
+          "DEAN",
+          "VP_ACADEMICS",
+          "CARE",
+          "ADMIN"
+        ],
+        "title": "AssignmentRole",
+        "description": "The roles SPEC \u00a72.1's table grants, as a Postgres enum type.\n\nEight of the nine rows in that table. **`STUDENT` is deliberately absent**: a\nstudent is attached to \"own responses\" rather than to a node in the org\nhierarchy, and nothing in the spec or in any ticket gives a student a\n`role_assignment` row. Adding one would need a scope grain for it, and the\nhonest answer to \"which node is a student scoped to\" is none of them \u2014 so the\nrow is left unwritable rather than given an invented answer.\n\n**`CARE` is in this enumeration and reachable from nowhere else.** SPEC \u00a76.2\nmakes Care the only role that can re-identify a student, and E0-09 keeps the\ngrant strictly here: no LTI claim, no OIDC claim and no LMS role may produce\nit, because the administrator of the platform controls what a claim says and\na claim-to-Care mapping would hand them identity access.\n`tests/unit/test_care_is_not_reachable_from_a_claim.py` sweeps the syntax tree\nof every module under `app/` for a module that both reads a claim and names\nthis role. That is why the name belongs to a shared enumeration in the model\nlayer: a door that needs to exclude Care can exclude *this* member, and the\nexclusion is then a fact about the role rather than a literal in the door.\n\nEach member's value is its name, as `CourseLevel`'s and `Modality`'s are:\none spelling in Python and in the database, rather than two to keep in step."
+      },
+      "AttentionCard": {
+        "properties": {
+          "rule": {
+            "type": "string",
+            "enum": [
+              "instructor_trend_down",
+              "course_trend_down",
+              "response_rate_low",
+              "response_owed"
+            ],
+            "title": "Rule"
+          },
+          "rule_name": {
+            "type": "string",
+            "title": "Rule Name"
+          },
+          "stream": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "INSTRUCTOR",
+                  "COURSE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream"
+          },
+          "section_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Section Id"
+          },
+          "section_code": {
+            "type": "string",
+            "title": "Section Code"
+          },
+          "course_name": {
+            "type": "string",
+            "title": "Course Name"
+          },
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule",
+          "rule_name",
+          "stream",
+          "section_id",
+          "section_code",
+          "course_name",
+          "course_week"
+        ],
+        "title": "AttentionCard",
+        "description": "One \u00a75.6 rule met by one section: the rule, its stream, and where its report is."
+      },
       "BenchmarkSeries": {
         "properties": {
           "points": {
@@ -1848,7 +3197,40 @@
           "rows"
         ],
         "title": "ExclusionLog",
-        "description": "The reader's exclusion log, newest decision first."
+        "description": "The reader's exclusion log: dated rows newest first, then undated rows in no time order."
+      },
+      "GrantWrite": {
+        "properties": {
+          "role": {
+            "$ref": "#/components/schemas/AssignmentRole"
+          },
+          "scope_node_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Scope Node Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "scope_node_id"
+        ],
+        "title": "GrantWrite",
+        "description": "A role to grant, and the one org node it is granted at (ADR 0200)."
+      },
+      "Granted": {
+        "properties": {
+          "assignment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assignment Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assignment_id"
+        ],
+        "title": "Granted"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1898,6 +3280,42 @@
         ],
         "title": "HeldNoteType",
         "description": "The class of a comment held for review, as an instructor may be told it (E6-03).\n\nSPEC \u00a75.1 lets a summary note \"one comment is held for review\" with type\nonly, and \u00a76.2 keeps threat and self-harm out of every instructor view. So\nthis is the two flagging classes of `ModerationVerdict` and nothing else: a\ntype that cannot express `threat` or `self_harm` cannot carry either onto a\npage, whatever a caller passes. The type checker refuses a third member, and\nthe runtime refuses an unknown token because the enum has no `_missing_`\nhook \u2014 `HeldNoteType(\"threat\")` raises `ValueError`.\n\nA `StrEnum` rather than `enum.Enum`, so the stored and served token is the\nvalue itself (ADR 0030) and a JSON payload carries `\"harmful\"`, not a member\nname. Each value is the matching `ModerationVerdict` member's value, written\nout because an enum cannot be built from a filtered copy of another one and\nstay a closed set the type checker can read."
+      },
+      "ImportApply": {
+        "properties": {
+          "csv": {
+            "type": "string",
+            "maxLength": 2000000,
+            "title": "Csv"
+          },
+          "digest": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Digest"
+          }
+        },
+        "type": "object",
+        "required": [
+          "csv",
+          "digest"
+        ],
+        "title": "ImportApply",
+        "description": "The same file again, and the digest its dry run answered (ADR 0204)."
+      },
+      "ImportFile": {
+        "properties": {
+          "csv": {
+            "type": "string",
+            "maxLength": 2000000,
+            "title": "Csv"
+          }
+        },
+        "type": "object",
+        "required": [
+          "csv"
+        ],
+        "title": "ImportFile",
+        "description": "An import file, as the text of a CSV, for its dry run."
       },
       "InstructorReport": {
         "properties": {
@@ -1978,6 +3396,51 @@
         "title": "LeadDecision",
         "description": "What a lead or chair sends to exclude or keep one queued comment.\n\nTwo actions: a leader has no undo (decision 1). `reason` is optional, because\nevery queued comment was flagged by the AI, and is checked by the decision\nservice as it was sent, before any trimming (`docs/MISTAKES.md` entry 29)."
       },
+      "LeadershipContext": {
+        "properties": {
+          "roles": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "VP_ACADEMICS",
+                "DEAN",
+                "ASSISTANT_DEAN",
+                "CHAIR",
+                "LEAD_FACULTY"
+              ]
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/RollupTerm"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "current_term_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Term Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "roles",
+          "terms",
+          "current_term_id"
+        ],
+        "title": "LeadershipContext",
+        "description": "What the leadership pages need before their first read (SPEC \u00a75.5).\n\n`roles` is every leadership role the reader holds, highest first, so a\nread-only context bar can name the reader's role. `terms` is every term,\noldest first; `current_term_id` is the term the pages open: the one whose\ndates contain the institution's today, else the latest that has begun,\nabsent before the first term begins. Terms are no secret."
+      },
       "LogRow": {
         "properties": {
           "section_label": {
@@ -2019,8 +3482,15 @@
             "title": "Reason"
           },
           "decided_on": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Decided On"
           },
           "excerpt": {
@@ -2052,6 +3522,221 @@
         ],
         "title": "LogRow",
         "description": "One decision a person made about a comment inside the reader's own grant."
+      },
+      "MappingChange": {
+        "properties": {
+          "before": {
+            "$ref": "#/components/schemas/MappingLine"
+          },
+          "after": {
+            "$ref": "#/components/schemas/MappingLine"
+          }
+        },
+        "type": "object",
+        "required": [
+          "before",
+          "after"
+        ],
+        "title": "MappingChange",
+        "description": "A course whose lead the import replaces."
+      },
+      "MappingDiff": {
+        "properties": {
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "added": {
+            "items": {
+              "$ref": "#/components/schemas/MappingLine"
+            },
+            "type": "array",
+            "title": "Added"
+          },
+          "changed": {
+            "items": {
+              "$ref": "#/components/schemas/MappingChange"
+            },
+            "type": "array",
+            "title": "Changed"
+          },
+          "removed": {
+            "items": {
+              "$ref": "#/components/schemas/MappingLine"
+            },
+            "type": "array",
+            "title": "Removed"
+          },
+          "unmapped": {
+            "items": {
+              "$ref": "#/components/schemas/UnmappedCourse"
+            },
+            "type": "array",
+            "title": "Unmapped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "digest",
+          "added",
+          "changed",
+          "removed",
+          "unmapped"
+        ],
+        "title": "MappingDiff",
+        "description": "What a mapping import adds, changes and removes, and the courses left unmapped."
+      },
+      "MappingLine": {
+        "properties": {
+          "course_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Course Id"
+          },
+          "course": {
+            "type": "string",
+            "title": "Course"
+          },
+          "person_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Person Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_id",
+          "course",
+          "person_id",
+          "name"
+        ],
+        "title": "MappingLine",
+        "description": "One row of the Lead Faculty mapping table: a course and its lead."
+      },
+      "MappingPage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/MappingLine"
+            },
+            "type": "array",
+            "title": "Mappings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "page",
+          "page_size",
+          "mappings"
+        ],
+        "title": "MappingPage"
+      },
+      "MappingWrite": {
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Person Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "person_id"
+        ],
+        "title": "MappingWrite",
+        "description": "The lead to map a course to."
+      },
+      "NamedSetCohort": {
+        "properties": {
+          "section_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Section Start Date"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/NamedSetWeek"
+            },
+            "type": "array",
+            "title": "Weeks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section_start_date",
+          "weeks"
+        ],
+        "title": "NamedSetCohort",
+        "description": "One start cohort of the reader's purview in the viewed term, and its published weeks."
+      },
+      "NamedSetSeries": {
+        "properties": {
+          "cohorts": {
+            "items": {
+              "$ref": "#/components/schemas/NamedSetCohort"
+            },
+            "type": "array",
+            "title": "Cohorts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cohorts"
+        ],
+        "title": "NamedSetSeries",
+        "description": "A named set's figures for one leadership reader in one term, one series per start cohort.\n\nA set wholly outside the reader's purview answers exactly the shape a thin set\ninside it does: the purview's cohorts, every figure suppressed (E9-05)."
+      },
+      "NamedSetWeek": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "term_week": {
+            "type": "integer",
+            "title": "Term Week"
+          },
+          "instructor_mean": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "course_mean": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "workload_mean": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "workload_median": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_week",
+          "term_week",
+          "instructor_mean",
+          "course_mean",
+          "workload_mean",
+          "workload_median"
+        ],
+        "title": "NamedSetWeek",
+        "description": "One course week of one start cohort, on both of SPEC \u00a72.2's week axes, every figure sealed.\n\nThe two rating means and the workload mean and median, each suppressed or\nshown on its own decision (\u00a74.1 item 7 covers \"a mean, a median, or any\nother statistic\"). One validator per member, so removing one seal is one\ntest going red."
       },
       "OnBehalfStream": {
         "properties": {
@@ -2216,6 +3901,54 @@
         "title": "OpenSurvey",
         "description": "The one survey open for a section right now (SPEC \u00a73.1's one-open rule).\n\nPresent only while the window is open. \u00a73.1 says a missed week cannot be\nback-filled, so a closed week is not something the form can answer and is not\noffered as one; the section it belonged to is still reported, which is how a\nstudent is told they are enrolled and there is nothing to do this minute.\n\n**`length_weeks` is the reader's own section's length and nobody else's**\n(E4-17). It is the `length_weeks` column of the section the window belongs\nto, reached through the section the reader is enrolled in \u2014 the same scoping\nargument `EnrolledSection.course_label` stands on, and \u00a74.1 item 1 is what it\nhas to hold against. It names no other section, carries no identity, and\ndiscloses nothing new: SPEC \u00a72.2 puts the length in the section code the\nstudent is already shown. It is a number about a calendar rather than about a\nperson, so no confidentiality rule in \u00a74 reaches it.\n\nIt is a plain integer because the column is `NOT NULL` on the section row. An\noptional one would let a read path that found no length answer a half-eyebrow\n\u2014 \"COURSE WK 04 / , TERM WK 07\" \u2014 instead of failing where the data is wrong."
       },
+      "OrgNode": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Node Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "parent_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "label",
+          "parent_label"
+        ],
+        "title": "OrgNode",
+        "description": "One organization node a role may be granted at, with its parent's name to tell namesakes apart."
+      },
+      "OrgNodes": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/OrgNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes"
+        ],
+        "title": "OrgNodes"
+      },
       "OwedWeek": {
         "properties": {
           "section_id": {
@@ -2281,6 +4014,184 @@
         ],
         "title": "OwnSubmission",
         "description": "What this reader has already submitted for this week, if anything.\n\nTheir own and only ever their own. SPEC \u00a75.4 gives a student their own section\nand never another individual's raw data, and \u00a74 keys every response to its\nauthor; the lookup behind this is over the reader, the section and the week\ntogether, and the denial suite is what proves the reader is in that key."
+      },
+      "PeopleDiff": {
+        "properties": {
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "added": {
+            "items": {
+              "$ref": "#/components/schemas/PersonValues"
+            },
+            "type": "array",
+            "title": "Added"
+          },
+          "changed": {
+            "items": {
+              "$ref": "#/components/schemas/PersonChange"
+            },
+            "type": "array",
+            "title": "Changed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "digest",
+          "added",
+          "changed"
+        ],
+        "title": "PeopleDiff",
+        "description": "What a people import adds and changes. People are never removed by an import."
+      },
+      "PeoplePage": {
+        "properties": {
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page"
+          },
+          "page_size": {
+            "type": "integer",
+            "title": "Page Size"
+          },
+          "people": {
+            "items": {
+              "$ref": "#/components/schemas/PersonLine"
+            },
+            "type": "array",
+            "title": "People"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "page",
+          "page_size",
+          "people"
+        ],
+        "title": "PeoplePage"
+      },
+      "PersonChange": {
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Person Id"
+          },
+          "before": {
+            "$ref": "#/components/schemas/PersonValues"
+          },
+          "after": {
+            "$ref": "#/components/schemas/PersonValues"
+          }
+        },
+        "type": "object",
+        "required": [
+          "person_id",
+          "before",
+          "after"
+        ],
+        "title": "PersonChange"
+      },
+      "PersonCreated": {
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Person Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "person_id"
+        ],
+        "title": "PersonCreated"
+      },
+      "PersonLine": {
+        "properties": {
+          "person_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Person Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          },
+          "web_login_linked": {
+            "type": "boolean",
+            "title": "Web Login Linked"
+          },
+          "assignments": {
+            "items": {
+              "$ref": "#/components/schemas/AssignmentLine"
+            },
+            "type": "array",
+            "title": "Assignments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "person_id",
+          "name",
+          "category",
+          "web_login_linked",
+          "assignments"
+        ],
+        "title": "PersonLine",
+        "description": "One row of the People & reporting table."
+      },
+      "PersonValues": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "category"
+        ],
+        "title": "PersonValues"
+      },
+      "PersonWrite": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^\\S(?:.*\\S)?$",
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
+            "pattern": "^\\S(?:.*\\S)?$",
+            "title": "Category"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "category"
+        ],
+        "title": "PersonWrite",
+        "description": "A person's name and category, on a create and on an edit."
       },
       "PolicyCourse": {
         "properties": {
@@ -2506,6 +4417,73 @@
         "title": "RatesView",
         "description": "SPEC \u00a75.1's two rates and the counts they are ratios of.\n\nADR 0147 keeps every division out of SQL and here instead, so that the rule\nfor a zero denominator is written in one reviewable place. `response_rate` and\n`validity_rate` are `None` where that rule leaves them undefined."
       },
+      "ReportsToOption": {
+        "properties": {
+          "assignment_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Assignment Id"
+          },
+          "person_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Person Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AssignmentRole"
+          }
+        },
+        "type": "object",
+        "required": [
+          "assignment_id",
+          "person_id",
+          "name",
+          "role"
+        ],
+        "title": "ReportsToOption"
+      },
+      "ReportsToOptions": {
+        "properties": {
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/ReportsToOption"
+            },
+            "type": "array",
+            "title": "Options"
+          }
+        },
+        "type": "object",
+        "required": [
+          "options"
+        ],
+        "title": "ReportsToOptions"
+      },
+      "ReportsToWrite": {
+        "properties": {
+          "reports_to": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reports To"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reports_to"
+        ],
+        "title": "ReportsToWrite",
+        "description": "The parent assignment, or `null` to clear the edge."
+      },
       "ResponseDraftView": {
         "properties": {
           "text": {
@@ -2571,6 +4549,395 @@
         "title": "ReviewQueue",
         "description": "The reader's review queue, in an order drawn for this request."
       },
+      "RollupCohort": {
+        "properties": {
+          "section_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Section Start Date"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/RollupWeek"
+            },
+            "type": "array",
+            "title": "Weeks"
+          },
+          "participation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RollupParticipation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "section_start_date",
+          "label",
+          "weeks",
+          "participation"
+        ],
+        "title": "RollupCohort",
+        "description": "One start cohort of a node's sections, its line on the term axis, and its participation."
+      },
+      "RollupFigures": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "college",
+              "department",
+              "prefix",
+              "course",
+              "lead",
+              "no_lead"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "term_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Term Id"
+          },
+          "cohorts": {
+            "items": {
+              "$ref": "#/components/schemas/RollupCohort"
+            },
+            "type": "array",
+            "title": "Cohorts"
+          },
+          "attention": {
+            "items": {
+              "$ref": "#/components/schemas/AttentionCard"
+            },
+            "type": "array",
+            "title": "Attention"
+          },
+          "attention_empty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attention Empty"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "term_id",
+          "cohorts",
+          "attention",
+          "attention_empty"
+        ],
+        "title": "RollupFigures",
+        "description": "One node's figures in one term: a line per start cohort, and the attention cards.\n\n`attention_empty` is \u00a75.6's calm sentence when no card is due, and absent\nwhen one is."
+      },
+      "RollupNode": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "college",
+              "department",
+              "prefix",
+              "course",
+              "section",
+              "lead",
+              "no_lead"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "section_count": {
+            "type": "integer",
+            "title": "Section Count"
+          },
+          "course_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Count"
+          },
+          "prefix_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefix Count"
+          },
+          "department_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Count"
+          },
+          "staff_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staff Name"
+          },
+          "instructor_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instructor Names",
+            "default": []
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/RollupNode"
+            },
+            "type": "array",
+            "title": "Children",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "name",
+          "label",
+          "section_count"
+        ],
+        "title": "RollupNode",
+        "description": "One row of the tree, with its children.\n\nEvery count is over the sections the reader holds, in the viewed term, so a\ncontainer the reader holds part of counts that part only. `staff_name` is\nthe row's Dean, Chair or Lead (absent for a course in its own lead's view,\nand where nobody holds the post); `instructor_names` is a section row's\nteaching instructors. `label` is SPEC \u00a72.1's row label, joined from those."
+      },
+      "RollupParticipation": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "response_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Rate"
+          },
+          "validity_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validity Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_week",
+          "response_rate",
+          "validity_rate"
+        ],
+        "title": "RollupParticipation",
+        "description": "A cohort's response rate and validity rate in its latest published week."
+      },
+      "RollupTerm": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          },
+          "length_weeks": {
+            "type": "integer",
+            "title": "Length Weeks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "start_date",
+          "end_date",
+          "length_weeks"
+        ],
+        "title": "RollupTerm",
+        "description": "One term a roll-up may be read for: its name, its dates and its length in weeks."
+      },
+      "RollupTree": {
+        "properties": {
+          "term_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Term Id"
+          },
+          "hierarchy": {
+            "items": {
+              "$ref": "#/components/schemas/RollupNode"
+            },
+            "type": "array",
+            "title": "Hierarchy"
+          },
+          "by_lead": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RollupNode"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Lead"
+          }
+        },
+        "type": "object",
+        "required": [
+          "term_id",
+          "hierarchy",
+          "by_lead"
+        ],
+        "title": "RollupTree",
+        "description": "The whole tree over the reader's leadership purview in one term.\n\n`hierarchy` holds the roots (SPEC \u00a72.1: the highest useful nodes, several\nfor a union of assignments). `by_lead` is the by-lead pivot, offered only to\na reader holding a `CHAIR` or higher assignment, and absent otherwise."
+      },
+      "RollupWeek": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "term_week": {
+            "type": "integer",
+            "title": "Term Week"
+          },
+          "instructor_mean": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructor Mean"
+          },
+          "course_mean": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Mean"
+          },
+          "workload_mean": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workload Mean"
+          },
+          "workload_median": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workload Median"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_week",
+          "term_week",
+          "instructor_mean",
+          "course_mean",
+          "workload_mean",
+          "workload_median"
+        ],
+        "title": "RollupWeek",
+        "description": "One course week of one cohort, on both week axes; `None` where nobody answered."
+      },
       "SectionView": {
         "properties": {
           "code": {
@@ -2587,16 +4954,115 @@
             "type": "integer",
             "title": "Length Weeks",
             "description": "How many weeks this section runs (SPEC \u00a72.2)."
+          },
+          "lead_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Name",
+            "description": "The Lead Faculty's name for the page header; null when nobody leads it."
           }
         },
         "type": "object",
         "required": [
           "code",
           "course_label",
-          "length_weeks"
+          "length_weeks",
+          "lead_name"
         ],
         "title": "SectionView",
         "description": "Which section this report is about, in the words its instructor knows it by."
+      },
+      "SessionLandings": {
+        "properties": {
+          "current": {
+            "type": "string",
+            "enum": [
+              "student",
+              "instructor",
+              "leadership",
+              "care",
+              "admin"
+            ],
+            "title": "Current"
+          },
+          "landings": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "student",
+                "instructor",
+                "leadership",
+                "care",
+                "admin"
+              ]
+            },
+            "type": "array",
+            "title": "Landings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "current",
+          "landings"
+        ],
+        "title": "SessionLandings",
+        "description": "`GET /session/landings`: the session's own view, and every view held at its door.\n\n`landings` is in `LANDING_PRECEDENCE` order with the student view last, and\nincludes `current`."
+      },
+      "SessionSwitch": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "student",
+              "instructor",
+              "leadership",
+              "care",
+              "admin"
+            ],
+            "title": "Role"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "SessionSwitch",
+        "description": "`POST /session/switch`: the one view to switch to."
+      },
+      "SessionSwitched": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "student",
+              "instructor",
+              "leadership",
+              "care",
+              "admin"
+            ],
+            "title": "Role"
+          },
+          "session": {
+            "type": "string",
+            "title": "Session"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "session"
+        ],
+        "title": "SessionSwitched",
+        "description": "What a switch answers with: the role of the new session, and the session itself.\n\nThe token is also set as the session cookie, beside a fresh CSRF token. It is\nin the body for the SPA's Bearer carrier, which is how the session travels\ninside the LMS's iframe (ADR 0089)."
       },
       "SetDetail": {
         "properties": {
@@ -3126,6 +5592,18 @@
             "title": "Course Label",
             "description": "The course's label, with its section code and term."
           },
+          "lead_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Name",
+            "description": "The Lead Faculty's name for the page header; null when nobody leads it."
+          },
           "state": {
             "type": "string",
             "enum": [
@@ -3214,6 +5692,7 @@
         "type": "object",
         "required": [
           "course_label",
+          "lead_name",
           "state",
           "response",
           "published_weeks",
@@ -3606,7 +6085,32 @@
           "mean"
         ],
         "title": "TrendPoint",
-        "description": "One week of one stream's trend line.\n\n`mean` is `None` for a week nobody rated. Zero is a rating nobody can give \u2014\nSPEC \u00a73.2's scale runs 1 to 5 \u2014 so a zero here would draw a line to the floor\nof the chart for a week that has no line at all (ADR 0147's zero-filling: a\nstored zero and a missing week never arrive looking the same).\n\n`term_week` is the term week of the window row this point was built from \u2014\n\u00a72.2's second axis, stated here rather than left for the client to derive\n(breakdown decision 12, ADR 0157). Today the gap between the two axes is a\nper-section constant (`_section_weeks`' `first_term_week`), so a client\ncould compute this member from the report week's own `course_week` /\n`term_week` pair. It is on the wire anyway because `week_of_the_term` is\nthis codebase's one reading of the axis mapping (\u00a72.2), and a client that\nderived the pair would freeze today's arithmetic into a second copy of\nthat reading \u2014 one that would disagree silently the day the mapping\nstops being affine, which is exactly the section-pausing-over-a-break\ncase E4-08's copy file anticipates. Stating the number here widens\nnothing: it is what every reader of this payload could already compute\nfrom `week` alone."
+        "description": "One week of one stream's trend line.\n\n`mean` is `None` for a week nobody rated. Zero is a rating nobody can give \u2014\nSPEC \u00a73.2's scale runs 1 to 5 \u2014 so a zero here would draw a line to the floor\nof the chart for a week that has no line at all (ADR 0147's zero-filling: a\nstored zero and a missing week never arrive looking the same).\n\n`term_week` is the term week of the window row this point was built from \u2014\n\u00a72.2's second axis, stated here rather than left for the client to derive\n(breakdown decision 12, ADR 0157). Today the gap between the two axes is a\nper-section constant (the section's first term week), so a client\ncould compute this member from the report week's own `course_week` /\n`term_week` pair. It is on the wire anyway because `week_of_the_term` is\nthis codebase's one reading of the axis mapping (\u00a72.2), and a client that\nderived the pair would freeze today's arithmetic into a second copy of\nthat reading \u2014 one that would disagree silently the day the mapping\nstops being affine, which is exactly the section-pausing-over-a-break\ncase E4-08's copy file anticipates. Stating the number here widens\nnothing: it is what every reader of this payload could already compute\nfrom `week` alone."
+      },
+      "UnmappedCourse": {
+        "properties": {
+          "course_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Course Id"
+          },
+          "course": {
+            "type": "string",
+            "title": "Course"
+          },
+          "note": {
+            "type": "string",
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_id",
+          "course",
+          "note"
+        ],
+        "title": "UnmappedCourse",
+        "description": "A course the import leaves without a lead, and the sentence saying where it falls."
       },
       "ValidationError": {
         "properties": {
@@ -3647,6 +6151,31 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WebLoginWrite": {
+        "properties": {
+          "idp_issuer": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "pattern": "^\\S(?:.*\\S)?$",
+            "title": "Idp Issuer"
+          },
+          "idp_subject": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 1,
+            "pattern": "^\\S(?:.*\\S)?$",
+            "title": "Idp Subject"
+          }
+        },
+        "type": "object",
+        "required": [
+          "idp_issuer",
+          "idp_subject"
+        ],
+        "title": "WebLoginWrite",
+        "description": "The verified web-login subject to link to a person (ADR 0097)."
       },
       "WeekResponseView": {
         "properties": {

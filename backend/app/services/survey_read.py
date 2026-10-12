@@ -92,7 +92,6 @@ from app.schemas.student import (
     SurveyQuestion,
 )
 from app.services import clock, response_loop
-from app.services.authz import teaching_instructors_of
 from app.services.enrollment_windows import live_on
 from app.services.section_codes import course_label, course_week_of
 from app.services.submissions import current_questions
@@ -226,11 +225,15 @@ def _section_view(
             if window is None
             else _open_survey(session, window=window, section=section, term=term, user_id=user_id)
         ),
-        instructors=_instructors(session, section_id=section.id, user_id=user_id),
+        instructors=_instructors(
+            session, section_id=section.id, user_id=user_id, settings=settings
+        ),
     )
 
 
-def _instructors(session: Session, *, section_id: UUID, user_id: UUID) -> list[str]:
+def _instructors(
+    session: Session, *, section_id: UUID, user_id: UUID, settings: Settings
+) -> list[str]:
     """The names of this section's live teaching instructors, sorted (E7-01, ADR 0191).
 
     **Asked as the reader, by the reader's own key.** The names come through the
@@ -239,18 +242,23 @@ def _instructors(session: Session, *, section_id: UUID, user_id: UUID) -> list[s
     already found the reader in, so the channel's check is a second one and never
     the only one.
 
-    **Teaching instructors only.** The channel also answers anyone who has
-    published a response to the section, which a later page attributes; this
-    member is the section's professor, so the answer is kept to the people
-    `authz.teaching_instructors_of` gives for it.
+    **Teaching instructors only.** The channel also answers the section's
+    response authors, its course's lead, its department's chair and its
+    college's dean, each as a row of its own role (ADR 0201); this member is the
+    section's professor, so the answer is kept to the `INSTRUCTOR` rows: the
+    section's `INSTRUCTOR` assignments, the same people
+    `authz.teaching_instructors_of` answers.
     """
-    teaching = teaching_instructors_of(session, section_id=section_id)
     return sorted(
         staff.display_name
         for staff in response_loop.section_staff_names(
-            session, section_id=section_id, reader_user_id=user_id
+            session,
+            section_ids=[section_id],
+            reader_user_id=user_id,
+            scope=None,
+            settings=settings,
         )
-        if staff.person_id in teaching
+        if staff.role is response_loop.StaffNameRole.INSTRUCTOR
     )
 
 

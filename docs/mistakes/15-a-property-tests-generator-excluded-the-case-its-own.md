@@ -1,6 +1,6 @@
 # Entry 15. A property test's generator excluded the case its own docstring named
 
-**Caught: 4**
+**Caught: 5**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -95,4 +95,4 @@ other in one file. There no claim exists at all: a shared driver that speaks a
 protocol correctly makes the malformed half of every guard unreachable, and there
 is nothing to compare it with.
 
----
+**Instance, 2026-10-12 (E9-01, PR #335).** The generated-forest properties assert what the generator can draw rather than assume it: `tests/fixtures/purview_walk.py` asks each plan what it draws (chains at the depth limit, two-hat edges, Care holders), so a strategy that never produced the assistant-dean union could not pass the property named for it. What would have shipped: a forest property green over forests with no supervised chair.

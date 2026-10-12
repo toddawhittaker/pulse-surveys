@@ -16,8 +16,6 @@ import { copy } from '../../copy/leadershipModerationCopy';
 import './leadershipComparisonSets.css';
 import './leadershipModeration.css';
 
-/** The address of the review queue, under the leadership area. */
-export const REVIEW_QUEUE_ROUTE = '/leadership/review-queue';
 
 /** Where a spec finds the page. */
 export const REVIEW_QUEUE_TESTID = 'pulse-leadership-review-queue';

@@ -58,10 +58,11 @@ reaches a reader without this module seeing it, and none of them is closed here:
   - **a single word.** The rule reads a sentence as whitespace plus letters after
     trimming, so a one-word literal in an expression position is allowed.
     Widening it would refuse every `'button'` and `'polite'` in the tree;
-  - **files outside the two trees.** `frontend/src/lib/landings.ts` holds shipped
-    sentences, and `main.tsx` and `router.tsx` are not swept either. That gap is
-    recorded in `docs/tickets/e4/deferred.md` with an owner rather than left to be
-    found;
+  - **files outside the two trees.** `main.tsx`, `router.tsx` and the rest of
+    `frontend/src/lib/` are not swept. `frontend/src/lib/landings.ts` held shipped
+    sentences until E9-04 moved them into `frontend/src/copy/landings.ts`; since
+    then one rule below reads that one file and refuses a sentence in it, and the
+    rest of `lib/` stays outside the sweep;
   - **CSS `content:` properties**, which put text on a screen from a stylesheet;
   - **an SVG drawn as a lock or a shield**, which is item 5's iconography clause
     in a form no text sweep reaches. The inventory module discloses the same;
@@ -79,6 +80,7 @@ from pathlib import Path
 import pytest
 from fixtures.component_strings import (
     EXCLUDED_SUPPORT_MODULES,
+    FRONTEND_SOURCE_ROOT,
     SWEPT_DIRECTORIES,
     ComponentParseError,
     ComponentStringError,
@@ -295,6 +297,33 @@ REFUSED = {
     ),
     "the low half of a surrogate pair on its own": a_component_declaring("const half = '\\uDD12';"),
 }
+
+# E9-04 done-when 9: "`frontend/src/lib/landings.ts` holds no sentence". The file
+# the landing views' sentences move out of, named by the ticket.
+LANDINGS_LIB_MODULE = FRONTEND_SOURCE_ROOT / "lib" / "landings.ts"
+
+# Two samples shaped like a table of landing views in a plain `.ts` module, for
+# the control on the rule over that file. Neither is copied from the shipped file
+# (`docs/MISTAKES.md` entry 3). The first holds what such a table may hold after
+# the move: a test id, a route and a copy key. The second is the same table with
+# one sentence written in place of the key.
+A_LANDING_TABLE_KEY = "landing.sample.heading"
+A_LANDING_TABLE_SENTENCE = "Nothing is waiting for you here today."
+A_GOVERNED_LANDING_TABLE = "\n".join(
+    [
+        "export const SAMPLE_LANDINGS = {",
+        "  care: {",
+        "    testid: 'pulse-landing-care',",
+        "    route: '/app/care',",
+        f"    heading: '{A_LANDING_TABLE_KEY}',",
+        "  },",
+        "} as const;",
+        "",
+    ]
+)
+AN_UNGOVERNED_LANDING_TABLE = A_GOVERNED_LANDING_TABLE.replace(
+    A_LANDING_TABLE_KEY, A_LANDING_TABLE_SENTENCE
+)
 
 A_SAMPLE_IMPORTING_EVERY_WAY = "\n".join(
     [
@@ -631,8 +660,42 @@ def test_the_support_module_rule_names_a_shipped_importer_and_spares_a_test(
     )
 
 
+def test_the_scan_of_a_plain_module_names_a_landing_sentence_and_spares_ids_routes_and_keys() -> (
+    None
+):
+    """The control on the rule over `lib/landings.ts`, both directions.
+
+    That rule reads a plain `.ts` module, so it scans with `jsx=False`, which no
+    other sample in this module exercises. A table of landing views may keep its
+    test ids, routes and copy keys; it may not keep a sentence.
+
+    **The mutations it kills:** a scan that reads nothing in a non-JSX module,
+    which would make the rule green over a file full of sentences; and a scan
+    that refuses a test id, a route or a known copy key, which would make the
+    rule unsatisfiable. **Needs no implementation and is green now. A red here
+    means this module is broken, not that the frontend is.**
+    """
+    known = frozenset({A_LANDING_TABLE_KEY})
+
+    spared = findings_in_source(
+        A_GOVERNED_LANDING_TABLE, A_SAMPLE_FILE, jsx=False, known_keys=known
+    )
+    assert spared == [], (
+        "The scan refused a landing table holding only a test id, a route and a known copy key:\n"
+        + "\n".join(f"  {finding}" for finding in spared)
+    )
+
+    named = findings_in_source(
+        AN_UNGOVERNED_LANDING_TABLE, A_SAMPLE_FILE, jsx=False, known_keys=known
+    )
+    assert [finding.text.strip() for finding in named] == [A_LANDING_TABLE_SENTENCE], (
+        f"Over a landing table holding the sentence {A_LANDING_TABLE_SENTENCE!r}, the scan "
+        f"reported {[finding.text for finding in named]} rather than that one sentence."
+    )
+
+
 # ---------------------------------------------------------------------------
-# The rules. Both are marked, and both docstrings name the items they extend.
+# The rules. Each is marked, and each docstring names the items it extends.
 # ---------------------------------------------------------------------------
 
 
@@ -734,4 +797,58 @@ def test_every_excluded_support_module_exists_and_ships_to_nobody() -> None:
         "They are excused from the string sweep because nothing shipped imports them. A component "
         "that does import one puts its strings on a screen with SPEC §4.1 items 4 and 5 asserted "
         "over none of them, and this sweep steps over the module by name."
+    )
+
+
+@pytest.mark.invariant
+def test_the_landings_module_in_lib_holds_no_sentence() -> None:
+    """SPEC §4.1 items 4 and 5 reach the landing views: E9-04 done-when 9's middle clause.
+
+    > `frontend/src/lib/landings.ts` holds no sentence.
+
+    The landing views' headings and sentences lived in that file, outside both
+    the copy directory and the two swept trees, so neither the inventory nor the
+    rule above read them (the carried E4 entry). E9-04 moves them into
+    `frontend/src/copy/landings.ts`; the inventory module asserts they arrive
+    there, and this asserts none stayed behind. Copy keys the inventory holds
+    are allowed, so the file may go on naming the keys each view renders.
+
+    **Whether the file survives is the builder's choice.** If it is deleted it
+    holds no sentence, and the inventory's canary still requires the sentences
+    to have arrived in the copy module, so a deletion that lost them is red
+    there.
+
+    **The mutations it kills:** the move left undone, or done for some views
+    and not others; and a new sentence written into the file later. **What
+    makes it non-vacuous:** the control above, which requires this scan to name
+    a sentence in a plain `.ts` landing table and to spare its ids, routes and
+    keys. **A red here before E9-04 is the expected red**: the file still holds
+    the sentences.
+    """
+    known_keys = frozenset(string.key for string in collect_shipped_copy())
+    assert known_keys, (
+        "The copy inventory collected no keys, so every copy key in the file would be reported "
+        "as unknown and this rule would be red for the wrong reason."
+    )
+
+    found = (
+        findings_in_source(
+            LANDINGS_LIB_MODULE.read_text(encoding="utf-8"),
+            display(LANDINGS_LIB_MODULE),
+            jsx=False,
+            known_keys=known_keys,
+        )
+        if LANDINGS_LIB_MODULE.exists()
+        else []
+    )
+    assert not found, "\n".join(
+        [
+            f"`{display(LANDINGS_LIB_MODULE)}` still ships {len(found)} string(s) no copy module "
+            "governs:",
+            *(f"  {finding}" for finding in found),
+            "",
+            "E9-04 moves the landing views' sentences into `frontend/src/copy/landings.ts`, under "
+            "the `landing.` prefix, unchanged word for word. A sentence left here is read by no "
+            "sweep for SPEC §4.1 items 4 and 5.",
+        ]
     )

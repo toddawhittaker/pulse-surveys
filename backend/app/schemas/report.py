@@ -141,6 +141,10 @@ class SectionView(BaseModel):
     # weeks, and a section running six weeks inside an eighteen-week term is the
     # ordinary case rather than the exception (SPEC §2.2).
     length_weeks: int = Field(description="How many weeks this section runs (SPEC §2.2).")
+    # SPEC §2.1: a course-level page carries the Lead Faculty name in its header.
+    lead_name: str | None = Field(
+        description="The Lead Faculty's name for the page header; null when nobody leads it."
+    )
 
 
 class WeekView(BaseModel):
@@ -205,7 +209,7 @@ class TrendPoint(BaseModel):
     `term_week` is the term week of the window row this point was built from —
     §2.2's second axis, stated here rather than left for the client to derive
     (breakdown decision 12, ADR 0157). Today the gap between the two axes is a
-    per-section constant (`_section_weeks`' `first_term_week`), so a client
+    per-section constant (the section's first term week), so a client
     could compute this member from the report week's own `course_week` /
     `term_week` pair. It is on the wire anyway because `week_of_the_term` is
     this codebase's one reading of the axis mapping (§2.2), and a client that

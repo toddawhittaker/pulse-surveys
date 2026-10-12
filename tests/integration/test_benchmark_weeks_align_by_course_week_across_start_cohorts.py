@@ -33,6 +33,12 @@ letters a hand-written test happened to pick (`docs/MISTAKES.md` entry 15 is a
 generator that excluded the case its own docstring named, so the draw includes
 the three-week cohorts and the ones that start in the term's first week, where
 the two axes agree).
+
+**Re-pointed by E9-12** from `benchmark_cohort_week`, which E9-12 retires (README
+decision 10), to `benchmark_set_week`, which keys its rows by course week over
+the section set it is handed. The half of the rule that is about membership —
+a section started 9/7 is in the same population as one started 8/17 — is now the
+university resolver's, and the first test asserts it there too.
 """
 
 from decimal import Decimal
@@ -40,10 +46,11 @@ from typing import Any
 
 import pytest
 from fixtures.benchmark_views import (
-    COHORT_WEEK_VIEW,
+    RESOLVE_UNIVERSITY,
+    SET_FUNCTION,
     UG,
     BenchmarkWorld,
-    require_benchmark_view,
+    benchmarks_api,
 )
 from fixtures.survey_windows import SEEDED_COHORTS
 from hypothesis import HealthCheck, given, settings
@@ -84,6 +91,19 @@ MEAN_IF_EVERYTHING_IS_ONE_ROW = Decimal("4.0")
 A_PROPERTY_WORKLOAD = Decimal("4.5")
 
 
+def row_at(world: BenchmarkWorld, labels: tuple[str, ...], course_week: int) -> Any:
+    """`benchmark_set_week`'s one row at `course_week` over `labels`, or None."""
+    rows = [row for row in world.set_week(*labels) if row["course_week"] == course_week]
+    assert len(rows) <= 1, (
+        f"`{SET_FUNCTION}` answered {len(rows)} rows at course week {course_week}: {rows}. Its rows "
+        "are keyed by the course week alone."
+    )
+    return rows[0] if rows else None
+
+
+BOTH = ("early", "late")
+
+
 def two_start_cohorts(world: BenchmarkWorld) -> BenchmarkWorld:
     """One 8/17 section and one 9/7 section, twelve weeks and undergraduate both."""
     world.build()
@@ -122,8 +142,8 @@ def test_course_week_two_of_two_start_cohorts_is_one_row(
     2.5.
 
     **The premise is asserted before the property.** Both responses are required
-    to have reached the view — through the section count — because "the two are
-    in one row" is trivially true of a row holding one of them and a view that
+    to have reached the function — through the section count — because "the two
+    are in one row" is trivially true of a row holding one of them and a body that
     lost the late cohort entirely would otherwise read as a pass with a wrong
     mean nobody looked at.
 
@@ -135,9 +155,21 @@ def test_course_week_two_of_two_start_cohorts_is_one_row(
     """
     world = two_start_cohorts(benchmark_world)
 
-    row = world.cohort_week(length_weeks=TWELVE_WEEKS, level=UG, course_week=THE_COURSE_WEEK)
+    world.session.flush()
+    population = {
+        str(section)
+        for section in benchmarks_api()[RESOLVE_UNIVERSITY](
+            world.session, section_id=world.section_id("late")
+        )
+    }
+    assert str(world.section_id("early")) in population, (
+        "The 9/7 section's university population does not hold the 8/17 section of the same "
+        "length and level; §5.1 compares week N 'regardless of start date'."
+    )
+
+    row = row_at(world, BOTH, THE_COURSE_WEEK)
     assert row is not None, (
-        f"`{COHORT_WEEK_VIEW}` has no row at course week {THE_COURSE_WEEK} for the "
+        f"`{SET_FUNCTION}` has no row at course week {THE_COURSE_WEEK} for the "
         f"{TWELVE_WEEKS}-week {UG} cohort, in which two sections answered their second course "
         f"week — one started 8/17 in term week {EARLY_TERM_WEEK_FOR_COURSE_WEEK_TWO}, the other "
         f"9/7 in term week {LATE_TERM_WEEK_FOR_COURSE_WEEK_TWO}. An absent row here would make "
@@ -154,7 +186,7 @@ def test_course_week_two_of_two_start_cohorts_is_one_row(
         f"`workload_mean` is {row['workload_mean']!r} at course week {THE_COURSE_WEEK}. The two "
         f"sections' second weeks carry {EARLY_WEEK_TWO_HOURS} and {LATE_WEEK_TWO_HOURS} hours, a "
         f"mean of {ALIGNED_MEAN}. {MEAN_IF_EVERYTHING_IS_ONE_ROW} is all three responses in one "
-        "row, which is a view with no week in its key at all."
+        "row, which is a function with no week in its key at all."
     )
 
 
@@ -174,14 +206,13 @@ def test_the_calendar_twin_week_is_not_aggregated_with_it(
     in this row and answers 5.0 — the mean of two sections at two quite
     different points in their own courses, which is the number §2.2's sentence
     exists to prevent. Asserted twice, from both ends, because a single-sided
-    test is satisfied by a view that lost a row rather than misplaced one.
+    test is satisfied by a function that lost a row rather than misplaced one.
     """
     world = two_start_cohorts(benchmark_world)
-    require_benchmark_view(world.session, COHORT_WEEK_VIEW)
 
-    row = world.cohort_week(length_weeks=TWELVE_WEEKS, level=UG, course_week=THE_TWIN_COURSE_WEEK)
+    row = row_at(world, BOTH, THE_TWIN_COURSE_WEEK)
     assert row is not None, (
-        f"`{COHORT_WEEK_VIEW}` has no row at course week {THE_TWIN_COURSE_WEEK}, which the early "
+        f"`{SET_FUNCTION}` has no row at course week {THE_TWIN_COURSE_WEEK}, which the early "
         f"section answered with {EARLY_WEEK_FIVE_HOURS} hours. The assertions below would be "
         "vacuous, and 'the late cohort is not in this row' would be true of an empty result."
     )
@@ -254,14 +285,14 @@ def test_a_response_lands_in_the_course_week_the_start_letter_map_puts_it_in(
             workload=A_PROPERTY_WORKLOAD,
         )
 
-        row = world.cohort_week(length_weeks=length_weeks, level=UG, course_week=course_week)
+        row = row_at(world, ("drawn",), course_week)
         assert row is not None, (
-            f"`{COHORT_WEEK_VIEW}` has no row at course week {course_week} of the "
+            f"`{SET_FUNCTION}` has no row at course week {course_week} of the "
             f"{length_weeks}-week {UG} cohort. One section of start cohort {letter!r} — which "
             f"§2.2's seed starts in term week {first_term_week}, on {start} — answered that "
             f"course week with {A_PROPERTY_WORKLOAD} hours, so the row is somewhere: most likely "
             f"at course week {first_term_week + course_week - 1}, which is the term week the "
-            "response hangs on and what a view keyed off `week.number` would answer."
+            "response hangs on and what a function keyed off `week.number` would answer."
         )
         assert row["section_count"] == 1 and row["workload_mean"] == A_PROPERTY_WORKLOAD, (
             f"The row at course week {course_week} of the {length_weeks}-week cohort is {row}. "

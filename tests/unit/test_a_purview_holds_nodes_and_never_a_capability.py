@@ -50,8 +50,11 @@ PURVIEW_LEVELS = (
 )
 
 # What an actor scope carries beside the purview. Same provenance as above: the
-# ticket's own list, transcribed, not derived.
-ACTOR_SCOPE_FIELDS = ("person_id", "purview", "holds_care", "n_threshold")
+# tickets' own lists, transcribed, not derived — E0-11's four, and `grants`, which
+# E9-01 adds: "`ActorScope` gains `grants`: one `(assignment id, role, purview)`
+# per leadership assignment". Compared as a set, because neither ticket orders
+# the fields and the order is not a property anything reads.
+ACTOR_SCOPE_FIELDS = ("person_id", "purview", "holds_care", "n_threshold", "grants")
 
 # Fragments that would read as a capability rather than as a place. A purview is
 # a set of nodes; anything here appearing as one of its fields is a power stored
@@ -204,9 +207,10 @@ def test_an_actor_scope_carries_care_as_a_capability_beside_the_purview(authz: A
     )
 
     declared = tuple(field.name for field in dataclasses.fields(actor_scope_class))
-    assert declared == ACTOR_SCOPE_FIELDS, (
-        f"`ActorScope` carries {declared} rather than {ACTOR_SCOPE_FIELDS}. Each of the four is a "
+    assert sorted(declared) == sorted(ACTOR_SCOPE_FIELDS), (
+        f"`ActorScope` carries {declared} rather than {ACTOR_SCOPE_FIELDS}. Each of the five is a "
         "separate requirement: the person the scope was resolved for, the purview §2.1 defines, "
         "Care as a capability of its own (E0-11: 'so that no union operation can ever pick it "
-        "up'), and §4's n-threshold, which E4's suppression rules read from here."
+        "up'), §4's n-threshold, which E4's suppression rules read from here, and E9-01's "
+        "`grants`, one (assignment id, role, purview) per leadership assignment."
     )

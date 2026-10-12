@@ -37,3 +37,9 @@ a reader will ever object — and the reader who arrives next is reading it for
 its content and will take the markers for formatting they do not recognise.
 
 ---
+
+**Occurrence, 2026-10-12 (E9-04, PR #336).** The merge of the epic branch into
+`e9/role-switcher-and-logout` (720ebd87) committed conflict markers in the root
+test `conftest.py`, where both tickets registered fixture modules. The next
+commit (6f2d2cfe) removed them before review. Not a catch: the sweep and the
+collection error are what found it.

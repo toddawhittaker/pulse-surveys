@@ -5,7 +5,8 @@
 and decision 4's set functions take per-week cutoffs since
 [ADR 0178](0178-a-published-benchmark-week-is-frozen-at-the-earliest-close-in-its-population.md)
 (both E5-14). Three rules the service already followed are recorded at the end
-(2026-09-22).
+(2026-09-22), followed by the retirement of the four cohort views (E9-12,
+2026-10-12).
 
 ## Context
 
@@ -224,3 +225,19 @@ comparison figure and the section figure beside it must be computed over the
 same kind of rows. Ruled at E5's wave-2 launch and closed in
 `docs/tickets/e5/deferred.md`; until now the only statement of it was the
 module docstring of `app/services/benchmarks.py`.
+
+### The four cohort views are retired unread
+
+Added 2026-10-12 by E9-12. Migration `e9e5b7d9f605` drops
+`benchmark_cohort_week`, `benchmark_cohort_rating_week`,
+`benchmark_cohort_term_axis` and `benchmark_cohort_rating_term_axis`, and
+`pulse_app`'s `SELECT` on each goes with them. Nothing read them: E9-05
+deleted their last reader, `named_set_term_axis`, which answered a set's
+declared length and level institution-wide with no course to narrow by, and
+E9's named-set and roll-up figures read the two set functions over the
+reader's purview instead (E9 README, decision 10). A whole-cohort aggregate
+that no page shows is still a read surface the runtime role holds, so it was
+removed rather than kept in case. The two set functions and their definer
+stay. Each drop ships as the view's next versioned `views_sql/` file, so the
+directory still records which views exist; the downgrade recreates the views
+and their grant from the versions before the drops.

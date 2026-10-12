@@ -182,7 +182,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 30** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
+**Caught: 31** · [the incidents, the root cause, and the whole rule](mistakes/22-a-tickets-new-rule-made-an-earlier-tickets-tests.md)
 
 ## 16. A mutation harness reported kills it had not made
 
@@ -198,7 +198,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 15. A property test's generator excluded the case its own docstring named
 
-**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/15-a-property-tests-generator-excluded-the-case-its-own.md)
+**Caught: 5** · [the incidents, the root cause, and the whole rule](mistakes/15-a-property-tests-generator-excluded-the-case-its-own.md)
 
 ## 19. A test held its expectation in a copy of the thing it was checking
 
@@ -210,7 +210,7 @@ you have removed the only signal that would have told you it did not work.
 
 ## 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 11** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
+**Caught: 12** · [the incidents, the root cause, and the whole rule](mistakes/35-a-guard-enumerated-the-currencies-a-privilege.md)
 
 **Rule.** When a guard enumerates mechanisms, require it to *find* each one on a
 subject that certainly has it, as a control. A guard that only ever reports
@@ -456,7 +456,7 @@ identifier that starts with `-` rather than generating until one appears.
 
 ## 46. A privilege was attributed to the wrong role, and the ticket was built on it
 
-**Caught: 2** · [the incidents, the root cause, and the whole rule](mistakes/46-a-privilege-was-attributed-to-the-wrong-role.md)
+**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/46-a-privilege-was-attributed-to-the-wrong-role.md)
 
 **Rule.** A settled decision that rests on a privilege is a claim about a role,
 and the role is the half that gets mistyped: execute the read as that role before
@@ -468,7 +468,7 @@ grant-shaped failure passes review as a green suite.
 
 ## 47. A route subclass's gate was discarded at dispatch while the class stayed visible
 
-**Caught: 3** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
+**Caught: 4** · [the incidents, the root cause, and the whole rule](mistakes/47-a-route-subclasss-gate-was-discarded-at-dispatch.md)
 
 **Rule.** On the pinned FastAPI, `include_router` does not serve the route objects
 a router holds: for a plain `starlette.routing.Route` it rebuilds one from the
@@ -556,7 +556,7 @@ that no longer exists names it exactly.
 
 ## 53. A closed-set guard is defeated one level out
 
-**Caught: 6** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
+**Caught: 7** · [the incidents, the root cause, and the whole rule](mistakes/53-a-closed-set-guard-is-defeated-one-level-out.md)
 
 **Rule.** When you build or review a closed-set or inventory guard, attack the
 whole class in the first pass: name what encloses the set — the directory above
@@ -598,3 +598,12 @@ already bound in the file, above all to a module: `from datetime import time`
 replaces `import time` without a word from the linter. Import the second one
 under its own name (`time as time_of_day`), and run the suites of every caller
 in the file, not only the ticket's own.
+
+## 61. A breakdown stated a fact about the seeded world that nobody had checked
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/61-a-breakdown-stated-a-fact-about-the-seeded-world-nobody-had-checked.md)
+
+**Rule.** A ticket's statement about the existing tree or the seeded world is a
+claim to check, not a premise to build on: resolve it the way the feature will
+(the subject through the door's own function, the row through the reader), and
+when it is false, say so before building around it.

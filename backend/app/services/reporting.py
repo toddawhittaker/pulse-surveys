@@ -16,15 +16,13 @@ onwards is the read. Nothing on the read path writes, and nothing on it commits;
 what it reads is E4-03's three views, E4-04's comment service, E4-02's summary
 table, and the section's own calendar.
 
-**Where E9's leadership drill-down attaches.** SPEC §5.5 renders this same report
-read-only inside a leadership shell, and E4-07 deliberately took the narrowest
-possible authorization — the requesting session's own taught sections — so that
-E9 has one thing to widen rather than a second payload to build.
-`_readable_section` is that one thing: E9 adds a purview-based way of reaching a
-section beside the teaching check, and every function below it is untouched.
-Forking `instructor_report` instead would give the institution two answers to
-"what does this report say", which is how a suppression rule comes to hold on one
-surface and not the other.
+**Where the leadership drill-down attaches.** SPEC §5.5 renders this same report
+read-only inside a leadership shell. `leadership_report` reaches a section
+through the reader's purview where `instructor_report` reaches it through the
+teaching grant, and both build the one `_payload` (ADR 0206). Forking the
+payload instead would give the institution two answers to "what does this
+report say", which is how a suppression rule comes to hold on one surface and
+not the other.
 
 **One section-week is the unit of work, and it is one transaction.** §5.1 leads
 each of a week's two comment groups with its own summary and E4-11 renders both;
@@ -57,7 +55,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -103,13 +101,15 @@ from app.models.survey import (
 from app.models.term import SurveyWindow, Term, Week
 from app.services import clock, enrollment_windows
 from app.services.authz import (
+    ActorScope,
     taught_section_ids,
     teaching_instructor_assigned,
 )
 from app.services.report_comments import (
     COMMENT_VIEW,
     CommentCard,
-    latest_decision_into,
+    latest_removal_into,
+    latest_sequence_of,
     n_threshold,
     released_cards,
     reported_status_of,
@@ -182,8 +182,8 @@ def generate_missing_summaries(
     held to one commit at the end loses every summary it had generated when the
     section after them fails.
 
-    **A window that has closed, and the comparison is the complement of the one
-    E2-06 already wrote.** `app.services.survey_windows._open_at` makes a window
+    **A window that has closed, and the comparison is the complement of the
+    window-open test.** `app.services.survey_windows._open_at` makes a window
     open when `opens_at <= t <= closes_at`, both ends inclusive, so closed is
     `closes_at < t` (`survey_windows.closed_by`, the one definition) and no
     instant is ever both. The instant is the *effective*
@@ -196,7 +196,7 @@ def generate_missing_summaries(
     whole of the idempotence: the second of two consecutive runs finds nothing to
     do, asks the provider nothing, and leaves every stored row exactly as it was.
     An upsert would converge on the same table and rewrite what an instructor read
-    this morning, which the E4 breakdown's decision 2 rules out.
+    this morning, and a stored summary is never regenerated (ADR 0182).
 
     **A provider failure is absorbed and nothing else is.** ADR 0056's gateway
     classes are the interface a caller branches on, and they are what this catches:
@@ -219,16 +219,9 @@ def generate_missing_summaries(
     failed = 0
     for section_id, week_id in awaiting:
         try:
-            for token in REPORT_STREAMS:
-                session.add(
-                    _summary_row(
-                        session,
-                        section_id=section_id,
-                        week_id=week_id,
-                        token=token,
-                        gateway=gateway,
-                    )
-                )
+            _summarize_section_week(
+                session, section_id=section_id, week_id=week_id, gateway=gateway
+            )
             # Both of §5.1's summaries are durable here, together, before the next
             # section-week is touched. A commit inside the loop above would leave a
             # half-summarized week the next run steps over, because the next run
@@ -280,6 +273,30 @@ def generate_missing_summaries(
         time.monotonic() - started,
     )
     return {"written": written, "failed": failed}
+
+
+def _summarize_section_week(
+    session: Session, *, section_id: UUID, week_id: UUID, gateway: AIGateway | None
+) -> None:
+    """Add both streams' summary rows for one section-week to the session, uncommitted.
+
+    **The decisions seen are read first, before any comment is gathered** (ADR
+    0206). A decision committed between the two reads is then above the recorded
+    number and withholds the summary from the leadership and draft reads, where
+    reading it afterwards would count as seen a decision the gather had missed.
+    """
+    seen = latest_sequence_of(session, section_id=section_id, week_id=week_id)
+    for token in REPORT_STREAMS:
+        session.add(
+            _summary_row(
+                session,
+                section_id=section_id,
+                week_id=week_id,
+                token=token,
+                gateway=gateway,
+                seen=seen,
+            )
+        )
 
 
 def _section_weeks_awaiting_a_summary(
@@ -438,6 +455,7 @@ def _summary_row(
     week_id: UUID,
     token: str,
     gateway: AIGateway | None,
+    seen: int,
 ) -> WeeklySummary:
     """One stream's summary for one section-week, as the row that stores it.
 
@@ -495,7 +513,7 @@ def _summary_row(
         response_count=record.response_count,
         # Stored as objects rather than as labels, because §5.3's draft check
         # "quietly names any theme not yet addressed (with its comment count)" and
-        # E4-10 renders the count beside the label. A list of strings keeps both
+        # the check renders the count beside the label. A list of strings keeps both
         # labels and loses both numbers, and nothing downstream could recover them.
         themes=[
             {"label": theme.label, "comment_count": theme.comment_count}
@@ -503,6 +521,7 @@ def _summary_row(
         ],
         prompt_version=record.summary.prompt_version,
         model_id=record.summary.model_id,
+        moderation_sequence_seen=seen,
     )
 
 
@@ -1059,6 +1078,51 @@ def instructor_report(
         week=asked,
         published=published,
         reader=person_id,
+        leader=None,
+        settings=settings,
+    )
+
+
+def leadership_report(
+    session: Session,
+    *,
+    scope: ActorScope,
+    section_id: UUID,
+    course_week: int,
+    settings: Settings,
+) -> "InstructorReport":
+    """The Monday report of one section in the reader's leadership purview, read-only (SPEC §5.5).
+
+    The drill-down: the instructor's report, wholesale, for a leader. **The
+    section is found inside `scope`'s purview and nowhere else**; a section
+    outside it and a section that does not exist both raise
+    `SectionUnavailableError` before anything about the section is read. The
+    week is selected out of the published set exactly as the instructor's is.
+
+    `_payload` builds it with the reader as `leader`, which changes four things
+    and nothing else: no comment is marked as the reader's decision, the stored
+    summaries pass the removal filter, the benchmark seal counts the reader's
+    purview and taught sections as what she knows (SPEC §5.1), and the Lead
+    Faculty's name is asked inside her purview. The per-stream hold, the release
+    batches and §5.2's flag hiding are the instructor's, unchanged.
+
+    Raises `SectionUnavailableError` and `CourseWeekUnavailableError`.
+    """
+    if section_id not in scope.purview.section_ids:
+        raise SectionUnavailableError
+    section = session.get(Section, section_id)
+    if section is None:  # pragma: no cover - the purview is read from existing sections
+        raise SectionUnavailableError
+    asked, published = _published_week_of(
+        session, section=section, course_week=course_week, settings=settings
+    )
+    return _payload(
+        session,
+        section=section,
+        week=asked,
+        published=published,
+        reader=scope.person_id,
+        leader=scope,
         settings=settings,
     )
 
@@ -1084,14 +1148,29 @@ def _published_section_week(
     if person_id is None:
         raise SectionUnavailableError
     section = _readable_section(session, person_id=person_id, section_id=section_id)
-    published = _published_weeks(session, section=section, settings=settings)
+    asked, published = _published_week_of(
+        session, section=section, course_week=course_week, settings=settings
+    )
+    return section, asked, published
 
+
+def _published_week_of(
+    session: Session, *, section: Section, course_week: int, settings: Settings
+) -> tuple[_SectionWeek, list[_SectionWeek]]:
+    """The asked course week out of the section's published weeks, and every published week.
+
+    Selected out of the published set rather than tested against the calendar
+    (ADR 0184), so an unopened week and a week the section never runs raise the
+    same `CourseWeekUnavailableError`. The instructor's door and the leadership
+    drill-down both select their week here.
+    """
+    published = _published_weeks(session, section=section, settings=settings)
     asked = next((week for week in published if week.course_week == course_week), None)
     if asked is None:
         raise CourseWeekUnavailableError(
             "This section has no published report for that course week."
         )
-    return section, asked, published
+    return asked, published
 
 
 def comment_on_instructor_report(
@@ -1137,14 +1216,15 @@ def comment_on_instructor_report(
     return None
 
 
-def comment_view(card: CommentCard, *, reader: UUID) -> "CommentView":
-    """One card as the payload carries it: E4-04's three fields and E6-03's three.
+def comment_view(card: CommentCard, *, reader: UUID | None) -> "CommentView":
+    """One card as the payload carries it: the comment's three fields and the decision door's three.
 
     The one place a `CommentCard` becomes a `CommentView`, used by the report and
     by the decision route's answer, so the two cannot describe one comment two
     ways. The latest decider goes no further than here: it becomes
     `decided_by_you`, which says whether it was the reader and nothing about who
-    else it might have been.
+    else it might have been. A `reader` of `None` is a read-only reader, the
+    leadership drill-down, for whom no comment is ever their decision.
     """
     from app.schemas.report import CommentView
 
@@ -1154,7 +1234,7 @@ def comment_view(card: CommentCard, *, reader: UUID) -> "CommentView":
         stream=card.comment.stream,
         answer_id=card.answer_id,
         flag=None if card.flag is None else card.flag.value,
-        decided_by_you=card.decided_by is not None and card.decided_by == reader,
+        decided_by_you=reader is not None and card.decided_by == reader,
     )
 
 
@@ -1180,22 +1260,99 @@ def published_course_weeks(
     ]
 
 
+def leadership_published_course_weeks(
+    session: Session, *, scope: ActorScope, section_id: UUID, settings: Settings
+) -> list[int]:
+    """The published course weeks of one section in the reader's leadership purview.
+
+    The drill-down's week list: the section is found inside `scope`'s purview
+    exactly as `leadership_report` finds it, so a section outside it and one
+    that does not exist both raise `SectionUnavailableError`, and the weeks are
+    `_published_weeks`'s, the list the report itself pages across.
+    """
+    if section_id not in scope.purview.section_ids:
+        raise SectionUnavailableError
+    section = session.get(Section, section_id)
+    if section is None:  # pragma: no cover - the purview is read from existing sections
+        raise SectionUnavailableError
+    return [
+        week.course_week for week in _published_weeks(session, section=section, settings=settings)
+    ]
+
+
 def _published_weeks(
     session: Session, *, section: Section, settings: Settings
 ) -> list[_SectionWeek]:
     """This section's weeks whose report has opened, on the effective clock (ADR 0109).
 
     The one place both readers above select their published weeks, so the list a
-    reader pages across and the report she is reading cannot disagree. The zone is
-    the institution's, because "06:00 on Monday" is a wall-clock promise.
+    reader pages across and the report she is reading cannot disagree. It is
+    `published_weeks_of` asked about one section.
     """
+    return published_weeks_of(session, [section.id], settings=settings).get(section.id, [])
+
+
+def published_weeks_of(
+    session: Session, section_ids: Collection[UUID], *, settings: Settings
+) -> dict[UUID, list[_SectionWeek]]:
+    """Each section's weeks whose report has opened, in one statement, in term-week order.
+
+    The one published-weeks rule for every reader: the instructor's report (through
+    `_published_weeks`), the roll-up's section figures and a roll-up node's series.
+    The zone is the institution's, because "06:00 on Monday" is a wall-clock
+    promise, and the clock is the effective one (ADR 0109). A section with no
+    published week is absent from the answer.
+
+    **The stored windows, not the derived ones.** `survey_windows.windows_for_section`
+    answers what the calendar *implies*; `survey_window` holds what was written, and
+    when a week's report opens is computed from the close on the row a student
+    answered against — the same instants `generate_missing_summaries` above compares. A read that
+    derived its own instants would answer a different question the day a calendar
+    is corrected under windows already written.
+
+    **The course week is arithmetic over the term axis and is not re-derived from
+    the section code.** `week_of_the_term` is this codebase's one reading of §2.2's
+    two axes, and a second copy of it here is how a course-level page and an
+    aggregate page come to disagree about the same section (`docs/MISTAKES.md`
+    entry 19). `section_codes.course_week_of` reads it backwards, once, for every
+    report that turns a stored term week into a course week.
+    """
+    if not section_ids:
+        return {}
     now = clock.now(session, settings=settings)
     zone = ZoneInfo(settings.institution_timezone)
-    return [
-        week
-        for week in _section_weeks(session, section)
-        if week_is_published(week.closes_at, now=now, zone=zone)
-    ]
+    rows = session.execute(
+        select(
+            SurveyWindow.section_id,
+            SurveyWindow.week_id,
+            Week.number,
+            SurveyWindow.opens_at,
+            SurveyWindow.closes_at,
+            Section.start_date,
+            Term.start_date,
+        )
+        .join(Week, Week.id == SurveyWindow.week_id)
+        .join(Section, Section.id == SurveyWindow.section_id)
+        .join(Term, Term.id == Section.term_id)
+        .where(SurveyWindow.section_id.in_(sorted(section_ids)))
+        .order_by(SurveyWindow.section_id, Week.number)
+    ).all()
+    published: dict[UUID, list[_SectionWeek]] = {}
+    for section_id, week_id, number, opens_at, closes_at, section_start, term_start in rows:
+        if not week_is_published(closes_at, now=now, zone=zone):
+            continue
+        published.setdefault(section_id, []).append(
+            _SectionWeek(
+                week_id=week_id,
+                term_week=number,
+                course_week=course_week_of(
+                    number, section_start=section_start, term_start=term_start
+                ),
+                opens_at=opens_at,
+                closes_at=closes_at,
+            )
+        )
+    return published
 
 
 def taught_sections(session: Session, *, person_id: UUID | None) -> list["TaughtSection"]:
@@ -1273,51 +1430,6 @@ def _readable_section(session: Session, *, person_id: UUID | None, section_id: U
     if section is None:  # pragma: no cover - the assignment's foreign key holds this
         raise SectionUnavailableError
     return section
-
-
-def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
-    """Every week this section has a survey window for, on both of §2.2's axes.
-
-    **The stored windows, not the derived ones.** `survey_windows.windows_for_section`
-    answers what the calendar *implies*; `survey_window` holds what was written, and
-    when a week's report opens is computed from the close on the row a student
-    answered against — the same instants `generate_missing_summaries` above compares. A read that
-    derived its own instants would answer a different question the day a calendar
-    is corrected under windows already written.
-
-    **The course week is arithmetic over the term axis and is not re-derived from
-    the section code.** `week_of_the_term` is this codebase's one reading of §2.2's
-    two axes, and a second copy of it here is how a course-level page and an
-    aggregate page come to disagree about the same section (`docs/MISTAKES.md`
-    entry 19). `section_codes.course_week_of` reads it backwards, once, for every
-    report that turns a stored term week into a course week.
-    """
-    term = session.get(Term, section.term_id)
-    if term is None:  # pragma: no cover - `section.term_id` is a non-null foreign key
-        raise SectionUnavailableError
-    rows = session.execute(
-        select(
-            SurveyWindow.week_id,
-            Week.number,
-            SurveyWindow.opens_at,
-            SurveyWindow.closes_at,
-        )
-        .join(Week, Week.id == SurveyWindow.week_id)
-        .where(SurveyWindow.section_id == section.id)
-        .order_by(Week.number)
-    ).all()
-    return [
-        _SectionWeek(
-            week_id=week_id,
-            term_week=number,
-            course_week=course_week_of(
-                number, section_start=section.start_date, term_start=term.start_date
-            ),
-            opens_at=opens_at,
-            closes_at=closes_at,
-        )
-        for week_id, number, opens_at, closes_at in rows
-    ]
 
 
 # The four columns every wording lookup below reads: which stream the question
@@ -1464,7 +1576,12 @@ def _population_cutoffs(
 
 
 def _benchmark_members(
-    session: Session, *, section: Section, course_week: int, published: Sequence[_SectionWeek]
+    session: Session,
+    *,
+    section: Section,
+    course_week: int,
+    published: Sequence[_SectionWeek],
+    scope: ActorScope | None,
 ) -> tuple[dict[str, "StreamBenchmark"], "WorkloadBenchmarkView"]:
     """SPEC §5.1's comparison and university figures for one report — assembled, never computed.
 
@@ -1483,8 +1600,8 @@ def _benchmark_members(
     would let a reader subtract their own published weeks and read off which
     weeks other sections answered in, which is an existence oracle readable from
     a series where every figure is withheld (ADR 0170). And each week has a
-    **cutoff** — the owner's freeze-at-close ruling, as E5-14's round 4 shares it
-    across the population (`_population_cutoffs`): a comparison figure for a
+    **cutoff** — a figure is frozen at its week's close, shared across the
+    population (SPEC §5.1, ADR 0178) (`_population_cutoffs`): a comparison figure for a
     published week counts only answers fixed by then, so no later answer moves it
     and two reads of it cannot be subtracted into one student's answer.
 
@@ -1512,6 +1629,9 @@ def _benchmark_members(
         course_week=course_week,
         streams=REPORT_STREAMS,
         cutoffs=_population_cutoffs(session, section=section, published=published),
+        # The leadership reader, sealed against with her purview and taught
+        # sections (SPEC §5.1); `None` for the instructor's own report.
+        scope=scope,
     )
     default_set = benchmarks.BenchmarkPopulation.DEFAULT_SET
     university = benchmarks.BenchmarkPopulation.UNIVERSITY
@@ -1568,6 +1688,7 @@ def _payload(
     week: _SectionWeek,
     published: list[_SectionWeek],
     reader: UUID,
+    leader: ActorScope | None,
     settings: Settings,
 ) -> "InstructorReport":
     """Assemble one report out of the views, the comment service and the summary table.
@@ -1583,13 +1704,23 @@ def _payload(
 
     **Nothing is widened at the assembly layer.** The comments are exactly what
     `visible_cards` and `released_cards` answer with: the comment service's
-    three fields, and E6-03's three (the handle, the flag class and whether the
+    three fields, and the decision door's three (the handle, the flag class and whether the
     reader made the latest decision), built by `comment_view`. The summary is
     what the row holds, and an absent row is an absent member rather than an
     empty string. §4.1 item 6's spirit is that a suppression decided one layer
     down is not undone by the layer that renders it.
+
+    **`leader` is the leadership reader of the drill-down, or `None`** for the
+    instructor's own report. With one, the report carries no action (no comment
+    is `decided_by_you`), the summaries pass the removal filter every up-chain
+    reader uses, the seal counts the reader, and the lead's name is asked inside
+    her purview. Nothing about which comments show changes.
     """
     from app.schemas import report as schema
+
+    # Inside the function for the same reason: `response_loop` imports this
+    # module at its top.
+    from app.services.response_loop import section_lead_name
 
     responses, valid_responses = _response_counts(
         session, section_id=section.id, week_id=week.week_id
@@ -1600,15 +1731,21 @@ def _payload(
         section_id=section.id,
         week_ids=[week.week_id, *(other.week_id for other in published)],
     )
-    summaries = _stored_summaries(session, section_id=section.id, week_id=week.week_id)
+    summaries = _stored_summaries(
+        session,
+        section_id=section.id,
+        week_id=week.week_id,
+        since_latest_removal=leader is not None,
+    )
+    # Whose decisions the comments may be marked as: nobody's on the drill-down.
+    decider = None if leader is not None else reader
     released = _released(session, section=section, week=week, published=published)
     # **The number `visible_comments` applied, read from the one function that
     # applies it, and printed unchanged.** Reading `settings.n_threshold_default`
     # here instead would be a second source: the report would print the value the
     # application started with while the gate applied whatever `Settings()` says
     # when it is called, and the screen would describe a rule the query did not
-    # follow. E4-07's security round found exactly that, and
-    # `app.services.report_comments.n_threshold` carries the argument.
+    # follow; `app.services.report_comments.n_threshold` carries the argument.
     threshold = n_threshold()
     held = _held_streams(session, section_id=section.id, week_id=week.week_id)
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
@@ -1619,6 +1756,7 @@ def _payload(
         # The published weeks: their course weeks are the axis `week.published_weeks`
         # below carries, and each one's cutoff is the population's earliest close.
         published=published,
+        scope=leader,
     )
 
     streams = {
@@ -1638,7 +1776,7 @@ def _payload(
             summary=summaries.get(token),
             comments=_comment_views(
                 visible_cards(session, section_id=section.id, week_id=week.week_id, stream=token),
-                reader=reader,
+                reader=decider,
             ),
             question_text=question_texts[token],
             benchmark=benchmarks_by_stream[token],
@@ -1656,12 +1794,19 @@ def _payload(
             code=section.lms_section_code,
             course_label=_course_label(session, section),
             length_weeks=section.length_weeks,
+            lead_name=section_lead_name(
+                session,
+                section_id=section.id,
+                reader_person_id=reader,
+                scope=leader,
+                settings=settings,
+            ),
         ),
         week=schema.WeekView(
             course_week=week.course_week,
             term_week=week.term_week,
             published_weeks=[other.course_week for other in published],
-            # The reported week's own window row, which `_section_weeks` already
+            # The reported week's own window row, which `published_weeks_of` already
             # read — never the latest published week's and never the one the clock
             # is standing in.
             closes_at=week.closes_at,
@@ -1679,15 +1824,12 @@ def _payload(
         ),
         workload=schema.WorkloadView(mean=workload_mean, median=workload_median),
         workload_benchmark=workload_benchmark,
-        # The member E4 shipped, now carrying what it was always for: the default
-        # comparison set's workload mean for this week. It is the *same object*
-        # `workload_benchmark.comparison.mean` carries — assigned twice, computed
-        # once — so the payload cannot say two things about one statistic. E5-05's
-        # decision 5 keeps it rather than retiring it, because every E4 reader and
-        # E4-07's own reconciliation test names it; a later ticket may retire it
-        # once nothing reads it.
+        # The default comparison set's workload mean for this week. It is the
+        # *same object* `workload_benchmark.comparison.mean` carries — assigned
+        # twice, computed once — so the payload cannot say two things about one
+        # statistic. It stays while readers of the older member remain.
         comparison=workload_benchmark.comparison.mean,
-        released_from_earlier_weeks=_comment_views(released, reader=reader),
+        released_from_earlier_weeks=_comment_views(released, reader=decider),
         institution_timezone=settings.institution_timezone,
     )
 
@@ -1714,8 +1856,8 @@ def _held_streams(session: Session, *, section_id: UUID, week_id: UUID) -> dict[
     }
 
 
-def _comment_views(cards: Sequence[CommentCard], *, reader: UUID) -> list["CommentView"]:
-    """E4-04's comments, each through `comment_view`, in the order the service gave them.
+def _comment_views(cards: Sequence[CommentCard], *, reader: UUID | None) -> list["CommentView"]:
+    """The comment service's cards, each through `comment_view`, in the order it gave them.
 
     Written as one function rather than three comprehensions so there is one place
     a field could ever be introduced, and so the review that forbids one has one
@@ -1848,7 +1990,11 @@ def _workload(
 
 
 def _stored_summaries(
-    session: Session, *, section_id: UUID, week_id: UUID
+    session: Session,
+    *,
+    section_id: UUID,
+    week_id: UUID,
+    since_latest_removal: bool = False,
 ) -> dict[str, "SummaryView"]:
     """This section-week's generated summaries, by stream, exactly as the row holds them.
 
@@ -1861,15 +2007,20 @@ def _stored_summaries(
     **An ordinary-mode summary of a stream that is now held is withheld.** A row
     written under `SUMMARY_PROMPT_VERSION` before the threshold became per stream
     (ADR 0182) may quote a thin stream's commenters, which the small-N prompt
-    forbids. Such a row is never regenerated (the E4 breakdown's decision 2), so
+    forbids. Such a row is never regenerated (ADR 0182), so
     it is left out here, at the one place a stored summary is read, and the
     stream shows the absent state instead.
+
+    `since_latest_removal` is true for a leadership reader, who reads the rows
+    `_summary_rows_since_latest_removal` serves; the instructor reads every
+    served row.
     """
     from app.schemas.report import SummaryView
 
+    read = _summary_rows_since_latest_removal if since_latest_removal else _served_summary_rows
     return {
         row.stream: SummaryView(text=row.summary_text, response_count=row.response_count)
-        for row in _served_summary_rows(session, section_id=section_id, week_id=week_id)
+        for row in read(session, section_id=section_id, week_id=week_id)
     }
 
 
@@ -1889,6 +2040,7 @@ def _served_summary_rows(session: Session, *, section_id: UUID, week_id: UUID) -
             WeeklySummary.themes,
             WeeklySummary.prompt_version,
             WeeklySummary.generated_at,
+            WeeklySummary.moderation_sequence_seen,
         ).where(WeeklySummary.section_id == section_id, WeeklySummary.week_id == week_id)
     ).all()
     return [
@@ -1906,31 +2058,47 @@ def _served_summary_rows(session: Session, *, section_id: UUID, week_id: UUID) -
 def _summary_rows_since_latest_removal(
     session: Session, *, section_id: UUID, week_id: UUID
 ) -> list[Any]:
-    """The rows `_served_summary_rows` serves, less any written before the week's latest removal.
+    """The rows `_served_summary_rows` serves, less any that did not see the week's latest removal.
 
-    E7's ruling 9, for the on-behalf reader (E7-03, done-when 10), and since
-    E7-10 for every draft and check, the instructor's included. A summary is
+    The filter every reader of a stored summary other than the instructor's own
+    report uses: the on-behalf read, every draft and check (the instructor's
+    included), and the leadership drill-down (ADR 0195, ADR 0206). A summary is
     generated over the comments a moderator was not holding at the time. A
     decision that later takes a comment out of that set — an exclusion, or the
     undo of a keep, which returns the comment to review — leaves a summary that
-    may carry it. So a row whose `generated_at` is not strictly later than the
-    latest such decision in the section-week is left out, with its themes. A tie
-    withholds: the two instants cannot say which came first.
+    may carry it. So a row is left out, with its themes, when the section-week
+    holds such a decision the walk did not see.
+
+    **By sequence** (ADR 0206): a row is served when its
+    `moderation_sequence_seen` is at least the latest removal's
+    `moderation_state.sequence`. Comparing two transaction-start instants
+    instead lets an exclusion that began before the walk and committed after
+    its read pass as earlier. A row written before the column existed carries
+    null and is judged as it was then: served only when its `generated_at` is
+    strictly later than the latest removal's instant, a tie withholding.
 
     "Out of the set" is `HELD_MODERATION_STATES`, the states the summary walk
-    itself leaves out, and the decision instants are read by
-    `report_comments.latest_decision_into`, the module that owns reading
-    `moderation_state`. The instructor's report keeps such a summary: they read
-    it there already, and nothing is published from it unless they write it
-    themselves. What a model writes for students never starts from one (ADR 0195).
+    itself leaves out, read by `report_comments.latest_removal_into`, the module
+    that owns reading `moderation_state`. The instructor's report keeps such a
+    summary: they read it there already, and nothing is published from it unless
+    they write it themselves. What a model writes for students never starts from
+    one (ADR 0195).
     """
-    removed_at = latest_decision_into(
+    removal = latest_removal_into(
         session, section_id=section_id, week_id=week_id, states=HELD_MODERATION_STATES
     )
     rows = _served_summary_rows(session, section_id=section_id, week_id=week_id)
-    if removed_at is None:
+    if removal is None:
         return rows
-    return [row for row in rows if row.generated_at > removed_at]
+    return [
+        row
+        for row in rows
+        if (
+            row.generated_at > removal.decided_at
+            if row.moderation_sequence_seen is None
+            else row.moderation_sequence_seen >= removal.sequence
+        )
+    ]
 
 
 def on_behalf_streams(
@@ -2006,7 +2174,7 @@ def student_streams(
     no comment here whatever the caller passed.
 
     **Who may read, and which weeks, is the caller's.**
-    `app.services.response_loop.student_week_results` checks the reader, leaves
+    `app.services.student_results.student_week_results` checks the reader, leaves
     every `awaiting` week out of `trend`, and reads `comments` through the
     student comment reads (ADR 0197). Nothing here returns a count of anybody or
     a benchmark.
@@ -2153,23 +2321,44 @@ def _enrolled_students(
     assignment at all (ADR 0028). The filter is `enrollment_windows.without_staff`,
     which `app.services.grading._live_enrollments` calls too about today.
     """
+    return _enrolled_students_of(session, weeks={section.id: week}, settings=settings)[section.id]
+
+
+def _enrolled_students_of(
+    session: Session, *, weeks: Mapping[UUID, _SectionWeek], settings: Settings
+) -> dict[UUID, int]:
+    """`_enrolled_students` for many sections, each in its own week, in a fixed number of reads.
+
+    The rule is the one `_enrolled_students` documents, and that function calls
+    this one, so it is written once. What changes is the reads: one grouped
+    first-sync-day read, one `enrollment` read for every section, and
+    `without_staff_of`'s two, whatever the number of sections and members. The
+    roll-up figures ask this for every section of a node (ADR 0205).
+    """
+    if not weeks:
+        return {}
     zone = ZoneInfo(settings.institution_timezone)
-    opened_on = week.opens_at.astimezone(zone).date()
-    synced_on = enrollment_windows.first_sync_day(session, section_id=section.id, zone=zone)
-    enrolled = {
-        enrollment.user_id
-        for enrollment in session.scalars(
-            select(Enrollment).where(
-                Enrollment.section_id == section.id,
-                or_(Enrollment.ended_on.is_(None), Enrollment.ended_on >= opened_on),
-            )
-        )
-        if enrollment_windows.began_by(
-            enrollment_windows.enrolled_from(enrollment, first_sync_day=synced_on, zone=zone),
-            closes_at=week.closes_at,
-        )
+    opened_on = {
+        section_id: week.opens_at.astimezone(zone).date() for section_id, week in weeks.items()
     }
-    return len(enrollment_windows.without_staff(session, section_id=section.id, user_ids=enrolled))
+    synced_on = enrollment_windows.first_sync_days(session, section_ids=list(weeks), zone=zone)
+    enrolled: dict[UUID, set[UUID]] = {section_id: set() for section_id in weeks}
+    for enrollment in session.scalars(
+        select(Enrollment).where(
+            Enrollment.section_id.in_(sorted(weeks)),
+            or_(Enrollment.ended_on.is_(None), Enrollment.ended_on >= min(opened_on.values())),
+        )
+    ):
+        section_id = enrollment.section_id
+        if enrollment.ended_on is not None and enrollment.ended_on < opened_on[section_id]:
+            continue
+        began = enrollment_windows.enrolled_from(
+            enrollment, first_sync_day=synced_on.get(section_id), zone=zone
+        )
+        if enrollment_windows.began_by(began, closes_at=weeks[section_id].closes_at):
+            enrolled[section_id].add(enrollment.user_id)
+    students = enrollment_windows.without_staff_of(session, members=enrolled)
+    return {section_id: len(students[section_id]) for section_id in weeks}
 
 
 def _course_label(session: Session, section: Section) -> str:

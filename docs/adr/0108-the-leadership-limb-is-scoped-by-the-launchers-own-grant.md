@@ -1,5 +1,7 @@
 # 0108 — The leadership limb binds only what the launcher's own grant reaches
 
+**Amended by [ADR 0199](0199-the-purview-walk-the-lead-clamp-and-its-chokepoint.md):** `leadership_grant_covers` now answers on the launcher's full leadership purview (the transitive union over their leadership assignments), not their own grants. An assistant dean's launch into a supervised chair's department binds; a lead's launch into a sibling lead's course is still refused, by the lead clamp. The "fail-closed until E9" passages below are history.
+
 ## Context
 
 SPEC §7.3 gives a staff launch two limbs: "a launch by an instructor **or any

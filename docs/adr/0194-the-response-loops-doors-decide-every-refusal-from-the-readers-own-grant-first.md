@@ -59,7 +59,8 @@ comment, and each stream's `response_count` is the week's response count.
   reasoning keeps such reads apart.
 - **A 403 for a reader with no course** (as the review queue answers). A chair of
   a department with no courses is a real reader; an empty read answers them, and
-  the assistant dean, dean and vice president read nothing until E9.
+  the assistant dean, dean and vice president read nothing here (ADR 0206 later
+  gave them the exclusion log and policy over their purview).
 - **Per-section calls for the owed read.** One query per section and week grows
   with the reader's courses.
 - **Reading each comment's current state for the filter.** It cannot say when a
@@ -89,3 +90,5 @@ included when the instructor answered, still gets the one 404.
 `WeekResponseView` carries `can_edit`, true exactly when the reader first
 published the week's response, on the instructor's routes and the on-behalf
 ones alike; the composer offers Edit only then.
+
+*Amended by [0206](0206-the-drill-down-reuses-the-report-read-only-and-the-wider-roles-read-the-log-and-policy.md):* the policy read lists every course of an assistant dean's, dean's or vice president's purview, which they read and do not set; the on-behalf doors keep their one 404 for them, and the summary filter compares decision sequences rather than instants.

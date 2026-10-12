@@ -47,6 +47,9 @@ import { jsonBody, readHeaders, refusalSentence, writeHeaders } from '../lib/htt
 import type {
   CheckThemeView,
   DraftCheckOutcome,
+  InstructorReportView,
+  PublishedWeeksRead,
+  ReportRead,
   ResponseDraftOutcome,
   ResponseWriteOutcome,
   ResponseWriteView,
@@ -99,16 +102,12 @@ export type ComparisonSetDetailView = Schemas['SetDetail'];
 export type ComparisonSetWrite = Schemas['SetWrite'];
 
 /**
- * What a set reaches.
+ * What a set reaches: its member count and its resolved section count.
  *
- * `section_count` is optional and nullable here, and required on the server,
- * because E5-06's scope note allows the preview to answer the member count
- * without it. An absent count is rendered as an absence; a zero printed in its
- * place would state something the server did not say.
+ * The list's line still says the section count is not known when an answer
+ * arrives without one, because the answer is cast rather than parsed.
  */
-export type ComparisonSetPreviewView = Omit<Schemas['SetPreview'], 'section_count'> & {
-  readonly section_count?: Schemas['SetPreview']['section_count'] | null;
-};
+export type ComparisonSetPreviewView = Schemas['SetPreview'];
 
 /** What a read of the set list answered. */
 export type ComparisonSetsRead =
@@ -464,7 +463,7 @@ export async function decideOnQueuedComment(
   return { kind: 'refused', detail: refusalSentence(await jsonBody(response)) };
 }
 
-/** The exclusion log inside this reader's own grant, newest decision first. */
+/** The exclusion log inside this reader's reach: dated rows newest first, then undated rows. */
 export async function readExclusionLog(): Promise<ExclusionLogRead> {
   let response: Response;
   try {
@@ -693,4 +692,190 @@ export async function writeOnBehalfResponse(
   if (answer.kind !== 'body') return answer;
   const view = weekResponseOf(answer.body);
   return view === null ? { kind: 'unavailable', detail: null } : { kind: 'saved', view };
+}
+
+// ---------------------------------------------------------------------------
+// The roll-ups (SPEC §5.5, ADR 0205): the context the pages read first, the
+// tree, one node's figures, a named set's line, and the drill-down.
+//
+// The same outcomes as above for a 401 and for the gate's 403. A node or a
+// section outside the purview is one 404 with one sentence, exactly as one
+// that does not exist, and the pages show the sentence they were sent.
+// ---------------------------------------------------------------------------
+
+/** `app.api.leadership.CONTEXT_PATH` — the reader's roles, the terms, and the current term. */
+export const LEADERSHIP_CONTEXT_PATH = '/leadership/context';
+
+/** `app.api.leadership.ROLLUP_PATH`, for one term. */
+export function rollupTreePath(termId: string): string {
+  return `/leadership/rollup?term_id=${encodeURIComponent(termId)}`;
+}
+
+/** `app.api.leadership.ROLLUP_NODE_PATH`, for one node in one term. */
+export function rollupFiguresPath(kind: RollupFiguresKind, nodeId: string, termId: string): string {
+  return `/leadership/rollup/${kind}/${encodeURIComponent(nodeId)}?term_id=${encodeURIComponent(termId)}`;
+}
+
+/** `app.api.leadership.SET_SERIES_PATH`, for one set in one term. */
+export function setSeriesPath(setId: string, termId: string): string {
+  return `${comparisonSetPath(setId)}/series?term_id=${encodeURIComponent(termId)}`;
+}
+
+/** `app.api.leadership.DRILL_DOWN_WEEKS_PATH`, with the section filled in. */
+export function drillDownWeeksPath(sectionId: string): string {
+  return `/leadership/sections/${encodeURIComponent(sectionId)}/published-weeks`;
+}
+
+/** `app.api.leadership.DRILL_DOWN_PATH`, with the section and the course week filled in. */
+export function drillDownPath(sectionId: string, courseWeek: number): string {
+  return `/leadership/sections/${encodeURIComponent(sectionId)}/weeks/${String(courseWeek)}/report`;
+}
+
+/** The reader's leadership roles, highest first, every term, and the term containing today. */
+export type LeadershipContextView = Schemas['LeadershipContext'];
+
+/** One leadership role, as the context names it. */
+export type LeaderRoleView = Schemas['LeadershipContext']['roles'][number];
+
+/** One term a roll-up may be read for. */
+export type RollupTermView = Schemas['RollupTerm'];
+
+/** The whole tree: the hierarchy's roots, and the by-lead groups where they are offered. */
+export type RollupTreeView = Schemas['RollupTree'];
+
+/** One row of the tree, with its children. */
+export type RollupNodeView = Schemas['RollupNode'];
+
+/** The kinds of node whose figures may be asked for. A section's are its report. */
+export type RollupFiguresKind = Schemas['RollupFigures']['kind'];
+
+/** One node's figures in one term: a line per start cohort, and the attention cards. */
+export type RollupFiguresView = Schemas['RollupFigures'];
+
+/** One start cohort of a node's sections, its line on the term axis, and its participation. */
+export type RollupCohortView = Schemas['RollupCohort'];
+
+/** One course week of one cohort, on both week axes. The means arrive as decimal strings. */
+export type RollupWeekView = Schemas['RollupWeek'];
+
+/** One §5.6 rule met by one section. */
+export type AttentionCardView = Schemas['AttentionCard'];
+
+/** A named set's figures for this reader in one term, one series per start cohort. */
+export type NamedSetSeriesView = Schemas['NamedSetSeries'];
+
+/** One start cohort of a named set's series. */
+export type NamedSetCohortView = Schemas['NamedSetCohort'];
+
+/** What the context read answered. */
+export type LeadershipContextRead =
+  | { readonly kind: 'context'; readonly context: LeadershipContextView }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** What the tree read answered. */
+export type RollupTreeRead =
+  | { readonly kind: 'tree'; readonly tree: RollupTreeView }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** What one node's figures answered. A node outside the purview is `unavailable` with the server's sentence. */
+export type RollupFiguresRead =
+  | { readonly kind: 'figures'; readonly figures: RollupFiguresView }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** What a named set's series answered. */
+export type SetSeriesRead =
+  | { readonly kind: 'series'; readonly series: NamedSetSeriesView }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null };
+
+/** What the drill-down's week list answered: the instructor page's outcomes, and the gate's 403. */
+export type DrillDownWeeksRead = PublishedWeeksRead | { readonly kind: 'not-your-role' };
+
+/** What the drill-down's report answered. */
+export type DrillDownReportRead = ReportRead | { readonly kind: 'not-your-role' };
+
+/** One read over the roll-up routes, answered in the shape every one of them shares. */
+async function rollupRead(
+  path: string,
+  required: string,
+): Promise<
+  | { readonly kind: 'body'; readonly body: unknown }
+  | { readonly kind: 'session-ended' }
+  | { readonly kind: 'not-your-role' }
+  | { readonly kind: 'unavailable'; readonly detail: string | null }
+> {
+  let response: Response;
+  try {
+    response = await fetch(path, { headers: readHeaders() });
+  } catch {
+    return { kind: 'unavailable', detail: null };
+  }
+  if (response.status === UNAUTHORIZED_STATUS) return { kind: 'session-ended' };
+  if (isNotYourRole(response)) return { kind: 'not-your-role' };
+  const body = await jsonBody(response);
+  if (!response.ok) return { kind: 'unavailable', detail: refusalSentence(body) };
+  // The bound on the cast: the member every render walks has to be there.
+  if (typeof body !== 'object' || body === null || !(required in body)) {
+    return { kind: 'unavailable', detail: null };
+  }
+  return { kind: 'body', body };
+}
+
+/** The reader's roles and the terms, read before anything else on the roll-up. */
+export async function readLeadershipContext(): Promise<LeadershipContextRead> {
+  const answer = await rollupRead(LEADERSHIP_CONTEXT_PATH, 'terms');
+  if (answer.kind !== 'body') return answer;
+  return { kind: 'context', context: answer.body as LeadershipContextView };
+}
+
+/** The tree over the reader's purview in one term. */
+export async function readRollupTree(termId: string): Promise<RollupTreeRead> {
+  const answer = await rollupRead(rollupTreePath(termId), 'hierarchy');
+  if (answer.kind !== 'body') return answer;
+  return { kind: 'tree', tree: answer.body as RollupTreeView };
+}
+
+/** One node's figures and attention cards in one term. */
+export async function readRollupFigures(
+  kind: RollupFiguresKind,
+  nodeId: string,
+  termId: string,
+): Promise<RollupFiguresRead> {
+  const answer = await rollupRead(rollupFiguresPath(kind, nodeId, termId), 'cohorts');
+  if (answer.kind !== 'body') return answer;
+  return { kind: 'figures', figures: answer.body as RollupFiguresView };
+}
+
+/** A named set's figures over the reader's purview in one term. */
+export async function readSetSeries(setId: string, termId: string): Promise<SetSeriesRead> {
+  const answer = await rollupRead(setSeriesPath(setId, termId), 'cohorts');
+  if (answer.kind !== 'body') return answer;
+  return { kind: 'series', series: answer.body as NamedSetSeriesView };
+}
+
+/** The published course weeks of one section in the reader's purview. */
+export async function readDrillDownWeeks(sectionId: string): Promise<DrillDownWeeksRead> {
+  const answer = await rollupRead(drillDownWeeksPath(sectionId), 'published_weeks');
+  if (answer.kind !== 'body') return answer;
+  return {
+    kind: 'weeks',
+    weeks: (answer.body as { published_weeks: readonly number[] }).published_weeks,
+  };
+}
+
+/** One section's Monday report, read-only, for a section in the reader's purview. */
+export async function readDrillDownReport(
+  sectionId: string,
+  courseWeek: number,
+): Promise<DrillDownReportRead> {
+  const answer = await rollupRead(drillDownPath(sectionId, courseWeek), 'streams');
+  if (answer.kind !== 'body') return answer;
+  return { kind: 'report', report: answer.body as InstructorReportView };
 }

@@ -111,3 +111,5 @@ but it answers "is the class there", never "does the gate run". Every gate this
 project adds to a route needs at least one test that drives the built application
 over HTTP and reads the status, in both directions; without it the structural
 guard is a green that means nothing.
+
+*(E9-02 and E9-04, 2026-10-12. E9-02's done-when drives `require_admin` over HTTP on a stub route the tests add with `add_api_route`, the gate a `Depends` of the endpoint (`tests/fixtures/admin_gate.py`), because no real admin route existed yet; E9-04's CSRF tests send the session as a cookie through the built app. What would have shipped: a gate asserted by its presence in the route table, and a CSRF check never exercised on the carrier it guards.)*

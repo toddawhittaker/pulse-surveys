@@ -33,6 +33,12 @@ the SPA captures and thereafter sends as `Authorization: Bearer`.
 `session_from_request` reads the Bearer header first and the cookie only when
 there is none, so the Bearer path carries the session with no cookie required.
 
+**Ending a session early (ADR 0202).** A token verifies until its `exp`,
+so a role switch and a logout end a session by recording its `jti` in
+`revoked_session` until that `exp` (`revoke_session`). Every role gate asks
+`is_revoked` after the token verifies, and answers a revoked session with the
+same refusal an expired one gets. The table purges itself as it is written.
+
 **CSRF, live because of `SameSite=None`.** A double-submit token bound to the
 session's `jti` by HMAC: a cookie an attacker tosses in without the secret still
 fails, and a token minted for one session does not verify against another's
@@ -49,30 +55,42 @@ import hmac
 import secrets
 import time
 from dataclasses import dataclass
-from uuid import uuid4
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 import jwt
 from fastapi.responses import RedirectResponse
+from sqlalchemy import delete, exists, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import Response
 
 from app.config import Settings, is_development
-from app.services.authz import Door, LandingRole
+from app.models.session import RevokedSession
+from app.services.authz import Door, LandingRole, resolve_landings
 
 __all__ = [
     "CSRF_COOKIE",
     "SESSION_ALGORITHM",
     "SESSION_COOKIE",
     "SESSION_LIFETIME_SECONDS",
+    "SessionAlreadyEndedError",
     "SessionClaims",
     "bearer_token",
+    "claim_key",
+    "clear_csrf_cookie",
     "clear_session_cookie",
     "fragment_redirect",
+    "is_revoked",
     "issue_csrf_token",
     "issue_session",
+    "purge_revoked_sessions",
+    "revoke_session",
     "session_from_request",
     "set_csrf_cookie",
     "set_session_cookie",
+    "switch_session",
     "verified_session",
     "verify_csrf_token",
 ]
@@ -152,8 +170,14 @@ def issue_session(
     person_id: str | None = None,
     user_id: str | None = None,
     now: int | None = None,
+    expires_at: int | None = None,
 ) -> str:
     """One signed session token, expiring `SESSION_LIFETIME_SECONDS` after `now`.
+
+    **`expires_at`, when given, is the token's `exp` instead** (ADR 0202);
+    `iat` is still `now`. The role switch passes the old token's
+    `exp`, so a switch is never a refresh: a session lives no longer for having
+    changed role, however many times it does.
 
     `now` is injectable epoch seconds so expiry is testable at the boundary
     without a clock patch; it defaults to the wall clock. `jti` is generated
@@ -184,7 +208,7 @@ def issue_session(
         "user_id": user_id,
         "jti": uuid4().hex,
         "iat": issued_at,
-        "exp": issued_at + SESSION_LIFETIME_SECONDS,
+        "exp": issued_at + SESSION_LIFETIME_SECONDS if expires_at is None else expires_at,
     }
     return jwt.encode(payload, secret, algorithm=SESSION_ALGORITHM)
 
@@ -301,9 +325,36 @@ def set_csrf_cookie(response: Response, token: str, settings: Settings) -> None:
     )
 
 
-def clear_session_cookie(response: Response) -> None:
-    """Delete the session cookie."""
-    response.delete_cookie(SESSION_COOKIE, path="/")
+def clear_session_cookie(response: Response, settings: Settings) -> None:
+    """Delete the session cookie, with the attributes `set_session_cookie` set it with.
+
+    The same `SameSite=None` and the same `Secure` rule, not Starlette's
+    defaults: a deletion is itself a `Set-Cookie`, and a browser can refuse a
+    `SameSite=Lax` one arriving on a cross-site response, which is every
+    response inside the LMS's iframe. Logout (ADR 0202) is the caller.
+    """
+    response.delete_cookie(
+        SESSION_COOKIE,
+        path="/",
+        httponly=True,
+        secure=not is_development(settings),
+        samesite="none",
+    )
+
+
+def clear_csrf_cookie(response: Response, settings: Settings) -> None:
+    """Delete the CSRF cookie, with the attributes `set_csrf_cookie` set it with.
+
+    Logout clears it beside the session cookie: a token bound to an ended
+    session verifies against nothing, and a browser holding one has no use for it.
+    """
+    response.delete_cookie(
+        CSRF_COOKIE,
+        path="/",
+        httponly=False,
+        secure=not is_development(settings),
+        samesite="none",
+    )
 
 
 def bearer_token(request: Request) -> str | None:
@@ -346,6 +397,14 @@ def session_from_request(request: Request, secret: bytes) -> SessionClaims | Non
     Reading a session does not consume it: unlike a launch nonce, the same token
     verifies on every later request, which is what lets a session survive
     navigation between landing routes.
+
+    **It does not ask whether the session was revoked** (ADR 0202). That
+    needs the database, and this stays a pure read over the request and the
+    secret. Every role gate in `app.api.deps` reads through it and then asks
+    `is_revoked`, which is the one place a route reads a session (the sweep in
+    `tests/unit/test_only_the_dependency_module_reads_a_session_from_a_request.py`).
+    Logout is the one caller that wants a revoked session read as well, so that a
+    second logout with the same token answers as the first did.
     """
     presented = bearer_token(request)
     if presented is not None:
@@ -362,3 +421,144 @@ def fragment_redirect(role: LandingRole, token: str) -> RedirectResponse:
     which is the SPA route the landing view lives at (`frontend/src/router.tsx`).
     """
     return RedirectResponse(f"{SPA_MOUNT}/{role.name.lower()}#session={token}", status_code=FOUND)
+
+
+# ---------------------------------------------------------------------------
+# Ending a session before its token expires (ADR 0202).
+# ---------------------------------------------------------------------------
+
+
+def is_revoked(db: Session, jti: str) -> bool:
+    """Whether the session with this `jti` was ended before its token expired.
+
+    Asked by every role gate in `app.api.deps` after the token verifies. A row
+    that outlived its token (the purge has not run since) still answers `True`,
+    which is harmless: the token it names no longer verifies anyway.
+    """
+    return bool(db.scalar(select(exists().where(RevokedSession.jti == jti))))
+
+
+def purge_revoked_sessions(db: Session, now: datetime) -> int:
+    """Delete every revocation whose token expired before `now`, and say how many.
+
+    `now` is passed in rather than read, so a test needs no clock patch. A row
+    expiring exactly at `now` is kept: the signature check refuses a token from
+    its `exp` on, and a row kept one instant longer than it is needed costs
+    nothing. Does not commit; the caller owns the transaction.
+    """
+    deleted = db.execute(delete(RevokedSession).where(RevokedSession.expires_at < now))
+    return int(getattr(deleted, "rowcount", 0) or 0)
+
+
+def revoke_session(db: Session, claims: SessionClaims) -> bool:
+    """End this session: record its `jti` until its token's own expiry, and purge the rest.
+
+    **An insert that does nothing on conflict**, so revoking a session twice is
+    not an error and leaves one row; a second logout with the same token
+    answers exactly as the first did.
+
+    **Answers whether this call recorded the revocation** (`RETURNING jti`).
+    `False` means the session was already revoked, by a call whose transaction
+    committed first: a concurrent insert of the same `jti` waits on the other
+    transaction's row and then does nothing. Logout ignores the answer; the
+    switch refuses on `False`, so one token switches once (ruling G2).
+
+    **The table purges itself here**, in the same transaction, so no scheduled
+    job is needed. The purge reads the real clock and never
+    `app.services.clock.now`, for the reason ADR 0109 gives about session
+    expiry: the token's `exp` is judged against the real clock by the signature
+    check, and a purge on a moved development clock would delete revocations
+    of tokens that still verify, bringing ended sessions back.
+
+    Does not commit; the caller owns the transaction.
+    """
+    purge_revoked_sessions(db, datetime.now(UTC))
+    recorded = db.execute(
+        insert(RevokedSession)
+        .values(jti=claims.jti, expires_at=datetime.fromtimestamp(claims.exp, UTC))
+        .on_conflict_do_nothing(index_elements=[RevokedSession.jti])
+        .returning(RevokedSession.jti)
+    ).first()
+    return recorded is not None
+
+
+def claim_key(value: str | None) -> UUID | None:
+    """A row key carried in a session claim, or `None` for an absent or malformed one.
+
+    `app.api.deps.person_of` and `user_of` read their claims through this, as
+    does `switch_session`: a value that is not a UUID is a token this deployment
+    did not issue in that shape, and it resolves to nobody rather than to a 500.
+    """
+    if value is None:
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
+
+
+class SessionAlreadyEndedError(Exception):
+    """The session a switch was asked from was revoked by another request first (ruling G2).
+
+    Two switches with one token race to revoke it; the one whose insert comes
+    back empty lost. Its caller answers as for a revoked token at any gate.
+    """
+
+
+def switch_session(
+    db: Session,
+    claims: SessionClaims,
+    *,
+    to: LandingRole,
+    secret: bytes,
+    settings: Settings,
+) -> str | None:
+    """A new session in role `to`, revoking this one; or `None`, issuing and revoking nothing.
+
+    SPEC §2 gives a person with several hats a switcher, and a session holds one
+    role (ADR 0202): the switch never adds a role to a session, it issues a new
+    session in the asked role and ends the old one. Care is therefore never
+    combined with a reporting role, and neither is Admin.
+
+    **The person's views are re-read now**, at the session's own door, through
+    `app.services.authz.resolve_landings`, never from a list a client or an
+    earlier answer supplied. A role the person does not hold, one held only at
+    the other door, and one whose assignment was deleted since the list was
+    shown all answer `None`.
+
+    **A switch is not a refresh** (ruling G1). The session's own role is refused
+    like any role not held, and the new token keeps the old token's `exp`, so
+    no sequence of switches keeps a session alive past the hour it was issued
+    for.
+
+    **Everything but the role and `iat` is carried over**: the door, the
+    subject, the issuer, both row keys and the expiry.
+
+    **The old token is spent once** (ruling G2). It is revoked before the new
+    one is issued, in the caller's transaction; if the revocation insert comes
+    back empty, another request revoked it first, and this raises
+    `SessionAlreadyEndedError` having issued nothing. The caller commits.
+    """
+    if to is claims.role:
+        return None
+    held = resolve_landings(
+        db,
+        door=claims.door,
+        person_id=claim_key(claims.person_id),
+        user_id=claim_key(claims.user_id),
+        settings=settings,
+    )
+    if to not in held:
+        return None
+    if not revoke_session(db, claims):
+        raise SessionAlreadyEndedError
+    return issue_session(
+        door=claims.door,
+        role=to,
+        sub=claims.sub,
+        iss=claims.iss,
+        secret=secret,
+        person_id=claims.person_id,
+        user_id=claims.user_id,
+        expires_at=claims.exp,
+    )

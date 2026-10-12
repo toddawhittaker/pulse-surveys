@@ -37,6 +37,7 @@ import pytest
 from fixtures.instructor_decisions import STORED_EXCLUDED, STORED_FLAGGED
 from fixtures.lead_review import (
     AS_INSTRUCTOR,
+    AS_LEAD_FACULTY,
     EXCLUDE,
     LOG_REASON,
     NOT_IN_QUEUE,
@@ -166,11 +167,15 @@ def test_a_care_class_comment_is_not_in_the_log_even_with_a_decision_row(
             course_week=week, stream=stream, text=text, verdict=verdict, cohort=TAUGHT_COHORT
         )
         reason = f"E6-05 the {verdict} comment's planted reason, which must not be logged"
+        # Decided by the reader. E9-14 item 1 blanks a withheld row's reason for a
+        # reader who did not decide it, and a Care-class comment is never shown, so
+        # with any other decider a leaked row would carry no reason and the check
+        # by reason below would pass whether or not the row leaked.
         review.plant_decision(
             comment,
             STORED_EXCLUDED,
-            decided_by=review.door.a_person(),
-            decided_as=AS_INSTRUCTOR,
+            decided_by=review.lead.person_id,
+            decided_as=AS_LEAD_FACULTY,
             reason=reason,
         )
         planted[verdict] = (text, reason)

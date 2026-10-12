@@ -1,19 +1,25 @@
 """The response loop (SPEC §5.3): who a section's staff are, by name, for a reader of it.
 
 The first piece is the one Python door to the staff-name definer,
-`public.section_staff_names` (`views_sql/section_staff_names_v001.sql`, ADR 0191).
-SPEC §5.3 posts a response under its author's name, and the survey page names the
-section's professor, so a student has to be able to read a member of staff's
-name, and `pulse_app` holds no privilege on `person`. The definer answers one
-section's live teaching instructors and anyone who has published a response to
-it, and only to a reader of that section. Every reader check is inside it.
+`public.section_staff_names` (the set-based overload in
+`views_sql/section_staff_names_v002.sql`, ADR 0201, which supersedes ADR 0191 in
+part). SPEC §5.3 posts a response under its author's name, the survey page names
+the section's professor, and E9's leadership pages name each section's lead,
+chair and dean, so a reader has to be able to read a member of staff's name, and
+`pulse_app` holds no privilege on `person`. The definer answers, for each section
+passed that the reader may read, its live teaching instructors, anyone who has
+published a response to it, its course's lead, its department's chair and its
+college's dean, each as a row of its own role. Every reader check is inside it.
 
 **This module is the only one under `backend/app/` that names the definer**
 (`tests/unit/test_only_the_response_loop_service_names_the_staff_name_definer.py`).
-The definer trusts the reader key it is handed, so the one thing a caller must
-get right is to pass the reader of its own session — the student's `user` key
-or the member of staff's `person` key — and never a key taken from a request. A
-second caller would be a second place that could get it wrong.
+The definer trusts the reader key and the reader's date it is handed, and it
+answers chair and above for any section passed. So a caller must get three things
+right: pass the reader of its own session — the student's `user` key or the
+member of staff's `person` key — and never a key taken from a request; let the
+door compute the date; and, for a leadership reader, pass the scope resolved for
+that reader, so the door sends only purview sections. A second caller would be a
+second place that could get them wrong.
 
 **A refusal is an empty list**, the same answer a section with no instructor
 gives, and nothing here logs what it was asked or what it answered: no refusal
@@ -38,14 +44,8 @@ copies:
     rows and nothing else. Neither decides who may write: the doors in front of
     them do (ADR 0194), and the table's guard trigger refuses a row whose author or
     setter does not hold the role it names.
-  - **`student_week_results`**: the student results route's read, through the
-    student's live enrollment, as the survey read reaches a section. While the
-    week is `awaiting` it serves the course label and the state and nothing
-    about the week; otherwise the streams, the workload median and, on the
-    latest published week while nothing is held, the release group (ADR 0197).
-    The comments come through `report_comments.student_comments` and
-    `student_released_comments`, the only names this module takes from that
-    module.
+  - The student results route's read, which calls these, lives in its own
+    module, `services/student_results.py`.
 
 ## The doors (ADR 0194)
 
@@ -61,6 +61,8 @@ Every door here decides who may write or read, then calls the writers above.
     (`authz.chaired_courses_with_a_lead`, ruling 5).
   - **`is_owed` and `on_behalf_open`**: a week required by its policy of record,
     unanswered, and 48 or 96 hours past its report opening (ruling 2).
+    `owed_section_weeks` is `is_owed` over a set of sections, which the
+    roll-ups' attention list reads (ADR 0205).
   - **`responses_owed`**: the reader's owed section-weeks, set-based.
   - **The on-behalf doors**: one gate (`_on_behalf_door`) decides every refusal
     before anything that varies with the week's state is read, and every
@@ -71,6 +73,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -80,10 +83,8 @@ from sqlalchemy.orm import Session
 
 from app.ai.contracts import CheckTheme
 from app.config import Settings
-from app.models.grades import GradeSyncOutcome, latest_grade_sync
 from app.models.loop import InstructorResponse, PolicyMode, PolicyRole, ResponsePolicy, ResponseRole
 from app.models.org import Course, Prefix, Section
-from app.models.survey import REPORT_STREAMS
 from app.models.term import SurveyWindow, Term, Week
 from app.schemas.response_loop import (
     OnBehalfWeek,
@@ -92,20 +93,18 @@ from app.schemas.response_loop import (
     PolicyOverview,
     PolicyPrefix,
     ResponseWrite,
-    StudentParticipation,
-    StudentReleasedComment,
     StudentResponse,
-    StudentWeekResults,
     WeekResponseView,
     WeekState,
 )
-from app.services import clock, reporting, survey_read
+from app.services import clock, reporting
 from app.services.authz import (
+    ActorScope,
     chaired_courses_with_a_lead,
     lead_review_courses,
     taught_or_once_taught_section_ids,
 )
-from app.services.report_comments import student_comments, student_released_comments
+from app.services.moderation import purview_read
 from app.services.reporting import SectionUnavailableError
 from app.services.section_codes import course_label, course_week_of, week_of_the_term
 
@@ -114,8 +113,8 @@ __all__ = [
     "NotYoursToEditError",
     "OnBehalfUnavailableError",
     "ResponseAlreadyPublishedError",
-    "ResultsUnavailableError",
     "StaffName",
+    "StaffNameRole",
     "edit_as_instructor",
     "edit_on_behalf",
     "first_response",
@@ -125,6 +124,7 @@ __all__ = [
     "on_behalf_draft",
     "on_behalf_open",
     "on_behalf_week",
+    "owed_section_weeks",
     "policy_overview",
     "publish_as_instructor",
     "publish_on_behalf",
@@ -134,25 +134,41 @@ __all__ = [
     "policy_of_record",
     "publish_response",
     "record_policy",
+    "section_lead_name",
     "section_staff_names",
-    "student_week_results",
     "week_state",
 ]
 
 # The parameters are cast rather than written with `::`, because SQLAlchemy's
 # `text()` stops reading a bind parameter at a colon, and an uncast null is
-# untyped.
+# untyped. The ids travel as one array, so a page's sections are one call.
 _SECTION_STAFF_NAMES = text(
-    "SELECT person_id, display_name FROM public.section_staff_names("
-    "CAST(:section_id AS uuid), CAST(:reader_user_id AS uuid), "
-    "CAST(:reader_person_id AS uuid))"
+    "SELECT section_id, role, person_id, display_name FROM public.section_staff_names("
+    "CAST(:section_ids AS uuid[]), CAST(:reader_user_id AS uuid), "
+    "CAST(:reader_person_id AS uuid), CAST(:reader_date AS date))"
 )
+
+
+class StaffNameRole(StrEnum):
+    """What a named member of staff is to the section the row names (ADR 0201)."""
+
+    INSTRUCTOR = "INSTRUCTOR"
+    AUTHOR = "AUTHOR"
+    LEAD_FACULTY = "LEAD_FACULTY"
+    CHAIR = "CHAIR"
+    DEAN = "DEAN"
 
 
 @dataclass(frozen=True)
 class StaffName:
-    """One member of staff the definer answered: their `person` key and their name."""
+    """One row the definer answered: a section, a role there, a `person` key and a name.
 
+    One person can be several rows: a teacher who also published is an
+    `INSTRUCTOR` row and an `AUTHOR` row of the same section.
+    """
+
+    section_id: UUID
+    role: StaffNameRole
     person_id: UUID
     display_name: str
 
@@ -160,11 +176,13 @@ class StaffName:
 def section_staff_names(
     session: Session,
     *,
-    section_id: UUID,
+    section_ids: Sequence[UUID],
     reader_user_id: UUID | None = None,
     reader_person_id: UUID | None = None,
+    scope: ActorScope | None,
+    settings: Settings | None = None,
 ) -> list[StaffName]:
-    """The staff names one reader may read for one section; empty for any other reader.
+    """The staff names one reader may read for a set of sections, in one definer call.
 
     Name the reader by exactly one key: a student by `reader_user_id` (a
     launched student has no `person`, ADR 0028), a member of staff by
@@ -172,22 +190,102 @@ def section_staff_names(
     `ValueError` here, rather than reaching the definer, which would answer it
     with nothing.
 
-    Answered in the definer's order, by name and then by key.
+    **`scope` is required, and a leadership caller must pass the reader's
+    resolved `ActorScope`.** It has no default, so every caller states its
+    choice: `scope=None` is an explicit opt-out, written at the call site. The
+    definer answers a reader holding `CHAIR`,
+    `ASSISTANT_DEAN`, `DEAN` or `VP_ACADEMICS` for any section it is handed
+    (ADR 0201), so the purview is applied here: given a scope, only the
+    sections in `scope.purview.section_ids` reach the definer. A scope resolved
+    for someone other than `reader_person_id`, or given with a user key, raises
+    `ValueError`, before any statement is sent. With `scope=None` every id is
+    passed, which is right for a student, an instructor or a lead, whom the
+    definer checks per section, and wrong for chair and above.
+
+    **The reader's date is the application clock's** (`clock.today`, in the
+    institution's timezone, development override included), so the definer's
+    live-enrollment check agrees with the survey read's. `settings` is the
+    configuration the caller already holds; without one it is read here.
+
+    Answered in the definer's order: by section, role, name and key. A list of
+    ids that leaves nothing to ask answers an empty list without a call.
     """
     if (reader_user_id is None) == (reader_person_id is None):
         raise ValueError(
             "section_staff_names takes exactly one reader key: reader_user_id for a student, "
             "reader_person_id for a member of staff."
         )
+    asked = list(dict.fromkeys(section_ids))
+    if scope is not None:
+        if scope.person_id != reader_person_id:
+            raise ValueError(
+                "section_staff_names was given a scope resolved for another reader than "
+                "reader_person_id; a scope belongs to the member of staff it was resolved for."
+            )
+        asked = [section_id for section_id in asked if section_id in scope.purview.section_ids]
+    if not asked:
+        return []
+    reader_date = clock.today(session, settings=Settings() if settings is None else settings)
     rows = session.execute(
         _SECTION_STAFF_NAMES,
         {
-            "section_id": str(section_id),
+            "section_ids": [str(section_id) for section_id in asked],
             "reader_user_id": None if reader_user_id is None else str(reader_user_id),
             "reader_person_id": None if reader_person_id is None else str(reader_person_id),
+            "reader_date": reader_date,
         },
     ).all()
-    return [StaffName(person_id=row.person_id, display_name=row.display_name) for row in rows]
+    return [
+        StaffName(
+            section_id=row.section_id,
+            role=StaffNameRole(row.role),
+            person_id=row.person_id,
+            display_name=row.display_name,
+        )
+        for row in rows
+    ]
+
+
+def section_lead_name(
+    session: Session,
+    *,
+    section_id: UUID,
+    reader_user_id: UUID | None = None,
+    reader_person_id: UUID | None = None,
+    scope: ActorScope | None,
+    settings: Settings | None = None,
+) -> str | None:
+    """The name of the section's course's Lead Faculty, for the header of a course page (§2.1).
+
+    Asked through `section_staff_names` with the reader's own key. `scope` is
+    that door's, a required keyword with no default, so every caller writes it: `None` for the student's results page and the teaching
+    instructor's report, readers the definer checks per section, and the
+    leader's own `ActorScope` on the drill-down, so the name is read only for a
+    section inside her purview. Passing neither key or both raises
+    `ValueError`, from that door.
+
+    `None` when the reader may not read the section or the course has no lead.
+    A course with no lead falls to its chair (SPEC §2.1), but the header names
+    the Lead Faculty, so the chair's row is never read in its place.
+
+    A course has at most one lead (`uq_lead_faculty_mapping_course_id`), so a
+    second lead row is a broken invariant and raises rather than picking one.
+    """
+    leads = [
+        staff.display_name
+        for staff in section_staff_names(
+            session,
+            section_ids=[section_id],
+            reader_user_id=reader_user_id,
+            reader_person_id=reader_person_id,
+            scope=scope,
+            settings=settings,
+        )
+        if staff.section_id == section_id and staff.role is StaffNameRole.LEAD_FACULTY
+    ]
+    if len(leads) > 1:
+        raise RuntimeError("section_staff_names answered more than one lead for one section.")
+    return leads[0] if leads else None
 
 
 # ---------------------------------------------------------------------------
@@ -197,17 +295,6 @@ def section_staff_names(
 # The two roles a response is written on the instructor's behalf under (SPEC §5.3,
 # ruling 5).
 _ON_BEHALF_ROLES = frozenset({ResponseRole.LEAD_FACULTY, ResponseRole.CHAIR})
-
-
-class ResultsUnavailableError(Exception):
-    """There are no results this student may read for that section and course week.
-
-    **One exception for every refusal, and it carries nothing.** A section the
-    student is not enrolled in, an enrollment that has ended, a week whose report
-    has not opened, and a section or a week that does not exist all leave by it,
-    so the route answers them with one status and one sentence (ADR 0193). Telling them apart would tell a student that a section they are not in
-    exists, or how long their own section runs.
-    """
 
 
 def policy_of_record(session: Session, *, course_id: UUID, report_opens_at: datetime) -> PolicyMode:
@@ -370,161 +457,6 @@ def record_policy(
     return rows
 
 
-def student_week_results(
-    session: Session,
-    *,
-    user_id: UUID,
-    section_id: UUID,
-    course_week: int | None,
-    settings: Settings,
-) -> StudentWeekResults:
-    """One week's state and response, for a student of the section, once its report has opened.
-
-    `course_week` names the week; `None` asks for the latest published week, which
-    is the week the student's page opens on. Either way the payload lists every
-    course week of the section whose report has opened, ascending, so the page
-    can page back through published weeks only (SPEC §5.4). A section with no
-    published week is refused, as an unopened week is.
-
-    **The section is found among the student's own live enrollments**, through
-    the survey read's `_live_enrollments`, and never read by its key first: a
-    section the student is not enrolled in today is not found, exactly as one
-    that does not exist is not. **The week is found among the section's
-    published weeks** (`reporting._published_weeks`, the instructor report's own
-    selection, ADR 0184), so an unopened week and a week the section never runs
-    are not found either. Only then is a response read, so nothing of a refused
-    week is ever loaded.
-
-    The author's name comes through the staff-name definer, asked as this
-    student. It answers anyone who has published to the section, so a response
-    whose author it does not answer is a broken invariant, and raises rather than
-    serving the response unattributed.
-
-    Raises `ResultsUnavailableError` for every refusal.
-    """
-    today = clock.today(session, settings=settings)
-    section = next(
-        (
-            enrolled
-            for enrolled, _term, _course, _prefix in survey_read._live_enrollments(
-                session, user_id=user_id, today=today
-            )
-            if enrolled.id == section_id
-        ),
-        None,
-    )
-    if section is None:
-        raise ResultsUnavailableError
-    published = sorted(
-        reporting._published_weeks(session, section=section, settings=settings),
-        key=lambda opened: opened.course_week,
-    )
-    if course_week is None:
-        week = published[-1] if published else None
-    else:
-        week = next((opened for opened in published if opened.course_week == course_week), None)
-    if week is None:
-        raise ResultsUnavailableError
-    published_weeks = [opened.course_week for opened in published]
-
-    label = reporting._course_label(session, section)
-
-    state, response = _state_and_response(
-        session,
-        section=section,
-        week_id=week.week_id,
-        closes_at=week.closes_at,
-        settings=settings,
-        reader_user_id=user_id,
-    )
-    participation = _own_participation(session, user_id=user_id, section_id=section.id)
-    if state == "awaiting":
-        # The hold (SPEC §5.3): nothing about the week, read or served, until a
-        # response releases it. Decided before any figure or comment is read.
-        return StudentWeekResults(
-            course_label=label,
-            state=state,
-            response=response,
-            published_weeks=published_weeks,
-            streams=None,
-            workload_median=None,
-            released=None,
-            participation=participation,
-        )
-
-    held_week_ids = {
-        clock_.week_id
-        for clock_ in _week_clocks(session, sections=[section], settings=settings)
-        if clock_.required and not clock_.answered
-    }
-    readable = [opened for opened in published if opened.week_id not in held_week_ids]
-    streams, workload_median = reporting.student_streams(
-        session,
-        section_id=section.id,
-        week_id=week.week_id,
-        trend=[
-            (opened.course_week, opened.week_id)
-            for opened in readable
-            if opened.course_week <= week.course_week
-        ],
-        comments={
-            token: [
-                comment.text
-                for comment in student_comments(
-                    session, section_id=section.id, week_id=week.week_id, stream=token
-                )
-            ]
-            for token in REPORT_STREAMS
-        },
-    )
-    # Ruling 1 (ADR 0197): the release group only on the latest published week's
-    # page, only while no published week is held, and only the batches cut
-    # before this week's report opened.
-    released = None
-    if week.course_week == published[-1].course_week and len(readable) == len(published):
-        as_of = reporting.report_opens_at(
-            week.closes_at, zone=ZoneInfo(settings.institution_timezone)
-        )
-        released = [
-            StudentReleasedComment(text=comment.text, stream=comment.stream.lower())
-            for token in REPORT_STREAMS
-            for comment in student_released_comments(
-                session,
-                section_id=section.id,
-                term_id=section.term_id,
-                stream=token,
-                as_of=as_of,
-            )
-        ]
-    return StudentWeekResults(
-        course_label=label,
-        state=state,
-        response=response,
-        published_weeks=published_weeks,
-        streams=streams,
-        workload_median=workload_median,
-        released=released,
-        participation=participation,
-    )
-
-
-def _own_participation(
-    session: Session, *, user_id: UUID, section_id: UUID
-) -> StudentParticipation | None:
-    """The reader's own newest accepted score for the section, as posted, or `None`.
-
-    Keyed by the session's user and the section already found among that user's
-    live enrollments, so no other student's row and no other section's row is
-    reachable. A `failed` row is never a score (ADR 0198).
-    """
-    latest = latest_grade_sync(
-        session, section_id=section_id, user_id=user_id, outcome=GradeSyncOutcome.POSTED
-    )
-    if latest is None:
-        return None
-    return StudentParticipation(score_text=latest.score_text, ledger_text=latest.ledger_text)
-
-
 def _state_and_response(
     session: Session,
     *,
@@ -539,10 +471,10 @@ def _state_and_response(
 
     The caller has already decided the reader may read this week. The author's
     name comes through the staff-name definer, asked as that reader (exactly one
-    of the two keys, as `section_staff_names` requires). The definer answers
-    anyone who has published to the section, so a response whose author it does
-    not answer is a broken invariant, and raises rather than serving the response
-    unattributed.
+    of the two keys, as `section_staff_names` requires) about this one section.
+    The definer answers anyone who has published to the section as an `AUTHOR`
+    row, so a response whose author it does not answer is a broken invariant, and
+    raises rather than serving the response unattributed.
     """
     opens_at = reporting.report_opens_at(closes_at, zone=ZoneInfo(settings.institution_timezone))
     policy = policy_of_record(session, course_id=section.course_id, report_opens_at=opens_at)
@@ -558,10 +490,13 @@ def _state_and_response(
         staff.person_id: staff.display_name
         for staff in section_staff_names(
             session,
-            section_id=section.id,
+            section_ids=[section.id],
             reader_user_id=reader_user_id,
             reader_person_id=reader_person_id,
+            scope=None,
+            settings=settings,
         )
+        if staff.role is StaffNameRole.AUTHOR
     }
     if first.author_person_id not in names:
         raise RuntimeError(
@@ -799,24 +734,28 @@ def _view(
 # -- the policy (rulings 1 and 5) ----------------------------------------------
 
 
-def policy_overview(session: Session, *, person_id: UUID | None) -> PolicyOverview:
-    """Every course whose policy this reader sets or reads, by prefix (ADR 0194).
+def policy_overview(session: Session, *, scope: ActorScope) -> PolicyOverview:
+    """Every course whose policy this reader sets or reads, by prefix (ADR 0194, ADR 0206).
 
-    The courses `lead_review_courses` gives the reader, which they set, and for a
+    The courses `lead_review_courses` gives the reader, which they set; for a
     chair the department's courses that have a lead, which they read and cannot
-    set. Nothing else: a sibling lead's course is in neither set. A reader with
-    neither reads an empty list, as an assistant dean, a dean and a vice
-    president do until E9.
+    set; and for an assistant dean, a dean or a vice president every course of
+    their purview (`moderation.purview_read`), which they read and cannot set.
+    Nothing else: a sibling lead's course is in none of these. A reader with
+    none reads an empty list.
 
     `mode` is each course's latest row now, by `sequence`; the policy of record
     for a week is a different question (`policy_of_record`). `set_by_role` is
     carried only on a course the reader cannot set, so nothing on a course the
     reader sets moves with anybody else's change (done-when 4).
     """
-    if person_id is None:
-        return PolicyOverview(prefixes=[])
+    person_id = scope.person_id
     settable = lead_review_courses(session, person_id=person_id)
-    readable = set(settable) | chaired_courses_with_a_lead(session, person_id=person_id)
+    readable = (
+        set(settable)
+        | chaired_courses_with_a_lead(session, person_id=person_id)
+        | purview_read(scope).course_ids
+    )
     if not readable:
         return PolicyOverview(prefixes=[])
     latest: dict[UUID, ResponsePolicy] = {}
@@ -859,7 +798,7 @@ def policy_overview(session: Session, *, person_id: UUID | None) -> PolicyOvervi
 
 
 def set_policy(
-    session: Session, *, person_id: UUID | None, prefix_id: UUID, mode: PolicyMode
+    session: Session, *, scope: ActorScope, prefix_id: UUID, mode: PolicyMode
 ) -> PolicyOverview:
     """Switch the policy of every course in the prefix this reader sets it for, and commit.
 
@@ -868,10 +807,10 @@ def set_policy(
     they lead and a `CHAIR` row for the department's unled course, each the role
     `lead_review_courses` gives for it. A reader who sets no course of the
     prefix, and a prefix that does not exist, raise `NoPolicyToSetError` before
-    anything is written.
+    anything is written. An assistant dean, a dean or a vice president sets
+    nothing (ADR 0206), so their every prefix is refused.
     """
-    if person_id is None:
-        raise NoPolicyToSetError
+    person_id = scope.person_id
     settable = lead_review_courses(session, person_id=person_id)
     in_prefix = session.scalars(
         select(Course.id).where(Course.prefix_id == prefix_id, Course.id.in_(list(settable)))
@@ -887,7 +826,7 @@ def set_policy(
             mode=mode,
         )
     session.commit()
-    return policy_overview(session, person_id=person_id)
+    return policy_overview(session, scope=scope)
 
 
 # -- the clocks (ruling 2) ------------------------------------------------------
@@ -914,13 +853,38 @@ class _WeekClock:
 def is_owed(session: Session, *, section_id: UUID, course_week: int, now: datetime) -> bool:
     """Whether a response to this section's course week is owed at `now` (§5.6 rule 4).
 
-    True when the week's policy of record is required, nobody has published a
+    The one-section form of `owed_section_weeks`, which holds the rule: true
+    when the week's policy of record is required, nobody has published a
     response, and `now` is at or after report open + 48 hours. Computed on read
-    from `now`, so a caller pins the clock; E9's attention list calls this.
+    from `now`, so a caller pins the clock. The attention list reads
+    `owed_section_weeks` over a whole purview; this form answers one question.
     False for a section or a course week that does not exist.
     """
-    week = _clock_of(session, section_id=section_id, course_week=course_week, settings=Settings())
-    return week is not None and week.owed(now)
+    return (section_id, course_week) in owed_section_weeks(
+        session, section_ids=[section_id], now=now, settings=Settings()
+    )
+
+
+def owed_section_weeks(
+    session: Session, *, section_ids: Iterable[UUID], now: datetime, settings: Settings
+) -> set[tuple[UUID, int]]:
+    """Every `(section, course week)` of these sections owed a response at `now` (§5.6 rule 4).
+
+    The set-based form; `is_owed` asks it about one section. One read of the sections
+    and `_week_clocks`' three, however many sections are asked about, so E9's
+    attention list reads policies and responses a fixed number of times (ADR
+    0205). The rule is `_WeekClock.owed`'s and nowhere else. A section id that
+    does not exist is owed nothing.
+    """
+    asked = sorted(set(section_ids))
+    if not asked:
+        return set()
+    sections = list(session.scalars(select(Section).where(Section.id.in_(asked))))
+    return {
+        (week.section.id, week.course_week)
+        for week in _week_clocks(session, sections=sections, settings=settings)
+        if week.owed(now)
+    }
 
 
 def on_behalf_open(session: Session, *, section_id: UUID, course_week: int, now: datetime) -> bool:

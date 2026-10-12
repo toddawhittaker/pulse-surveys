@@ -13,14 +13,18 @@ import './instructorReportStats.css';
  * the bar is drawn from and what the percent is written from; the counts are
  * what the sentence says, and they are integers the page was given rather than a
  * number multiplied back out of a rounded rate.
+ *
+ * **An aggregate rate travels without its counts** (the roll-up's
+ * participation, SPEC §5.5): both counts are then absent, and the row says the
+ * percent alone rather than a count over a node the payload did not send.
  */
 export interface RateFigure {
   /** The rate as a 0–1 fraction — `0.62`, not `62`. */
   readonly rate: number;
   /** How many: responses for a response rate, valid responses for a validity rate. */
-  readonly numerator: number;
+  readonly numerator?: number;
   /** Out of how many: enrolled students, or the week's responses. */
-  readonly denominator: number;
+  readonly denominator?: number;
 }
 
 /**
@@ -81,6 +85,9 @@ function Rate({
   readonly figure: RateFigure;
 }): JSX.Element {
   const label = copy(labelKey);
+  if (figure.numerator === undefined || figure.denominator === undefined) {
+    return <PercentOnly label={label} rate={figure.rate} />;
+  }
   const numerator = String(figure.numerator);
   const denominator = String(figure.denominator);
   const absentFigure = copy('instructor_report_stats.absent_figure');
@@ -116,6 +123,30 @@ function Rate({
           });
   }
 
+  return (
+    <div className="pulse-stat-rate" role="img" aria-label={reading}>
+      <div className="pulse-stat-rate-head">
+        <span className="pulse-stat-rate-label">{label}</span>
+        <span className="pulse-stat-rate-readout">{readout}</span>
+      </div>
+      <div className="pulse-stat-rate-track" aria-hidden="true">
+        {percent === null ? null : <div className="pulse-stat-rate-fill" style={{ width: percent }} />}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A rate the payload sent without its counts: the percent, or the em dash where
+ * the rate is not a finite number. The track is the same track.
+ */
+function PercentOnly({ label, rate }: { readonly label: string; readonly rate: number }): JSX.Element {
+  const percent = Number.isFinite(rate) ? formatRate(rate) : null;
+  const readout = percent ?? copy('instructor_report_stats.absent_figure');
+  const reading =
+    percent === null
+      ? fillCopy('instructor_report_stats.rate_reading_absent', { label })
+      : fillCopy('instructor_report_stats.rate_reading_percent_only', { label, percent });
   return (
     <div className="pulse-stat-rate" role="img" aria-label={reading}>
       <div className="pulse-stat-rate-head">

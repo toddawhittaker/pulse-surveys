@@ -57,11 +57,15 @@ WEEKS = [1, 2]
 # Passed explicitly on every construction here, so whether the builder gives the
 # last three a default is not something this file decides (`docs/MISTAKES.md`
 # entry 22: a new member reaches every fixture).
+#
+# E9-08 adds `lead_name`, required with no default (its settled interface), so it
+# is passed here too: `None`, the value a course with no lead carries.
 HELD_E8_01_MEMBERS: dict[str, Any] = {
     "course_label": "E7-02 BIO 101 F1WW — A course, Fall 2026",
     "streams": None,
     "workload_median": None,
     "released": None,
+    "lead_name": None,
 }
 
 PLANTED_MEMBERS = ("benchmark", "comparison", "university_mean")

@@ -150,6 +150,9 @@ WEEKLY_SUMMARY_COLUMNS = (
     PROMPT_VERSION_COLUMN,
     MODEL_ID_COLUMN,
     "generated_at",
+    # The highest decision sequence the summary walk read (ADR 0206): a number,
+    # never a time, so it adds no instant to the table.
+    "moderation_sequence_seen",
 )
 
 # This suite's own values. None of them is a claim about anything the system

@@ -155,14 +155,14 @@ boundary: `metadata_tables` is asked for by both.
     neither the creation order nor the code order, and the two sessions criterion
     3 is about — a person holding no grant, and a session naming no person —
     which no launch can issue and which are therefore minted.
-  - `fixtures/benchmark_views.py` — E5-03: the four benchmark views' column
-    contracts and the two `SECURITY DEFINER` set functions' signatures, both
-    transcribed from the ruling on `docs/disputes/E5-03-01.md` because neither
-    was settled anywhere else; a world of two terms whose sections differ in one
-    thing at a time — length, level, start cohort or term — so every membership
-    rule can be asserted from both sides; and one reader for a row of each view
-    and each function, on `db_session` and on a committed world the application
-    role can reach. Every guard it raises is a `pytest.fail` a test body reaches,
+  - `fixtures/benchmark_views.py` — E5-03: the two `SECURITY DEFINER` set
+    functions' signatures (the four cohort views it also described were retired
+    by E9-12, with their readers here), transcribed from the ruling on
+    `docs/disputes/E5-03-01.md` because they were settled nowhere else; a world
+    of two terms whose sections differ in one thing at a time — length, level,
+    start cohort or term — so every membership rule can be asserted from both
+    sides; and one reader for each function's rows, on `db_session` and on a
+    committed world the application role can reach. Every guard it raises is a `pytest.fail` a test body reaches,
     never a fixture, so an unbuilt E5-03 is a wall of FAILEDs naming deliverables
     rather than of setup errors (`docs/MISTAKES.md` entry 44). E5-04 added the
     three things its service is resolved over — a lead-faculty mapping, a named
@@ -203,7 +203,19 @@ boundary: `metadata_tables` is asked for by both.
     students, former teacher, two-hat person and response a test plants for
     itself.
 
-Five modules under `tests/fixtures/` carry **no fixtures** and are therefore not
+  - `fixtures/named_set_figures.py` — E9-05: E5-03's benchmark world given named
+    departments, courses with several sections, and the people and assignments
+    E9-01's purview is resolved from (`purview_world`, unbuilt); the reads E9-05's
+    interface settles — `named_set_series` and `section_benchmarks` with the
+    reader's scope — reached inside a test body; and the readers for one week of
+    a series, a figure's state, and any answer as plain data for equality.
+  - `fixtures/people_graph.py` — E9-02: the twelve people-graph definers called
+    as `pulse_app` under their settled names and signatures, a world of one admin
+    and three non-admins seeded committed, the rows read back on a second
+    connection, and the planted `audit_log` trigger done-when 5 fails an audit
+    insert with.
+
+The modules below under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
 `seed_row` already is. They are listed here because this docstring is the index
 of that directory and a module missing from it is a record that has stopped being
@@ -221,6 +233,12 @@ complete.
     without deciding how they are built — two names spelled, the membership
     table found by its foreign keys, and the two seeding helpers four modules
     share.
+  - `fixtures/purview_walk.py` — E9-01: E0-09's `climbing_forest`, moved here so
+    the supervision-graph properties and the purview properties share one
+    generator; the `world_plans` strategy (a containment tree, an assignment
+    forest, people with several hats and a Lead Faculty mapping, as a pure value
+    `hypothesis.find` can interrogate); the writer that builds a plan; and the
+    purview computed from the plan alone, never from `authz`.
   - `fixtures/benchmark_history.py` — E5-12: `scripts/seed_benchmark_history.py`
     piped into an interpreter the way the runbook pipes it, the row counts a
     refused run is read by, the SPEC §2.2 reader that says which sections a
@@ -233,6 +251,18 @@ complete.
     sections, windows, rosters and enrollments four staff launches and a roster
     sync would have left, planted row by row out of the seeder's own refusals, so
     that its write path can be executed by a test at all.
+  - `fixtures/admin_gate.py` — E9-02: the admin gate asked over HTTP on a stub
+    route mounted on the built application (its real routes are E9-06's), and
+    the admin, Care and student sessions minted on `fixtures/lead_review.py`'s
+    world, an admin or Care session at the web door.
+  - `fixtures/people_editor.py` — the admin's people editor driven over HTTP on
+    the built application with an admin session, and the planting its tests share.
+  - `fixtures/e9_invariant_pass.py` — E9-12: the URLs of E9's four read routes
+    (the roll-up tree, a node's figures, a named set's series, the drill-down),
+    the readers that search an answer for ids, names and comment-shaped keys,
+    the shared owed read swapped so every section a page computes over carries a
+    card, a named set planted over courses a test names, and `LeadReviewWorld`'s
+    session minting over the bare report world.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -293,9 +323,14 @@ pytest_plugins = (
     "fixtures.instructor_decisions",
     "fixtures.lead_review",
     "fixtures.staff_names",
+    "fixtures.staff_names_for_sections",
     "fixtures.the_hold",
     "fixtures.response_draft",
     "fixtures.response_loop_doors",
+    "fixtures.named_set_figures",
+    "fixtures.session_switch",
+    "fixtures.people_graph",
+    "fixtures.people_editor",
 )
 
 
