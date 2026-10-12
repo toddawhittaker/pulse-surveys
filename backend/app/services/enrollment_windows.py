@@ -53,7 +53,7 @@ from sqlalchemy.orm import Session
 
 from app.models.base import Base
 from app.models.identity import Enrollment
-from app.services.authz import section_scoped_assignees_of
+from app.services.authz import section_scoped_assignees
 from app.services.identity import persons_for_users
 
 __all__ = [
@@ -229,7 +229,7 @@ def without_staff_of(
     is left out only of the section whose staff their person is.
     """
     asked = {section_id: set(user_ids) for section_id, user_ids in members.items()}
-    staff = section_scoped_assignees_of(session, section_ids=list(asked))
+    staff = section_scoped_assignees(session, section_ids=list(asked))
     staffed_members = {user_id for section_id in staff for user_id in asked.get(section_id, ())}
     person_of = persons_for_users(session, staffed_members)
     return {

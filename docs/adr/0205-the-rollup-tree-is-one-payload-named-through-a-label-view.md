@@ -43,7 +43,7 @@ this ticket failed on exactly that.
   `reporting._enrolled_students_of` answers that for every section of a node
   in a fixed number of statements: one grouped first-sync-day read
   (`enrollment_windows.first_sync_days`), one `enrollment` read, one read of
-  every section's staff (`authz.section_scoped_assignees_of`), and one call of
+  every section's staff (`authz.section_scoped_assignees`, now set-shaped), and one call of
   `public.resolve_persons_for_users(uuid[])`, a set form of ADR 0094's
   `resolve_person_for_user` with the same owner and the same one column read
   (`views_sql/identity_resolution_v003.sql`). The one-section functions call

@@ -1391,8 +1391,10 @@ def teaching_instructor_grants(session: Session, *, section_id: UUID) -> dict[UU
     }
 
 
-def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]:
-    """The people holding an assignment scoped to this section — its staff (EE-M1).
+def section_scoped_assignees(
+    session: Session, *, section_ids: Collection[UUID]
+) -> dict[UUID, set[UUID]]:
+    """The people holding an assignment scoped to each of these sections — their staff (EE-M1).
 
     Asked by SPEC §3.4's participation sweep before it delivers a score. A roster
     container carries everybody the platform lists, instructors included. Until
@@ -1406,7 +1408,7 @@ def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]
     **It answers people, not members.** The caller holds `user` ids and this
     answers `person` ids, because those are two different keys for two different
     things (ADR 0024) and the hop between them is a definer call the caller makes —
-    `app.services.identity.person_for_user`. Answering members would put that hop
+    `app.services.identity.persons_for_users`. Answering members would put that hop
     inside this module and give it a second thing to be about.
 
     **It lives here because the view does.** E0-41's rule is that
@@ -1420,19 +1422,10 @@ def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]
     nothing and refuses nothing, and what a caller does with the answer is the
     caller's rule. A false *yes* withholds a grade from a student; a false *no*
     posts one to a member of staff. Neither widens anybody's purview.
-    """
-    return section_scoped_assignees_of(session, section_ids=[section_id]).get(section_id, set())
 
-
-def section_scoped_assignees_of(
-    session: Session, *, section_ids: Collection[UUID]
-) -> dict[UUID, set[UUID]]:
-    """`section_scoped_assignees` for a set of sections, in one statement.
-
-    Each section's staff by person id; a section nobody is assigned to is
-    absent. The roll-up figures ask this for every section of a node at once
-    (ADR 0205), and the one-section form above calls this, so the question is
-    written once.
+    **One statement for any number of sections** (ADR 0205): a section nobody
+    is assigned to is absent from the answer. The participation sweep asks for
+    one section and the roll-up figures for every section of a node.
     """
     asked = sorted(set(section_ids))
     if not asked:
