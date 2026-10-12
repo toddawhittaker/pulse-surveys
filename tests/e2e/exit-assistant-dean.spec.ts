@@ -137,7 +137,9 @@ async function expectTheDrawnTree(where: Page | Frame): Promise<void> {
     ROOTS,
   );
   const psychology = roots.filter({
-    has: where.locator(':scope > div .pulse-hierarchy-name', { hasText: PSYCHOLOGY_ROOT }),
+    has: where.locator('.pulse-hierarchy-select .pulse-hierarchy-name', {
+      hasText: new RegExp(`^${PSYCHOLOGY_ROOT}$`),
+    }),
   });
   await psychology.locator(':scope > div button.pulse-hierarchy-toggle').click();
   await expect(
