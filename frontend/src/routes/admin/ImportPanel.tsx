@@ -12,6 +12,8 @@ import {
 import type { Table } from '../../lib/adminTable';
 import { copy, fillCopy } from '../../copy/adminPeople';
 import type { Gate } from './AdminPage';
+import { describedBy, useWriteRefusal } from './outcome';
+import { RefusalNote } from './PersonPanel';
 
 /** The file name each table exports under, less its suffix (`api/admin.py`'s `Content-Disposition`). */
 const EXPORT_STEM: Readonly<Record<Table, string>> = {
@@ -59,6 +61,8 @@ export function ImportPanel({
 }): JSX.Element {
   const [held, setHeld] = useState<Held>({ kind: 'idle' });
   const fileId = useId();
+  const refusalId = useId();
+  const exportRefusal = useWriteRefusal();
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   /** The control pressed is about to leave, so focus goes to the section's heading. */
@@ -134,9 +138,12 @@ export function ImportPanel({
     const answer = await exportCsv(table);
     if (gated(answer)) return;
     if (answer.kind !== 'ok') {
-      announce(answer.kind === 'refused' ? answer.detail : copy('admin_people.page.write_unavailable'));
+      const said = answer.kind === 'refused' ? answer.detail : copy('admin_people.page.write_unavailable');
+      exportRefusal.show(said);
+      announce(said);
       return;
     }
+    exportRefusal.show('');
     const url = URL.createObjectURL(new Blob([answer.value], { type: 'text/csv' }));
     const link = document.createElement('a');
     link.href = url;
@@ -161,12 +168,19 @@ export function ImportPanel({
           className="pulse-admin-input"
           type="file"
           accept=".csv,text/csv"
+          aria-describedby={held.kind === 'refused' ? refusalId : undefined}
           onChange={(event) => void choose(event)}
         />
-        <button type="button" className="pulse-admin-button-plain" onClick={() => void download()}>
+        <button
+          type="button"
+          className="pulse-admin-button-plain"
+          aria-describedby={describedBy(exportRefusal)}
+          onClick={() => void download()}
+        >
           {copy('admin_people.page.export')}
         </button>
       </div>
+      <RefusalNote refusal={exportRefusal} />
 
       {held.kind === 'dry' || held.kind === 'applying' ? (
         <div data-testid={IMPORT_DIFF_TESTID}>
@@ -203,7 +217,9 @@ export function ImportPanel({
       ) : null}
 
       {held.kind === 'stale' || held.kind === 'refused' ? (
-        <p className="pulse-admin-refusal">{held.detail}</p>
+        <p id={refusalId} className="pulse-admin-refusal">
+          {held.detail}
+        </p>
       ) : null}
 
       {held.kind === 'stale' ? (
@@ -211,6 +227,7 @@ export function ImportPanel({
           <button
             type="button"
             className="pulse-admin-button"
+            aria-describedby={refusalId}
             onClick={() => {
               toHeading();
               void dryRunOf(held.csv);

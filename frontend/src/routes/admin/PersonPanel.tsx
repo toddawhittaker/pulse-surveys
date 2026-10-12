@@ -17,7 +17,7 @@ import {
 import { copy, fillCopy } from '../../copy/adminPeople';
 import type { Gate } from './AdminPage';
 import { nodeText, type NodeLabels } from './nodeLabels';
-import { settle } from './outcome';
+import { describedBy, settle, useWriteRefusal, type WriteRefusal } from './outcome';
 
 /** Where a spec finds the panel. */
 export const PERSON_PANEL_TESTID = 'pulse-admin-person-panel';
@@ -77,6 +77,9 @@ export function PersonPanel({
   const loginHeadingRef = useRef<HTMLHeadingElement>(null);
   const [issuer, setIssuer] = useState('');
   const [subject, setSubject] = useState('');
+  const editRefusal = useWriteRefusal();
+  const grantRefusal = useWriteRefusal();
+  const loginRefusal = useWriteRefusal();
 
   // Opening the panel moves the reader into it: the control that opened it is
   // still where focus is, and a keyboard or screen-reader user would otherwise
@@ -101,26 +104,12 @@ export function PersonPanel({
     event: FormEvent,
     send: () => Promise<Parameters<typeof settle>[0]>,
     done: string,
+    refusal: WriteRefusal,
   ): Promise<boolean> {
     event.preventDefault();
-    const landed = settle(await send(), done, announce, onGate);
+    const landed = settle(await send(), done, announce, onGate, refusal);
     if (landed) onChanged();
     return landed;
-  }
-
-  async function revoke(assignment: AssignmentLineView): Promise<void> {
-    if (
-      settle(
-        await revokeRole(assignment.assignment_id),
-        copy('admin_people.page.role_revoked'),
-        announce,
-        onGate,
-      )
-    ) {
-      // The button pressed is about to leave; focus goes to the list's heading.
-      rolesHeadingRef.current?.focus();
-      onChanged();
-    }
   }
 
   return (
@@ -140,6 +129,7 @@ export function PersonPanel({
             event,
             () => editPerson(person.person_id, name, category),
             copy('admin_people.page.person_saved'),
+            editRefusal,
           )
         }
       >
@@ -159,9 +149,10 @@ export function PersonPanel({
             onChange={(event) => setCategory(event.target.value)}
           />
         </Field>
-        <button type="submit" className="pulse-admin-button">
+        <button type="submit" className="pulse-admin-button" aria-describedby={describedBy(editRefusal)}>
           {copy('admin_people.page.save_person')}
         </button>
+        <RefusalNote refusal={editRefusal} />
       </form>
 
       <h3 className="pulse-admin-diff-heading" tabIndex={-1} ref={rolesHeadingRef}>
@@ -181,18 +172,17 @@ export function PersonPanel({
                 onGate={onGate}
                 onChanged={onChanged}
               />
-              <button
-                type="button"
-                className="pulse-admin-button-plain"
-                onClick={() => void revoke(assignment)}
-              >
-                {placeOf(labels, assignment) === null
-                  ? fillCopy('admin_people.page.revoke', { role: roleLabel(assignment.role) })
-                  : fillCopy('admin_people.page.revoke_at', {
-                      role: roleLabel(assignment.role),
-                      place: placeOf(labels, assignment) ?? '',
-                    })}
-              </button>
+              <RevokeButton
+                assignment={assignment}
+                place={placeOf(labels, assignment)}
+                announce={announce}
+                onGate={onGate}
+                onRevoked={() => {
+                  // The button pressed is about to leave; focus goes to the list's heading.
+                  rolesHeadingRef.current?.focus();
+                  onChanged();
+                }}
+              />
             </li>
           ))}
         </ul>
@@ -205,6 +195,7 @@ export function PersonPanel({
             event,
             () => grantRole(person.person_id, role, node),
             copy('admin_people.page.role_granted'),
+            grantRefusal,
           )
         }
       >
@@ -242,9 +233,10 @@ export function PersonPanel({
             ))}
           </select>
         </Field>
-        <button type="submit" className="pulse-admin-button">
+        <button type="submit" className="pulse-admin-button" aria-describedby={describedBy(grantRefusal)}>
           {copy('admin_people.page.grant_submit')}
         </button>
+        <RefusalNote refusal={grantRefusal} />
       </form>
 
       <h3 className="pulse-admin-diff-heading" tabIndex={-1} ref={loginHeadingRef}>
@@ -254,9 +246,12 @@ export function PersonPanel({
         <button
           type="button"
           className="pulse-admin-button-plain"
+          aria-describedby={describedBy(loginRefusal)}
           onClick={() =>
             void unlinkWebLogin(person.person_id).then((answer) => {
-              if (settle(answer, copy('admin_people.page.login_was_unlinked'), announce, onGate)) {
+              if (
+                settle(answer, copy('admin_people.page.login_was_unlinked'), announce, onGate, loginRefusal)
+              ) {
                 loginHeadingRef.current?.focus();
                 onChanged();
               }
@@ -273,6 +268,7 @@ export function PersonPanel({
               event,
               () => linkWebLogin(person.person_id, issuer.trim(), subject.trim()),
               copy('admin_people.page.login_was_linked'),
+              loginRefusal,
             ).then((landed) => {
               // The form is about to be replaced by the unlink control.
               if (landed) loginHeadingRef.current?.focus();
@@ -295,11 +291,12 @@ export function PersonPanel({
               onChange={(event) => setSubject(event.target.value)}
             />
           </Field>
-          <button type="submit" className="pulse-admin-button">
+          <button type="submit" className="pulse-admin-button" aria-describedby={describedBy(loginRefusal)}>
             {copy('admin_people.page.link_submit')}
           </button>
         </form>
       )}
+      <RefusalNote refusal={loginRefusal} />
 
       <div className="pulse-admin-row">
         <button type="button" className="pulse-admin-button-plain" onClick={onClose}>
@@ -354,6 +351,7 @@ function ReportsToSelect({
   // on every arrow key, and a write per keystroke is a change of context
   // nobody asked for (WCAG 3.2.2).
   const [choice, setChoice] = useState(assignment.reports_to ?? '');
+  const refusal = useWriteRefusal();
 
   useEffect(() => {
     let live = true;
@@ -405,10 +403,11 @@ function ReportsToSelect({
       <button
         type="button"
         className="pulse-admin-button-plain"
+        aria-describedby={describedBy(refusal)}
         onClick={() =>
           void setReportsTo(assignment.assignment_id, choice === '' ? null : choice).then(
             (answer) => {
-              if (settle(answer, copy('admin_people.page.reports_to_saved'), announce, onGate)) {
+              if (settle(answer, copy('admin_people.page.reports_to_saved'), announce, onGate, refusal)) {
                 onChanged();
               }
             },
@@ -417,6 +416,58 @@ function ReportsToSelect({
       >
         {fillCopy('admin_people.page.save_reports_to', { assignment: text })}
       </button>
+      <RefusalNote refusal={refusal} />
     </span>
+  );
+}
+
+/** Revoking one assignment, with its refusal beside its button. */
+function RevokeButton({
+  assignment,
+  place,
+  announce,
+  onGate,
+  onRevoked,
+}: {
+  readonly assignment: AssignmentLineView;
+  readonly place: string | null;
+  readonly announce: (message: string) => void;
+  readonly onGate: (gate: Exclude<Gate, null>) => void;
+  readonly onRevoked: () => void;
+}): JSX.Element {
+  const refusal = useWriteRefusal();
+  return (
+    <>
+      <button
+        type="button"
+        className="pulse-admin-button-plain"
+        aria-describedby={describedBy(refusal)}
+        onClick={() =>
+          void revokeRole(assignment.assignment_id).then((answer) => {
+            if (settle(answer, copy('admin_people.page.role_revoked'), announce, onGate, refusal)) {
+              onRevoked();
+            }
+          })
+        }
+      >
+        {place === null
+          ? fillCopy('admin_people.page.revoke', { role: roleLabel(assignment.role) })
+          : fillCopy('admin_people.page.revoke_at', { role: roleLabel(assignment.role), place })}
+      </button>
+      <RefusalNote refusal={refusal} />
+    </>
+  );
+}
+
+/**
+ * Where a write's refusal stays beside its control. Always in the document, so
+ * the control's `aria-describedby` never names a missing node; empty until a
+ * refusal arrives.
+ */
+export function RefusalNote({ refusal }: { readonly refusal: WriteRefusal }): JSX.Element {
+  return (
+    <p id={refusal.id} className="pulse-admin-refusal">
+      {refusal.text}
+    </p>
   );
 }
