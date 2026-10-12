@@ -594,6 +594,10 @@ def attention_cards(
             )
         )
 
+    owed_weeks: dict[UUID, list[int]] = defaultdict(list)
+    for owed_id, week in owed:
+        owed_weeks[owed_id].append(week)
+
     for section in sections:
         found = figures.get(section.section_id)
         if found is not None and found.published:
@@ -604,7 +608,7 @@ def attention_cards(
                 card(section, "course_trend_down", course, latest)
             if found.enrolled > 0 and found.responses / found.enrolled < _LOW_RESPONSE_RATE:
                 card(section, "response_rate_low", None, latest)
-        for week in sorted(week for owed_id, week in owed if owed_id == section.section_id):
+        for week in sorted(owed_weeks.get(section.section_id, ())):
             card(section, "response_owed", None, week)
     return sorted(
         cards,
