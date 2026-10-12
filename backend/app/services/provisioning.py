@@ -560,7 +560,7 @@ def _ingest_the_context(
         _record_defect(session, claims, LaunchDefectKind.UNKNOWN_PREFIX)
         return None
 
-    term = _term_containing_the_launch_day(session, settings)
+    term = term_containing_today(session, settings)
     if term is None:
         _record_defect(session, claims, LaunchDefectKind.NO_TERM_FOR_LAUNCH_DATE)
         return None
@@ -705,7 +705,7 @@ def _inside_the_bands(number: str) -> bool:
     return False
 
 
-def _term_containing_the_launch_day(session: Session, settings: Settings) -> Term | None:
+def term_containing_today(session: Session, settings: Settings) -> Term | None:
     """The term whose dates contain the day of this launch, or `None`.
 
     Todd's ruling, 2026-08-26: "a new section belongs to the one term whose dates

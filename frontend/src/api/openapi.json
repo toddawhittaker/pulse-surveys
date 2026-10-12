@@ -3439,7 +3439,7 @@
           "current_term_id"
         ],
         "title": "LeadershipContext",
-        "description": "What the leadership pages need before their first read (SPEC \u00a75.5).\n\n`roles` is every leadership role the reader holds, highest first, so a\nread-only context bar can name the reader's role. `terms` is every term,\noldest first; `current_term_id` is the term whose dates contain the\ninstitution's today, absent between terms. Terms are no secret."
+        "description": "What the leadership pages need before their first read (SPEC \u00a75.5).\n\n`roles` is every leadership role the reader holds, highest first, so a\nread-only context bar can name the reader's role. `terms` is every term,\noldest first; `current_term_id` is the term the pages open: the one whose\ndates contain the institution's today, else the latest that has begun,\nabsent before the first term begins. Terms are no secret."
       },
       "LogRow": {
         "properties": {

@@ -161,8 +161,9 @@ class LeadershipContext(BaseModel):
 
     `roles` is every leadership role the reader holds, highest first, so a
     read-only context bar can name the reader's role. `terms` is every term,
-    oldest first; `current_term_id` is the term whose dates contain the
-    institution's today, absent between terms. Terms are no secret.
+    oldest first; `current_term_id` is the term the pages open: the one whose
+    dates contain the institution's today, else the latest that has begun,
+    absent before the first term begins. Terms are no secret.
     """
 
     model_config = ConfigDict(frozen=True)
