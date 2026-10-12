@@ -105,7 +105,8 @@ pass unbounded in time and in what it trusts. Four changes.
   §5's seal changed what it treats as her sections. *Rejected:* ending grants
   after term as the platform says, which is what the original decision did.
   *Cost:* an instructor really removed after the term keeps the grant on that
-  past section until E9's end-dating gives an admin a way to end it.
+  past section. Assignment end-dating was later ruled out (ADR 0200), whose
+  definers also refuse teaching grants, so nothing in the admin console ends it.
   **Writing is gated too**, because a grant written after the last day is one no
   later walk can end: a person first listed as Instructor on a past section
   would hold its reports for good. *Rejected:* gating only the ending pass,
