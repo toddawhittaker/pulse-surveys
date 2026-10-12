@@ -91,8 +91,13 @@ from app.copy.leadership_sets import (
 )
 from app.models.benchmark import ComparisonSet, ComparisonSetMember
 from app.models.org import Course, CourseLevel, Prefix, Section
+from app.models.survey import REPORT_STREAMS
+from app.models.term import Term
 from app.schemas.comparison_sets import (
     CourseOption,
+    NamedSetCohort,
+    NamedSetSeries,
+    NamedSetWeek,
     SetDetail,
     SetOptions,
     SetPreview,
@@ -100,18 +105,21 @@ from app.schemas.comparison_sets import (
     SetWrite,
 )
 from app.services import clock
-from app.services.benchmarks import resolve_named_set
+from app.services.authz import ActorScope
+from app.services.benchmarks import named_set_series, resolve_named_set
 from app.services.section_codes import course_label
 
 __all__ = [
     "NotTheSetsDefinerError",
     "SetUnavailableError",
+    "TermUnavailableError",
     "WriteRefusedError",
     "create_set",
     "definition_options",
     "delete_set",
     "edit_set",
     "listed_sets",
+    "named_set_figures",
     "preview_of",
     "read_set",
 ]
@@ -133,6 +141,10 @@ NOT_NULL_VIOLATION = "23502"
 
 class SetUnavailableError(Exception):
     """No set carries this id — the 404 every keyed route answers."""
+
+
+class TermUnavailableError(Exception):
+    """No term carries this id — the 404 the series route answers for the term it is asked about."""
 
 
 class NotTheSetsDefinerError(Exception):
@@ -393,6 +405,49 @@ def preview_of(session: Session, *, set_id: UUID) -> SetPreview:
     return SetPreview(
         member_count=int(member_count or 0),
         section_count=len(resolve_named_set(session, set_id=found.id)),
+    )
+
+
+def named_set_figures(
+    session: Session, *, set_id: UUID, scope: ActorScope, term_id: UUID, settings: Settings
+) -> NamedSetSeries:
+    """One set's figures for one leadership reader in one term, as the series route serves them.
+
+    **The two refusals come first, in this order:** an unknown set is
+    `SetUnavailableError`, then an unknown term is `TermUnavailableError`. Set
+    existence is public under ADR 0173 and a term is no secret, so neither 404
+    says anything the reader could not already see. Past them, every figure is
+    `app.services.benchmarks.named_set_series`' — narrowed to the reader's
+    purview, both minimums applied and sealed there — and this only places each
+    one in its payload member. A set with no section inside the purview answers
+    the purview's cohorts with every figure suppressed, exactly as a thin set
+    does (E9-05 done-when 9).
+    """
+    _the_set(session, set_id=set_id)
+    if session.get(Term, term_id) is None:
+        raise TermUnavailableError
+    instructor, course = REPORT_STREAMS  # ("INSTRUCTOR", "COURSE"), the stored stream tokens
+    cohorts = named_set_series(
+        session, set_id=set_id, scope=scope, term_id=term_id, settings=settings
+    )
+    return NamedSetSeries(
+        cohorts=[
+            NamedSetCohort(
+                section_start_date=cohort.section_start_date,
+                weeks=[
+                    NamedSetWeek(
+                        course_week=week.course_week,
+                        term_week=week.term_week,
+                        instructor_mean=week.ratings[instructor],
+                        course_mean=week.ratings[course],
+                        workload_mean=week.workload.mean,
+                        workload_median=week.workload.median,
+                    )
+                    for week in cohort.weeks
+                ],
+            )
+            for cohort in cohorts
+        ]
     )
 
 
