@@ -6,7 +6,7 @@ response-on-behalf actions, imports (with their dry-run diffs), and admin config
 edits". E0-10 needs exactly one of those: §4's "every identity access is
 automatically audit-logged with actor, timestamp, and case".
 
-**Six actions can be written, and the enum lists exactly those.** E0-10 added
+**Seven actions can be written, and the enum lists exactly those.** E0-10 added
 `IDENTITY_REVEAL`. E9-02 added five for the admin's people-graph writes
 (`ROLE_GRANTED`, `ROLE_REVOKED`, `REPORTS_TO_SET`, `LEAD_MAPPING_CHANGED` and
 `WEB_LOGIN_LINKAGE_CHANGED`), because the E9 owner ruling makes every grant and
@@ -32,7 +32,10 @@ written about (`subject_person_id`) and, for an assignment or a mapping, the
 role and the scope node, and names no student. `subject_user_id` was `NOT NULL`
 while the reveal was the only action; it is nullable now, and two two-way checks
 hold each shape: a row names a student exactly when it is a reveal, and names a
-person exactly when it is not.
+person exactly when it is neither a reveal nor an applied import. E9-06's
+`IMPORT_APPLIED` row is the third shape: it names no student and no person, and
+it alone carries `detail`, the import's kind and dry-run diff, written by
+`public.admin_record_import` inside the apply's transaction.
 
 **A row has to be committed before any name is handed over, and that is what
 makes it a record rather than a courtesy.**
@@ -69,9 +72,11 @@ model, the disposition note, the two actions — arrives with it.
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import CheckConstraint, Enum, ForeignKey, Uuid, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import AwareDateTime, Base, UuidPrimaryKey
@@ -92,6 +97,11 @@ class AuditAction(StrEnum):
     `WEB_LOGIN_LINKAGE_CHANGED` a link and an unlink. Creating or editing a
     person record is not audited.
 
+    `IMPORT_APPLIED` is E9-06's: an admin applied a people or mapping CSV
+    import, and the row carries the kind and the dry-run diff in `detail`
+    (SPEC §8, "imports (with their dry-run diffs)"; ADR 0204). It names no
+    subject person, because one import is about many.
+
     Each member's value is its name, as every other enum in this model layer
     does it — one spelling in Python and in the database.
     """
@@ -102,6 +112,7 @@ class AuditAction(StrEnum):
     REPORTS_TO_SET = "REPORTS_TO_SET"
     LEAD_MAPPING_CHANGED = "LEAD_MAPPING_CHANGED"
     WEB_LOGIN_LINKAGE_CHANGED = "WEB_LOGIN_LINKAGE_CHANGED"
+    IMPORT_APPLIED = "IMPORT_APPLIED"
 
 
 class AuditLog(UuidPrimaryKey, Base):
@@ -123,11 +134,17 @@ class AuditLog(UuidPrimaryKey, Base):
             "(action = 'IDENTITY_REVEAL') = (subject_user_id IS NOT NULL)",
             name="a_reveal_names_its_student",
         ),
-        # Every admin write names the person it was about, and a reveal names
-        # none.
+        # Every single admin write names the person it was about; a reveal and
+        # an applied import (about many people at once) name none.
         CheckConstraint(
-            "(action = 'IDENTITY_REVEAL') = (subject_person_id IS NULL)",
+            "(action IN ('IDENTITY_REVEAL', 'IMPORT_APPLIED')) = (subject_person_id IS NULL)",
             name="an_admin_write_names_its_person",
+        ),
+        # An applied import carries its kind and its dry-run diff, and no other
+        # row carries anything here.
+        CheckConstraint(
+            "(action = 'IMPORT_APPLIED') = (detail IS NOT NULL)",
+            name="only_an_import_carries_a_detail",
         ),
         # Only an edge write names a parent.
         CheckConstraint(
@@ -189,3 +206,10 @@ class AuditLog(UuidPrimaryKey, Base):
     # ships the reveal as a proof of mechanism, before there is any case model
     # to reveal *from*. E10 adds the reference when it adds the table.
     case_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    # On an `IMPORT_APPLIED` row, `{"kind": "people" | "lead_mappings", "diff":
+    # {...}}`: the diff the dry run answered, without its digest (ADR 0204). Staff
+    # records only, because no import names a student. NULL on every other row,
+    # by the `only_an_import_carries_a_detail` check. `none_as_null`, so a Python
+    # `None` is SQL NULL rather than the JSON value `null`, which the check would
+    # count as a detail.
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB(none_as_null=True), nullable=True)

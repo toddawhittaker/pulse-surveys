@@ -293,6 +293,10 @@ OWNER_HOLDS = (
     ("audit_log", "action", "INSERT"),
     ("audit_log", "subject_person_id", "INSERT"),
     ("audit_log", "scope_node_id", "INSERT"),
+    # E9-06's fix round: `admin_record_import`, owned by this role, writes the
+    # import's diff into `audit_log.detail` (SPEC §8, "imports (with their dry-run
+    # diffs)"), so its owner must be able to insert that column.
+    ("audit_log", "detail", "INSERT"),
 )
 
 # What it must not hold. Each is a widening a body does not need.
@@ -351,7 +355,17 @@ def test_the_people_graph_definers_owner_holds_exactly_what_its_writes_need(
     role = db_session.execute(text(ROLE_ROW), {"role": OWNER_ROLE}).mappings().one_or_none()
     assert role is not None, (
         f"There is no `{OWNER_ROLE}` role. Settled: one NOLOGIN owner of all twelve people-graph "
-        "definers."
+        "definers and of E9-06's `admin_record_import`."
+    )
+    has_detail = db_session.execute(
+        text(
+            "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' "
+            "AND table_name = 'audit_log' AND column_name = 'detail'"
+        )
+    ).scalar_one()
+    assert has_detail == 1, (
+        "`audit_log` has no `detail` column. E9-06's fix round adds it (nullable `jsonb`, "
+        "non-null exactly for `IMPORT_APPLIED`), and the owner's `INSERT` on it is checked below."
     )
     assert (role["rolcanlogin"], role["rolsuper"]) == (False, False), (
         f"`{OWNER_ROLE}` has login {role['rolcanlogin']} and superuser {role['rolsuper']}; it is a "

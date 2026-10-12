@@ -3,10 +3,11 @@
 **ID:** E9-06
 **Branch:** `e9/people-and-mapping-editor-backend`
 **Depends on:** 02
-**Lane:** light
-**Why this lane:** a service, routes and schemas over E9-02's definers. It
-calls `require_admin` and the definers and changes neither, adds no view, no
-migration and no `invariant`-marked test.
+**Lane:** heavy
+**Why this lane:** set light at breakdown (a service, routes and schemas over
+E9-02's definers), and re-laned heavy by its review: SPEC §8 needs an applied
+import's audit row, which adds a definer under `views_sql/` and a migration on
+`audit_log`. The fix round ran tests first.
 **Size:** L
 **Security-relevant:** the admin's editor. A defect here imports a mapping
 the admin did not see in the dry run, or applies half an import.

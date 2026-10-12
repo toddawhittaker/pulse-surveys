@@ -458,6 +458,7 @@ pulse-surveys/
 │       │   ├── response_loop_guard_v001.sql  # who may write a response or a policy, checked at insert
 │       │   ├── response_loop_guard_v002.sql  # who may set a policy, checked for the one course a row covers
 │       │   ├── people_graph_v001.sql         # the admin's writes to the people graph and the admin's reads, each admin-checked and audited
+│       │   ├── people_graph_v002.sql         # the record of an applied people or mapping import, with its dry-run diff, admin-checked
 │       │   ├── section_staff_names_v001.sql  # the one channel a staff name reaches a reader through
 │       │   ├── section_staff_names_v002.sql  # the same channel over a set of sections, with each name's role
 │       │   └── queries.py          # typed ways into the read views
@@ -469,12 +470,13 @@ pulse-surveys/
 │       │   ├── report.py           # the instructor's Monday report
 │       │   ├── report_benchmark.py # the report's comparison and university figures
 │       │   ├── comparison_sets.py  # the named-set management API, and a set's figures for one leader
+│       │   ├── admin.py            # the people editor's tables, writes, and CSV import diffs
 │       │   ├── response_loop.py    # a student's week state and the response published to it
 │       │   ├── moderation.py       # the Lead Faculty review queue, a leader's decision, the exclusion log
 │       │   └── session.py          # the role switcher: the views a session holds, a switch, the new session
 │       │
 │       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
-│       │   ├── admin_people.py     # the admin gate's sentences and the people-graph writes' refusals
+│       │   ├── admin_people.py     # the admin gate's sentences, the people-graph writes' refusals, the import's
 │       │   ├── entry.py            # the four pages a door answers with when there is no landing
 │       │   ├── landing.py          # the role switch's refusal
 │       │   ├── submit.py           # the weekly survey's submit path
@@ -496,7 +498,7 @@ pulse-surveys/
 │       │   ├── instructor.py       # the Monday report reads, comment decisions, the response draft and check, the week's response
 │       │   ├── leadership.py       # named comparison sets and a set's figures for the reader; the review queue and exclusion log; the response policy, the responses owed, on behalf; a section's read-only drill-down
 │       │   ├── care.py             # threat queue, audited re-identify — not built yet: E10
-│       │   └── admin.py            # observability, config, hierarchy, roles — not built yet: E11
+│       │   └── admin.py            # the people editor (§6.3); observability and config — not built yet: E11
 │       │
 │       ├── services/               # domain logic (the real app lives here)
 │       │   ├── authz.py            # the one chokepoint every entry point reads through
@@ -517,6 +519,7 @@ pulse-surveys/
 │       │   ├── report_comments.py  # §4's small-N comment rules
 │       │   ├── benchmarks.py       # comparison-set resolution, length/level matching, min-N
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set; its figures for one leader
+│       │   ├── people.py           # the people editor: sorting, paging, the reports-to selector, CSV import with a dry run
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
 │       │   ├── response_loop.py    # the staff names of a set of sections for a reader of them, and a course page's lead; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)

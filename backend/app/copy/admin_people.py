@@ -1,12 +1,13 @@
-"""The sentences the admin's people-graph writes refuse with, and the admin gate's two — E9-02.
+"""The admin's people editor: the definers' refusals, the gate's two sentences, the import's.
 
 SPEC §6.3 puts the People & reporting editor and the Lead Faculty mapping table in
 the admin console. The writes underneath them are `SECURITY DEFINER` functions
-in `app/views_sql/people_graph_v001.sql` (ADR 0200), and each refusal they can
+in `app/views_sql/people_graph_v001.sql` (ADR 0200) and `people_graph_v002.sql`
+(E9-06's import record), and each refusal they can
 make is raised as SQLSTATE `P0001` whose message is **exactly one key below**,
 for example `admin_people.actor_not_an_admin`. The message names no person and
 no id. A caller reads the key off the database error and looks it up in `COPY`;
-E9-06 writes that translation, and E9-02 ships none.
+`app.services.people` writes that translation.
 
 **One refusal carries a number.** `admin_people.assignment_has_reports` is raised
 with the count of assignments that still report to the one being revoked, as
@@ -135,6 +136,60 @@ _PERSON_NOT_LINKED = CopyEntry(
     text="This person has no web login to unlink.",
 )
 
+# `admin_record_import` (people_graph_v002.sql), asked to record an import of a
+# kind other than a people file or a mapping file. The service passes only the
+# two, so this reaches nobody unless the service is wrong.
+_IMPORT_KIND_UNKNOWN = CopyEntry(
+    key="admin_people.import_kind_unknown",
+    text="This import is neither a people file nor a lead mapping file, so nothing was changed.",
+)
+
+# --- The editor's own sentences (the import and its dry run) ----------------
+
+# Each lead mapping a dry run would remove: SPEC §2.1's "unmapped, falls to
+# chair". `{course}` is the course's label.
+_UNMAPPED_FALLS_TO_CHAIR = CopyEntry(
+    key="admin_people.unmapped_falls_to_chair",
+    text="{course} is left without a lead and falls to its chair.",
+)
+
+# A refused line of an import file. `{line}` counts the header as line 1, and
+# `{reason}` is one of the sentences below or a definer's refusal above.
+_IMPORT_LINE_REFUSED = CopyEntry(
+    key="admin_people.import_line_refused",
+    text="Line {line} of the file cannot be imported, so nothing was changed. {reason}",
+)
+
+_IMPORT_HEADER_WRONG = CopyEntry(
+    key="admin_people.import_header_wrong",
+    text=(
+        "The first line of the file is not the header this table exports. Start from an "
+        "exported file."
+    ),
+)
+
+_IMPORT_LINE_MALFORMED = CopyEntry(
+    key="admin_people.import_line_malformed",
+    text=(
+        "It does not have the header's columns, or a value in it is not written the way the "
+        "export writes it."
+    ),
+)
+
+_IMPORT_KEY_REPEATED = CopyEntry(
+    key="admin_people.import_key_repeated",
+    text="It names the same record as an earlier line.",
+)
+
+# The apply's digest no longer matches: the tables moved after the dry run.
+_IMPORT_STALE = CopyEntry(
+    key="admin_people.import_stale",
+    text=(
+        "The tables changed after this file's dry run, so nothing was applied. Run the dry "
+        "run again and review the new changes."
+    ),
+)
+
 # What the gate serves. Each is its entry's own text, so a reworded sentence is
 # one edit above.
 NOT_ADMIN = _NOT_AN_ADMIN_SESSION.text
@@ -159,5 +214,12 @@ COPY: Mapping[str, CopyEntry] = {
         _SUBJECT_LINKED_TO_ANOTHER,
         _PERSON_ALREADY_LINKED,
         _PERSON_NOT_LINKED,
+        _IMPORT_KIND_UNKNOWN,
+        _UNMAPPED_FALLS_TO_CHAIR,
+        _IMPORT_LINE_REFUSED,
+        _IMPORT_HEADER_WRONG,
+        _IMPORT_LINE_MALFORMED,
+        _IMPORT_KEY_REPEATED,
+        _IMPORT_STALE,
     )
 }
