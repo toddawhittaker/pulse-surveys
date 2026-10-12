@@ -31,6 +31,7 @@ export type PersonLineView = Schemas['PersonLine'];
 export type AssignmentLineView = Schemas['AssignmentLine'];
 export type PeoplePageView = Schemas['PeoplePage'];
 export type ReportsToOptionView = Schemas['ReportsToOption'];
+export type OrgNodeView = Schemas['OrgNode'];
 export type MappingLineView = Schemas['MappingLine'];
 export type MappingPageView = Schemas['MappingPage'];
 export type PeopleDiffView = Schemas['PeopleDiff'];
@@ -64,6 +65,7 @@ export const GRANTABLE_ROLES: readonly AssignmentRole[] = (
 export const PEOPLE_PATH = '/admin/people';
 export const MAPPINGS_PATH = '/admin/lead-mappings';
 export const REPORTS_TO_OPTIONS_PATH = '/admin/reports-to-options';
+export const ORG_NODES_PATH = '/admin/org-nodes';
 
 export function personPath(personId: string): string {
   return `${PEOPLE_PATH}/${encodeURIComponent(personId)}`;
@@ -208,6 +210,16 @@ export async function readReportsToOptions(
   if (answer.kind !== 'ok') return answer;
   if (!Array.isArray(answer.value.options)) return { kind: 'unavailable' };
   return { kind: 'ok', value: answer.value.options };
+}
+
+/** The org nodes the server grants `role` at; the role decides the level, not the client. */
+export async function readOrgNodes(
+  role: AssignmentRole,
+): Promise<AdminOutcome<readonly OrgNodeView[]>> {
+  const answer = await read<Schemas['OrgNodes']>(`${ORG_NODES_PATH}${query({ role })}`);
+  if (answer.kind !== 'ok') return answer;
+  if (!Array.isArray(answer.value.nodes)) return { kind: 'unavailable' };
+  return { kind: 'ok', value: answer.value.nodes };
 }
 
 export function addPerson(name: string, category: string): Promise<AdminOutcome<Schemas['PersonCreated']>> {

@@ -82,9 +82,10 @@ export const ADMIN_PEOPLE_COPY = {
   'admin_people.page.save_person': 'Save name and category',
   'admin_people.page.grant_heading': 'Grant a role',
   'admin_people.page.field_role': 'Role',
-  'admin_people.page.field_node': 'Organization node ID',
-  'admin_people.page.node_help':
-    'The identifier of the college, department, course or institution the role is granted at. The server refuses a node that is not the level the role belongs to.',
+  'admin_people.page.field_node': 'Granted at',
+  'admin_people.page.node_option': '{name} ({parent})',
+  'admin_people.page.node_choose': 'Choose where',
+  'admin_people.page.nodes_unavailable': 'The places this role is granted at could not be loaded just now.',
   'admin_people.page.grant_submit': 'Grant role',
   'admin_people.page.role_granted': 'Role granted.',
   'admin_people.page.role_LEAD_FACULTY': 'Lead Faculty',

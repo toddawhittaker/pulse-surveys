@@ -5,12 +5,14 @@ import {
   editPerson,
   grantRole,
   linkWebLogin,
+  readOrgNodes,
   readReportsToOptions,
   revokeRole,
   setReportsTo,
   unlinkWebLogin,
   type AssignmentLineView,
   type AssignmentRole,
+  type OrgNodeView,
   type PersonLineView,
   type ReportsToOptionView,
 } from '../../api/admin';
@@ -49,8 +51,29 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
   const [category, setCategory] = useState(person.category);
   const [role, setRole] = useState<AssignmentRole>(GRANTABLE_ROLES[0] ?? 'ADMIN');
   const [node, setNode] = useState('');
+  const [loaded, setLoaded] = useState<{
+    readonly role: AssignmentRole;
+    readonly nodes: readonly OrgNodeView[];
+  } | null>(null);
+  // Nodes read for another role are not this role's, so none show until its own arrive.
+  const nodes = loaded !== null && loaded.role === role ? loaded.nodes : [];
   const [issuer, setIssuer] = useState('');
   const [subject, setSubject] = useState('');
+
+  // The places a role is granted at depend on the role, and the server says which.
+  useEffect(() => {
+    let live = true;
+    void readOrgNodes(role).then((answer) => {
+      if (!live) return;
+      if (answer.kind === 'ok') setLoaded({ role, nodes: answer.value });
+      else if (answer.kind === 'session-ended' || answer.kind === 'not-your-role') {
+        onGate(answer.kind);
+      } else announce(copy('admin_people.page.nodes_unavailable'));
+    });
+    return () => {
+      live = false;
+    };
+  }, [role, announce, onGate]);
 
   async function submit(
     event: FormEvent,
@@ -146,7 +169,7 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
         onSubmit={(event) =>
           void submit(
             event,
-            () => grantRole(person.person_id, role, node.trim()),
+            () => grantRole(person.person_id, role, node),
             copy('admin_people.page.role_granted'),
           )
         }
@@ -157,7 +180,10 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
             id={`${id}-role`}
             className="pulse-admin-input"
             value={role}
-            onChange={(event) => setRole(event.target.value as AssignmentRole)}
+            onChange={(event) => {
+              setRole(event.target.value as AssignmentRole);
+              setNode('');
+            }}
           >
             {GRANTABLE_ROLES.map((offered) => (
               <option key={offered} value={offered}>
@@ -167,17 +193,25 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
           </select>
         </Field>
         <Field id={`${id}-node`} label={copy('admin_people.page.field_node')}>
-          <input
+          <select
             id={`${id}-node`}
             className="pulse-admin-input"
             value={node}
-            aria-describedby={`${id}-node-help`}
             onChange={(event) => setNode(event.target.value)}
-          />
+          >
+            <option value="">{copy('admin_people.page.node_choose')}</option>
+            {nodes.map((choice) => (
+              <option key={choice.node_id} value={choice.node_id}>
+                {choice.parent_label === null
+                  ? choice.label
+                  : fillCopy('admin_people.page.node_option', {
+                      name: choice.label,
+                      parent: choice.parent_label,
+                    })}
+              </option>
+            ))}
+          </select>
         </Field>
-        <p className="pulse-admin-help" id={`${id}-node-help`}>
-          {copy('admin_people.page.node_help')}
-        </p>
         <button type="submit" className="pulse-admin-button">
           {copy('admin_people.page.grant_submit')}
         </button>

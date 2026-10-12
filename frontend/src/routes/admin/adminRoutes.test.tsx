@@ -136,8 +136,21 @@ function peopleReads(rows: unknown[] = THE_PEOPLE): Handler {
     if (ask.method === 'GET' && ask.path.startsWith('/admin/reports-to-options')) {
       return json(200, { options: [] });
     }
+    if (ask.method === 'GET' && ask.path.startsWith('/admin/org-nodes?')) {
+      return json(200, { nodes: nodesFor(ask.path) });
+    }
     return undefined;
   };
+}
+
+/** The nodes the server would answer for a role: the level is the server's, so each role gets its own. */
+function nodesFor(path: string) {
+  return path.endsWith('role=CARE')
+    ? [{ node_id: 'inst-1', label: 'Pulse University', parent_label: null }]
+    : [
+        { node_id: 'dept-a', label: 'Biology', parent_label: 'Sciences' },
+        { node_id: 'dept-b', label: 'Biology', parent_label: 'Health' },
+      ];
 }
 
 function tableRowNames(): string[] {
@@ -280,6 +293,25 @@ describe('the person panel', () => {
     expect(offered).not.toContain('Instructor');
   });
 
+  it('offers the nodes the server answers for the role, namesakes told apart by their parent', async () => {
+    const asked = serving(peopleReads());
+    mountAt(PEOPLE_PAGE);
+    const panel = await manage('Bo Adams');
+
+    const select = await within(panel).findByLabelText<HTMLSelectElement>('Granted at');
+    await within(select).findByRole('option', { name: 'Biology (Sciences)' });
+    expect(within(select).getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Choose where',
+      'Biology (Sciences)',
+      'Biology (Health)',
+    ]);
+    expect(asked.map((ask) => ask.path)).toContain('/admin/org-nodes?role=LEAD_FACULTY');
+
+    fireEvent.change(within(panel).getByLabelText('Role'), { target: { value: 'CARE' } });
+    await within(select).findByRole('option', { name: 'Pulse University' });
+    expect(within(select).queryByRole('option', { name: /Biology/ })).toBeNull();
+  });
+
   it('grants the chosen role at the chosen node and echoes the CSRF cookie', async () => {
     document.cookie = 'pulse_csrf=the-token';
     let granted = false;
@@ -294,16 +326,16 @@ describe('the person panel', () => {
     const panel = await manage('Bo Adams');
 
     fireEvent.change(within(panel).getByLabelText('Role'), { target: { value: 'CARE' } });
-    fireEvent.change(within(panel).getByLabelText('Organization node ID'), {
-      target: { value: ' node-7 ' },
-    });
+    const nodeSelect = await within(panel).findByLabelText<HTMLSelectElement>('Granted at');
+    await within(nodeSelect).findByRole('option', { name: 'Pulse University' });
+    fireEvent.change(nodeSelect, { target: { value: 'inst-1' } });
     fireEvent.click(within(panel).getByRole('button', { name: 'Grant role' }));
 
     await waitFor(() => {
       expect(granted).toBe(true);
     });
     const write = asked.find((ask) => ask.method === 'POST');
-    expect(write?.body).toEqual({ role: 'CARE', scope_node_id: 'node-7' });
+    expect(write?.body).toEqual({ role: 'CARE', scope_node_id: 'inst-1' });
     expect(write?.headers.get('X-Pulse-CSRF')).toBe('the-token');
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toBe('Role granted.');
