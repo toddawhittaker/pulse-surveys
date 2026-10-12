@@ -166,9 +166,9 @@ def downgrade() -> None:
     ).scalar_one()
     if held:
         raise RuntimeError(
-            f"This database holds {held} audit rows recording the admin's people-graph writes "
-            "(role grants and revocations, reporting lines, lead mappings and web-login "
-            "linkages). Going below this revision drops the columns those rows name their "
+            "This database holds audit rows recording the admin's people-graph writes (role "
+            "grants and revocations, reporting lines, lead mappings and web-login linkages): "
+            f"{held} of them. Going below this revision drops the columns those rows name their "
             "subject, role and scope in, so it would destroy the record of every Care and Admin "
             "grant. Nothing was changed. Keep the database at this revision, or export those "
             "rows and remove them deliberately first."
