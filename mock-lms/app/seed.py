@@ -57,6 +57,11 @@ enrolled in `MATH-140-E1FF` and nowhere else, with a roles claim carrying no
 Instructor URN — see the constant for why that claim is the learner pair rather
 than something invented.
 
+**A second is here so a browser can drive SPEC §2.1's worked example.**
+`ASSISTANT_DEAN` is the demo institution's assistant dean, linked to the same
+person their web login reaches by `scripts/seed.py`, and enrolled the dean's way:
+in `MATH-140-E1FF` alone, with the same claim.
+
 **One section holds a class big enough to demonstrate a Monday report**
 (E4-20). `BIOL-310-R7FF` carries the shared instructor and twenty students of
 its own, and neither the shared learner nor the dean. Its start letter is `R`,
@@ -294,13 +299,26 @@ DEAN = MockUser(
     email=f"dean@{FACULTY_MAIL_DOMAIN}",
 )
 
+# **The worked example's launch-side subject.** `scripts/seed.py` links
+# `mock-lms-user-assistant-dean` to the demo institution's assistant dean, the
+# person SPEC §2.1's worked example is about, so that their roll-up can be read
+# from both doors. Enrolled the dean's way and for the dean's reasons: one
+# section, the learner claim, and joined at the end of the roster so nobody else
+# moves across a page boundary. `MATH-140-E1FF` sits in a department whose chair
+# reports to them, so the launch binds inside their purview.
+ASSISTANT_DEAN = MockUser(
+    user_id="mock-lms-user-assistant-dean",
+    label="An assistant dean, enrolled in one section and teaching none",
+    email=f"assistant-dean@{FACULTY_MAIL_DOMAIN}",
+)
+
 # Who the launch page offers, and the whole of it. The per-section students below
 # are seeded so a roster has members and pages; they are not people a browser
-# picks from, and offering all forty-one would bury the three that every other
+# picks from, and offering all forty-one would bury the named few that every other
 # suite reaches by name. `launch_users()` filters this by enrollment, so a name
 # added here without an enrollment is left off the page rather than published as
 # an option `resolve_launch` refuses.
-LAUNCH_PAGE_CAST = (INSTRUCTOR, LEARNER, DEAN)
+LAUNCH_PAGE_CAST = (INSTRUCTOR, LEARNER, DEAN, ASSISTANT_DEAN)
 
 # The four sections. Course numbers are read off SPEC §8's table: `215`, `140`
 # and `310` are undergraduate three-digit numbers inside `000`-`799`, and `8100`
@@ -648,8 +666,8 @@ def seeded_platform() -> SeededPlatform:
     each is a case rather than a number picked to look plausible:
 
       - `BIOL-215-R3WW` holds twelve, which is two full pages and a short one;
-      - `MATH-140-E1FF` holds eight — the dean included — which is one full page
-        and a short one;
+      - `MATH-140-E1FF` holds nine — the dean and the assistant dean included —
+        which is one full page and a short one;
       - `NURS-8100-Q2FF` holds five, which is exactly one page and no more — the
         boundary where a platform that advertises a next page whenever the page
         it just served was full serves an empty one. This is the section the dean
@@ -693,7 +711,7 @@ def seeded_platform() -> SeededPlatform:
         (NURSING_INQUIRY, 3, Q_SECTIONS_OPEN),
     )
 
-    users: list[MockUser] = [INSTRUCTOR, LEARNER, DEAN]
+    users: list[MockUser] = [INSTRUCTOR, LEARNER, DEAN, ASSISTANT_DEAN]
     enrollments: list[MockEnrollment] = []
     for context, class_size, opens in sections:
         enrollments.append(enrolled(INSTRUCTOR, context, INSTRUCTOR_ROLES, opens))
@@ -708,6 +726,9 @@ def seeded_platform() -> SeededPlatform:
     # container divides its pages in seeded order, and putting him third would
     # shift five students across a page boundary for no reason.
     enrollments.append(enrolled(DEAN, COLLEGE_ALGEBRA, NO_INSTRUCTOR_URN_ROLES, E_SECTIONS_OPEN))
+    enrollments.append(
+        enrolled(ASSISTANT_DEAN, COLLEGE_ALGEBRA, NO_INSTRUCTOR_URN_ROLES, E_SECTIONS_OPEN)
+    )
 
     # E4-20's section, assembled on its own for the reason the docstring gives:
     # the loop above enrolls the shared learner in every section it walks, and

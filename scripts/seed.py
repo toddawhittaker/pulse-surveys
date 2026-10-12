@@ -493,11 +493,19 @@ class DemoPerson:
     `category` is free text in the schema (SPEC §2.1 names the field and never
     enumerates its values), so these three words are this file's vocabulary and
     nothing reads them.
+
+    `lms_user_id` and `idp_subject` are set for one person only, the assistant
+    dean of SPEC §2.1's worked example, so that the worked example can be entered
+    by both doors on a development stack. `lms_user_id` puts that person's `user`
+    on the mock platform's registration instead of the fictional one, and
+    `idp_subject` links the mock provider's subject to them.
     """
 
     key: str
     name: str
     category: str
+    lms_user_id: str | None = None
+    idp_subject: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -648,6 +656,21 @@ SECTIONS: tuple[DemoSection, ...] = (
     DemoSection("BUSA 8400", "Z1FF"),
 )
 
+# The two subjects the worked example's assistant dean enters by: the mock
+# platform's `mock-lms-user-assistant-dean` (`mock-lms/app/seed.py`'s
+# `ASSISTANT_DEAN`) and the mock provider's `assistant-dean` persona. Both reach
+# the demo person below rather than a mock-world copy, because the worked example
+# is that person's supervision edges and no copy can hold them: a chair's
+# assignment reports to one assignment only.
+#
+# **What that opens, stated:** anyone who can reach the mock containers on a
+# development box can now enter as the demo assistant dean and read their purview
+# (Mathematics, Biology and PSYC 110). That is the trade ADR 0097 made for the
+# dean, made again for one more person; the data is fictional and the seed runs in
+# development only (ADR 0063).
+MOCK_LMS_WORKED_EXAMPLE_USER_ID = "mock-lms-user-assistant-dean"
+MOCK_IDP_WORKED_EXAMPLE_SUBJECT = "mock-idp-user-assistant-dean"
+
 PEOPLE: tuple[DemoPerson, ...] = (
     DemoPerson("vp", "Demo VP of Academics", "Leadership"),
     DemoPerson("dean-arts-sciences", "Demo Dean of Arts and Sciences", "Leadership"),
@@ -656,6 +679,8 @@ PEOPLE: tuple[DemoPerson, ...] = (
         "assistant-dean-arts-sciences",
         "Demo Assistant Dean of Arts and Sciences",
         "Leadership",
+        lms_user_id=MOCK_LMS_WORKED_EXAMPLE_USER_ID,
+        idp_subject=MOCK_IDP_WORKED_EXAMPLE_SUBJECT,
     ),
     DemoPerson("chair-mathematics", "Demo Chair of Mathematics", "Faculty"),
     DemoPerson("chair-biology", "Demo Chair of Biology", "Faculty"),
@@ -955,7 +980,9 @@ class MockWorldPerson:
 # purview they then hold. E0-31 made that set empty and said so; E1-12 makes it
 # these two, argues for both in ADR 0097, and
 # `test_the_only_users_on_the_mock_platform_are_the_mock_worlds_own` pins it as an
-# inventory so a third is a red rather than a quiet widening.
+# inventory so a third is a red rather than a quiet widening. The third is the
+# worked example's assistant dean (`MOCK_LMS_WORKED_EXAMPLE_USER_ID`), and the
+# inventory names them.
 #
 # The first is `mock-idp/app/seed.py::LMS_INSTRUCTOR_USER_ID` — the two-hat
 # person's other identity, and the one reference either mock holds to the other.
@@ -978,21 +1005,23 @@ MOCK_LMS_LEADERSHIP_USER_ID = "mock-lms-user-dean"
 # `test_every_mock_world_persona_holds_the_assignment_their_role_names` pins the
 # inventory.
 #
-# **All eight are roots**: no `reports_to` anywhere in this table. A supervision
+# **All seven are roots**: no `reports_to` anywhere in this table. A supervision
 # edge is SPEC §2.1's own subject and the demo eighteen are where the graph is
 # seeded and asserted; an edge invented here would be this file deciding who
 # answers to whom, for a screen that reads none of it in E1.
 #
+# **The provider's assistant-dean persona is not here.** Its subject reaches the
+# demo institution's assistant dean instead (`MOCK_IDP_WORKED_EXAMPLE_SUBJECT`),
+# so the seven below are the provider's other personas.
+#
 # **The scope nodes are the demo institution's**, because that is the only
-# containment tree a development box holds. Two of them avoid a node the demo
-# already uses the same way: the assistant dean sits in the College of Business
-# and Technology, whose own assistant dean the demo does not seed, and the lead
-# faculty leads `BUSA 300`, one of the nine courses `LEAD_FACULTY_MAPPINGS`
-# leaves unmapped on purpose — so neither can be mistaken for part of §2.1's
-# assistant-dean shape or for a second lead on a mapped course. The other four
-# share a node with a demo person holding the same role, which `role_assignment`
-# permits and no rule forbids: the institution cannot be duplicated at all (ADR
-# 0072), and every department in that college already has a chair.
+# containment tree a development box holds. One of them avoids a node the demo
+# already uses the same way: the lead faculty leads `BUSA 300`, one of the nine
+# courses `LEAD_FACULTY_MAPPINGS` leaves unmapped on purpose, so it cannot be
+# mistaken for a second lead on a mapped course. The other four share a node
+# with a demo person holding the same role, which `role_assignment` permits and
+# no rule forbids: the institution cannot be duplicated at all (ADR 0072), and
+# every department in that college already has a chair.
 #
 # **The two that carry more are the two E1-12 is demonstrated with.** The two-hat
 # person holds Care at the institution and an instructor assignment, because §2's
@@ -1023,14 +1052,6 @@ MOCK_WORLD_PEOPLE: tuple[MockWorldPerson, ...] = (
         "Leadership",
         assignments=((AssignmentRole.DEAN, ("college", "College of Arts and Sciences")),),
         lms_user_id=MOCK_LMS_LEADERSHIP_USER_ID,
-    ),
-    MockWorldPerson(
-        "assistant-dean",
-        "Demo Mock-World Assistant Dean",
-        "Leadership",
-        assignments=(
-            (AssignmentRole.ASSISTANT_DEAN, ("college", "College of Business and Technology")),
-        ),
     ),
     MockWorldPerson(
         "chair",
@@ -1859,7 +1880,44 @@ def seed_demo_platform(session: Session, configuration: Mapping[str, str]) -> De
     return DemoRegistration(platform=platform, deployment=deployment)
 
 
-def seed_people(session: Session, configuration: Mapping[str, str]) -> dict[str, Person]:
+def user_on_the_mock_platform(
+    session: Session,
+    configuration: Mapping[str, str],
+    mock: LtiPlatform,
+    fictional: LtiPlatform,
+    demo: DemoPerson,
+) -> User:
+    """A demo person's `user` on the mock platform's registration, for `demo.lms_user_id`.
+
+    A `user` on that registration is a subject anyone who can reach the mock can
+    launch as, so the environment guard is read here as `seed_the_mock_world`
+    reads it.
+
+    **A database seeded before this person moved keeps them**: their person is
+    linked to the fictional platform's `user`, and `seed_people` finds a person by
+    their `user`. So that person is re-pointed at the mock's `user` rather than a
+    second one being written beside them, holding the same assignments.
+    """
+    check_environment_is_development(configuration)
+    user = upsert(session, User, {"lti_platform_id": mock.id, "lms_user_id": demo.lms_user_id})
+    if session.scalars(select(Person).where(Person.user_id == user.id)).one_or_none() is None:
+        earlier = session.scalars(
+            select(Person)
+            .join(User, Person.user_id == User.id)
+            .where(
+                User.lti_platform_id == fictional.id,
+                User.lms_user_id == f"pulse-demo-{demo.key}",
+            )
+        ).one_or_none()
+        if earlier is not None:
+            earlier.user_id = user.id
+            session.flush()
+    return user
+
+
+def seed_people(
+    session: Session, configuration: Mapping[str, str], mock: LtiPlatform
+) -> dict[str, Person]:
     """Every demo person, with the `user` and `user_identity` rows behind them.
 
     Three tables and not one, because SPEC §4.1's separation is table-level: `user`
@@ -1885,11 +1943,14 @@ def seed_people(session: Session, configuration: Mapping[str, str]) -> dict[str,
     platform = seed_demo_platform(session, configuration).platform
     people: dict[str, Person] = {}
     for demo in PEOPLE:
-        user = upsert(
-            session,
-            User,
-            {"lti_platform_id": platform.id, "lms_user_id": f"pulse-demo-{demo.key}"},
-        )
+        if demo.lms_user_id is None:
+            user = upsert(
+                session,
+                User,
+                {"lti_platform_id": platform.id, "lms_user_id": f"pulse-demo-{demo.key}"},
+            )
+        else:
+            user = user_on_the_mock_platform(session, configuration, mock, platform, demo)
         upsert(
             session,
             UserIdentity,
@@ -1905,6 +1966,28 @@ def seed_people(session: Session, configuration: Mapping[str, str]) -> dict[str,
             category=demo.category,
         )
     return people
+
+
+def link_the_demo_web_logins(
+    session: Session, configuration: Mapping[str, str], people: dict[str, Person]
+) -> None:
+    """The mock provider's subject for each demo person that has one, linked to them.
+
+    Keyed on the `(issuer, subject)` pair, so a database where the subject was
+    linked to somebody else has the link moved rather than refused: the provider's
+    assistant-dean persona reached a mock-world copy until the worked example
+    took it.
+    """
+    check_environment_is_development(configuration)
+    issuer = mock_idp_issuer(configuration)
+    for demo in PEOPLE:
+        if demo.idp_subject is not None:
+            upsert(
+                session,
+                WebLoginSubject,
+                {"idp_issuer": issuer, "idp_subject": demo.idp_subject},
+                person_id=people[demo.key].id,
+            )
 
 
 def seed_assignments(
@@ -2173,7 +2256,8 @@ def seed(session: Session, configuration: Mapping[str, str]) -> None:
     seed_prior_calendar(session, nodes["institution", INSTITUTION_NAME])
     seed_sections(session, term, nodes, demo.deployment)
     seed_survey_windows(session)
-    people = seed_people(session, configuration)
+    people = seed_people(session, configuration, mock)
+    link_the_demo_web_logins(session, configuration, people)
     seed_assignments(session, people, nodes)
     seed_lead_faculty_mappings(session, people, nodes)
     # Last, because the mock world hangs off everything above it: its people are
