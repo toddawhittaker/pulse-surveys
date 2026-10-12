@@ -101,9 +101,11 @@ export function PersonPanel({
     event: FormEvent,
     send: () => Promise<Parameters<typeof settle>[0]>,
     done: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     event.preventDefault();
-    if (settle(await send(), done, announce, onGate)) onChanged();
+    const landed = settle(await send(), done, announce, onGate);
+    if (landed) onChanged();
+    return landed;
   }
 
   async function revoke(assignment: AssignmentLineView): Promise<void> {
@@ -271,7 +273,10 @@ export function PersonPanel({
               event,
               () => linkWebLogin(person.person_id, issuer.trim(), subject.trim()),
               copy('admin_people.page.login_was_linked'),
-            )
+            ).then((landed) => {
+              // The form is about to be replaced by the unlink control.
+              if (landed) loginHeadingRef.current?.focus();
+            })
           }
         >
           <Field id={`${id}-issuer`} label={copy('admin_people.page.field_issuer')}>

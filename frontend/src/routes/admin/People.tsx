@@ -3,13 +3,13 @@ import { useEffect, useId, useRef, useState, type FormEvent, type JSX } from 're
 import { GRANTABLE_ROLES, addPerson, readPeople, type PeoplePageView } from '../../api/admin';
 import type { Order, PeopleSort } from '../../lib/adminTable';
 import { copy, fillCopy } from '../../copy/adminPeople';
-import { AdminPage, type Gate } from './AdminPage';
+import { AdminPage, useGate, type Gate } from './AdminPage';
 import { useAnnouncer } from './announcer';
 import { useNodeLabels } from './nodeLabels';
 import { ImportPanel } from './ImportPanel';
 import { Field, PersonPanel, roleLabel } from './PersonPanel';
 import { settle } from './outcome';
-import { Pager, SortHeader, nextOrder } from './tableParts';
+import { Pager, SortHeader, nextOrder, sortedBy } from './tableParts';
 
 /** The address of the People & reporting table, under the admin area. */
 export const PEOPLE_ROUTE = '/admin/people';
@@ -40,8 +40,8 @@ export function PeopleRoute(): JSX.Element {
   const [pageNumber, setPageNumber] = useState(1);
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [reloads, setReloads] = useState(0);
-  const [gate, setGate] = useState<Gate>(null);
   const [announcement, announce] = useAnnouncer(copy('admin_people.page.loading'));
+  const [gate, setGate] = useGate(announce);
   const [selected, setSelected] = useState<string | null>(null);
   const manageButtons = useRef(new Map<string, HTMLButtonElement>());
   const firstRead = useRef(true);
@@ -67,13 +67,15 @@ export function PeopleRoute(): JSX.Element {
     return () => {
       live = false;
     };
-  }, [sort, order, pageNumber, reloads, announce]);
+  }, [sort, order, pageNumber, reloads, announce, setGate]);
 
   const reload = (): void => setReloads((count) => count + 1);
 
   function sortBy(column: PeopleSort): void {
-    setOrder(nextOrder(sort === column, order));
+    const next = nextOrder(sort === column, order);
+    setOrder(next);
     setSort(column);
+    announce(sortedBy(column === 'name' ? 'admin_people.page.column_name' : 'admin_people.page.column_category', next));
     setPageNumber(1);
   }
 

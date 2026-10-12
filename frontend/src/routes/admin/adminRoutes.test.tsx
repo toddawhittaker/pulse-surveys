@@ -636,6 +636,49 @@ describe('keyboard and screen-reader behaviour', () => {
   });
 });
 
+describe('what is said and where focus lands', () => {
+  it('puts focus on the web-login heading after a successful link', async () => {
+    serving((ask) => (ask.method === 'PUT' ? none() : peopleReads()(ask)));
+    mountAt(PEOPLE_PAGE);
+    const panel = await manage('Bo Adams');
+    fireEvent.change(within(panel).getByLabelText('Identity provider issuer'), {
+      target: { value: 'https://idp.example' },
+    });
+    fireEvent.change(within(panel).getByLabelText('Identity provider subject'), {
+      target: { value: 'sub-1' },
+    });
+    fireEvent.click(within(panel).getByRole('button', { name: 'Link web login' }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(within(panel).getByRole('heading', { name: 'Web login' }));
+    });
+  });
+
+  it('says the gate’s title aloud when the gate turns the page away', async () => {
+    serving(() => json(403, { detail: 'not admin' }, NOT_YOUR_ROLE_HEADERS));
+    mountAt(PEOPLE_PAGE);
+
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe('This page is not part of your role');
+    });
+  });
+
+  it('says the column and direction a sort now shows', async () => {
+    serving(peopleReads());
+    mountAt(PEOPLE_PAGE);
+    await screen.findByTestId('pulse-admin-people-table');
+
+    fireEvent.click(within(screen.getByRole('columnheader', { name: /Name/ })).getByRole('button'));
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe('Sorted by Name, descending');
+    });
+    fireEvent.click(within(screen.getByRole('columnheader', { name: /Category/ })).getByRole('button'));
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe('Sorted by Category, ascending');
+    });
+  });
+});
+
 describe('a session that is not an admin, or not signed in', () => {
   it.each([
     ['the People table', PEOPLE_PAGE],

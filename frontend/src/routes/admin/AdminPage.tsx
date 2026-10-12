@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import { StateNotice } from '../../components/StateNotice';
 import { copy } from '../../copy/adminPeople';
@@ -9,6 +9,29 @@ import './adminPeople.css';
 export type Gate = 'session-ended' | 'not-your-role' | null;
 
 /**
+ * The page's gate state and the function that sets it, which also says the
+ * gate's title aloud: the notice replaces the page's content, and a reader
+ * should hear that happen.
+ */
+export function useGate(
+  announce: (message: string) => void,
+): readonly [Gate, (gate: Exclude<Gate, null>) => void] {
+  const [gate, setGate] = useState<Gate>(null);
+  const onGate = useCallback(
+    (reached: Exclude<Gate, null>): void => {
+      setGate(reached);
+      announce(
+        reached === 'session-ended'
+          ? copy('admin_people.page.session_ended_title')
+          : copy('admin_people.page.not_your_role_title'),
+      );
+    },
+    [announce],
+  );
+  return [gate, onGate];
+}
+
+/**
  * The frame both admin pages share: a landmark, a heading, a line of intro, and
  * the one polite live region every outcome is said in.
  *
@@ -16,8 +39,7 @@ export type Gate = 'session-ended' | 'not-your-role' | null;
  * reader announces a change to a region that was already there, and often
  * nothing for one inserted with its text, so a refusal rendered into a node
  * created at that moment would be said to nobody. Every write's outcome goes
- * through `announcement`, the refusals the server sent included. It sticks to
- * the top of the window so an outcome stays in view while a long page scrolls.
+ * through `announcement`, the refusals the server sent included.
  *
  * **A page the gate turned away shows only the gate's sentence.** The admin
  * routes answer a verified session in another role with a 403 marked

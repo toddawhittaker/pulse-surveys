@@ -3,10 +3,10 @@ import { useEffect, useRef, useState, type JSX } from 'react';
 import { readMappings, type MappingPageView } from '../../api/admin';
 import type { MappingSort, Order } from '../../lib/adminTable';
 import { copy, fillCopy } from '../../copy/adminPeople';
-import { AdminPage, type Gate } from './AdminPage';
+import { AdminPage, useGate } from './AdminPage';
 import { useAnnouncer } from './announcer';
 import { ImportPanel } from './ImportPanel';
-import { Pager, SortHeader, nextOrder } from './tableParts';
+import { Pager, SortHeader, nextOrder, sortedBy } from './tableParts';
 
 /** The address of the Lead Faculty mapping table, under the admin area. */
 export const MAPPINGS_ROUTE = '/admin/lead-mappings';
@@ -36,8 +36,8 @@ export function MappingsRoute(): JSX.Element {
   const [pageNumber, setPageNumber] = useState(1);
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [reloads, setReloads] = useState(0);
-  const [gate, setGate] = useState<Gate>(null);
   const [announcement, announce] = useAnnouncer(copy('admin_people.page.loading'));
+  const [gate, setGate] = useGate(announce);
   const firstRead = useRef(true);
 
   useEffect(() => {
@@ -60,11 +60,13 @@ export function MappingsRoute(): JSX.Element {
     return () => {
       live = false;
     };
-  }, [sort, order, pageNumber, reloads, announce]);
+  }, [sort, order, pageNumber, reloads, announce, setGate]);
 
   function sortBy(column: MappingSort): void {
-    setOrder(nextOrder(sort === column, order));
+    const next = nextOrder(sort === column, order);
+    setOrder(next);
     setSort(column);
+    announce(sortedBy(column === 'course' ? 'admin_people.page.column_course' : 'admin_people.page.column_lead', next));
     setPageNumber(1);
   }
 

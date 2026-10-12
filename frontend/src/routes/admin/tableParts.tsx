@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 
 import type { Order } from '../../lib/adminTable';
-import { copy, fillCopy } from '../../copy/adminPeople';
+import { copy, fillCopy, type AdminPeopleCopyKey } from '../../copy/adminPeople';
 
 /**
  * A column header that sorts: a button inside a `th` that carries `aria-sort`,
@@ -90,4 +90,14 @@ export function Pager({
 /** The order a click on a column asks for: the other way on the column showing, ascending on a new one. */
 export function nextOrder(sameColumn: boolean, order: Order): Order {
   return sameColumn && order === 'asc' ? 'desc' : 'asc';
+}
+
+/** What a sort says aloud: the column and the direction now showing. */
+export function sortedBy(column: AdminPeopleCopyKey, order: Order): string {
+  return fillCopy('admin_people.page.sorted_by', {
+    column: copy(column),
+    direction: copy(
+      order === 'asc' ? 'admin_people.page.direction_ascending' : 'admin_people.page.direction_descending',
+    ),
+  });
 }
