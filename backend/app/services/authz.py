@@ -117,15 +117,18 @@ from app.config import Settings
 from app.models.identity import LEADERSHIP_ROLES, AssignmentRole
 from app.services import clock
 from app.views_sql.queries import (
+    OrgNodeChoice,
     OrgNodeLabel,
     SectionEnrollmentCount,
     SectionRosterRow,
     org_node_labels_above,
+    org_nodes_at_level,
     section_enrollment_counts,
     section_roster,
 )
 
 __all__ = [
+    "admin_grant_nodes",
     "LANDING_FOR_ROLE",
     "LANDING_PRECEDENCE",
     "LMS_OWNED_TABLES",
@@ -2200,3 +2203,31 @@ def resolve_landings(
         and _enrolled_today(session, user_id=user_id, settings=settings)
     )
     return held_landings(roles, enrolled_today=enrolled, door=door)
+
+
+# The level each grantable role is granted at: `admin_grant_role`'s own mapping in
+# `people_graph_v001.sql`, so a node offered here is one the definer accepts. A
+# teaching assignment is the roster's and is granted nowhere.
+_GRANT_LEVEL: dict[AssignmentRole, str] = {
+    AssignmentRole.VP_ACADEMICS: "institution",
+    AssignmentRole.CARE: "institution",
+    AssignmentRole.ADMIN: "institution",
+    AssignmentRole.ASSISTANT_DEAN: "college",
+    AssignmentRole.DEAN: "college",
+    AssignmentRole.CHAIR: "department",
+    AssignmentRole.LEAD_FACULTY: "course",
+}
+
+
+def admin_grant_nodes(session: Session, *, role: AssignmentRole) -> Sequence[OrgNodeChoice]:
+    """The org nodes an admin may grant `role` at: every node of the role's level.
+
+    **Not purview-scoped, on purpose**: the admin grants anywhere, so this is not
+    `ScopedReader.org_node_labels`. The caller must be an admin session; the one
+    caller is `api/admin.py`, behind `require_admin`. Answers nothing for a role
+    that is not granted in the editor.
+    """
+    level = _GRANT_LEVEL.get(role)
+    if level is None:
+        return []
+    return org_nodes_at_level(session, level=level)

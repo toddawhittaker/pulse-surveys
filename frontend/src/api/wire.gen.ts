@@ -1456,6 +1456,26 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/admin/org-nodes": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The organization nodes a role may be granted at
+         * @description Only nodes at the level `role` is granted at, sorted by name.
+         */
+        readonly get: operations["read_org_nodes_admin_org_nodes_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/dev": {
         readonly parameters: {
             readonly query?: never;
@@ -2244,6 +2264,26 @@ export interface components {
             readonly questions: readonly components["schemas"]["SurveyQuestion"][];
             /** @description What this reader has already submitted for this week, or null. */
             readonly submission: components["schemas"]["OwnSubmission"] | null;
+        };
+        /**
+         * OrgNode
+         * @description One organization node a role may be granted at, with its parent's name to tell namesakes apart.
+         */
+        readonly OrgNode: {
+            /**
+             * Node Id
+             * Format: uuid
+             */
+            readonly node_id: string;
+            /** Label */
+            readonly label: string;
+            /** Parent Label */
+            readonly parent_label: string | null;
+        };
+        /** OrgNodes */
+        readonly OrgNodes: {
+            /** Nodes */
+            readonly nodes: readonly components["schemas"]["OrgNode"][];
         };
         /**
          * OwedWeek
@@ -5454,6 +5494,37 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["MappingDiff"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_org_nodes_admin_org_nodes_get: {
+        readonly parameters: {
+            readonly query: {
+                readonly role: components["schemas"]["AssignmentRole"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OrgNodes"];
                 };
             };
             /** @description Validation Error */

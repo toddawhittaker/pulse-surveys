@@ -26,7 +26,9 @@ def _admin_routes(editor: PeopleEditor) -> list[tuple[str, str, APIRoute]]:
         if isinstance(route, APIRoute) and route.path.startswith("/admin/")
         for method in sorted(route.methods)
     ]
-    assert len(found) == 18, f"{len(found)} admin routes were found, not 18: {found}."
+    # Nineteen since E9-10 added `GET /admin/org-nodes`, the grant picker's read of
+    # the organization nodes a role can be scoped to.
+    assert len(found) == 19, f"{len(found)} admin routes were found, not 19: {found}."
     return found
 
 
