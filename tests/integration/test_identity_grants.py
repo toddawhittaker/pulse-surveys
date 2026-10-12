@@ -542,12 +542,29 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     column. Their owner is a NOLOGIN role of its own,
 #     `pulse_people_graph_definer`, which holds nothing on `user_identity`.
 #     The count moves from eleven to twenty-three.
+#   - `resolve_persons_for_users(uuid[]) -> TABLE (user_id, person_id)` — E9-07's
+#     fix round (R1), and the set form of `resolve_person_for_user` above. The
+#     roll-up's enrolled count drops staff from a section's enrolled students
+#     (`enrollment_windows.without_staff_of`), which means asking, for every
+#     enrolled user, whether a `person` is linked to it; asked one user at a time
+#     that was a statement per student, thousands for a college, and ADR 0094
+#     forbids looping the one-user resolver for bulk use. So one call answers the
+#     person key for each user key passed, and nothing for a user not passed. It
+#     answers keys only, no name and no identity column, and its owner is the
+#     same `pulse_resolve_definer`, reading the same `person (id, user_id)`
+#     columns the one-user form already reads, so
+#     `RESOLVE_DEFINER_COLUMN_PRIVILEGES` below does not move. What it costs: a
+#     caller holding many user keys can map them to person keys in one call
+#     rather than one at a time, which is reach `pulse_app` already had through
+#     the one-user form. Its answer is scoped to the keys passed
+#     (`test_the_roster_definers_answer_a_point_query_and_nothing_more.py`).
+#     The count moves from twenty-three to twenty-four.
 #
 # What is *not* here is the point of the list: the functions of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
-# **twenty-fourth** entry appearing here is a new door into identity that some later
+# **twenty-fifth** entry appearing here is a new door into identity that some later
 # ticket opened without arguing for it. The number moves only in a change that
-# writes the sentence admitting the entry, as each of the eleven above did; an
+# writes the sentence admitting the entry, as each entry above did; an
 # entry arriving without one is the thing this inventory exists to make
 # impossible.
 #
@@ -579,6 +596,7 @@ SANCTIONED_APPLICATION_EXECUTE = (
     "admin_read_people",
     "admin_read_role_assignments",
     "admin_read_lead_mappings",
+    "resolve_persons_for_users",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
