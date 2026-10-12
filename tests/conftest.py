@@ -243,6 +243,8 @@ complete.
     route mounted on the built application (its real routes are E9-06's), and
     the admin, Care and student sessions minted on `fixtures/lead_review.py`'s
     world, an admin or Care session at the web door.
+  - `fixtures/people_editor.py` — the admin's people editor driven over HTTP on
+    the built application with an admin session, and the planting its tests share.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -307,6 +309,7 @@ pytest_plugins = (
     "fixtures.response_draft",
     "fixtures.response_loop_doors",
     "fixtures.people_graph",
+    "fixtures.people_editor",
 )
 
 
