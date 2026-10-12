@@ -81,6 +81,7 @@ POLL_SECONDS = 0.05
 # The statement switch A runs before holding its transaction open, and the probe
 # that sees switch B waiting on it. Written out whole, with the settled names.
 REVOKE_AS_SWITCH_A = "INSERT INTO revoked_session (jti, expires_at) VALUES (:jti, :expires_at)"
+CLEAR_THE_STATISTICS_SNAPSHOT = "SELECT pg_stat_clear_snapshot()"
 SESSIONS_WAITING_ON_A_LOCK = (
     "SELECT count(*) FROM pg_stat_activity "
     "WHERE wait_event_type = 'Lock' AND datname = current_database() AND pid <> pg_backend_pid()"
@@ -246,8 +247,8 @@ def race_switch_b_against_switch_a(
 
     A inserts the old token's revocation row on its own connection and holds the
     transaction open; B, a real switch over HTTP, is sent from a worker thread;
-    once B is seen waiting on a lock (or has answered, which the caller then
-    judges), A commits or rolls back; B's answer is awaited with a bound.
+    B must be seen waiting on a lock within the bound, or the test fails; then A
+    commits or rolls back, and B's answer is awaited with a bound.
     """
     from sqlalchemy import text
 
@@ -266,13 +267,26 @@ def race_switch_b_against_switch_a(
         )
         switch_b = executor.submit(world.switch, old, LEADERSHIP)
 
+        # Postgres keeps one snapshot of `pg_stat_activity` per transaction, so
+        # the watcher clears it before every poll; without that it reads the
+        # state from its first poll for ever and never sees B start waiting.
+        seen_waiting = False
         deadline = time.monotonic() + BLOCK_WAIT_SECONDS
         with migrated_engine.connect() as watcher:
             while not switch_b.done() and time.monotonic() < deadline:
-                waiting = watcher.execute(text(SESSIONS_WAITING_ON_A_LOCK)).scalar_one()
-                if waiting:
+                watcher.execute(text(CLEAR_THE_STATISTICS_SNAPSHOT))
+                if watcher.execute(text(SESSIONS_WAITING_ON_A_LOCK)).scalar_one():
+                    seen_waiting = True
                     break
                 time.sleep(POLL_SECONDS)
+        if not seen_waiting:
+            pytest.fail(
+                f"Switch B was not seen waiting on a lock within {BLOCK_WAIT_SECONDS}s while switch "
+                f"A held the old token's revocation row uncommitted (B "
+                f"{'had already answered' if switch_b.done() else 'was still running'}). B's "
+                "revocation insert has to wait on A's row: a B that answered without waiting "
+                "never tried to spend the token in the same transaction as its issue."
+            )
 
         if a_commits:
             transaction.commit()
