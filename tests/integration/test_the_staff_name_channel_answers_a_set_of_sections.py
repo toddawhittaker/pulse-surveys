@@ -57,6 +57,7 @@ from fixtures.staff_names_for_sections import (
     prepared,
     rows_of,
     statements_sent,
+    the_set_door,
 )
 from fixtures.survey_windows import INSTITUTION_TIMEZONE
 from sqlalchemy import text
@@ -395,6 +396,168 @@ def test_the_door_sends_the_definer_no_section_outside_the_leadership_scope(
 
 
 # ---------------------------------------------------------------------------
+# The fix round: the door refuses a call it cannot scope.
+#
+# The review of the built head found the door fail-open: a chair's, dean's or
+# VP's key passed with no `scope` was answered for every section. The ruling:
+# `scope` is a required keyword (`ActorScope | None`, no default), so a caller
+# that wants no purview filter writes `scope=None` where a reviewer sees it. The
+# door's two `ValueError` checks (a scope that is not the reader's own; a user
+# key with any scope) had no test (the privacy review's LOW).
+# ---------------------------------------------------------------------------
+
+
+def test_the_door_refuses_a_call_that_does_not_name_a_scope(
+    staff_names_for_sections: SetWorld,
+) -> None:
+    """Called with no `scope` keyword at all, the door raises `TypeError` naming `scope`.
+
+    **The mutation this kills:** a default restored on `scope` (`scope=None`),
+    which is the fail-open the review found: a caller who forgets the scope gets
+    the definer's broad answer for a chair and above. **The twin** is the next
+    test: the same call with `scope=None` written out is answered.
+    """
+    names = staff_names_for_sections.names
+    prepared(names)
+    assert names.teacher is not None
+    door = the_set_door()
+    with pytest.raises(TypeError) as refused:
+        door(
+            names.application_session,
+            section_ids=[names.taught],
+            reader_person_id=names.teacher.person_id,
+        )
+    names.application_session.rollback()
+    assert "scope" in str(refused.value), (
+        f"The door raised `TypeError: {refused.value}`, which does not name `scope`; the refusal "
+        "this test is about is the missing required keyword, not some other `TypeError`."
+    )
+
+
+def test_the_door_answers_a_call_that_writes_scope_none(
+    staff_names_for_sections: SetWorld,
+) -> None:
+    """The twin: the same call with `scope=None` is answered the taught section's instructor.
+
+    **The mutation this kills:** a door that refuses `scope=None` outright, so
+    single-section callers (the survey page, the instructor report) lose their
+    names; and, for the test above, it shows the call shape works once `scope` is
+    named, so the `TypeError` there is about the keyword.
+    """
+    names = staff_names_for_sections.names
+    prepared(names)
+    assert names.teacher is not None
+    answered = ask_the_set_door(
+        names.application_session,
+        section_ids=[names.taught],
+        reader_person_id=names.teacher.person_id,
+        scope=None,
+    )
+    instructors = {
+        row.person_id for row in rows_of(answered, names.taught) if row.role == AS_INSTRUCTOR
+    }
+    assert instructors == {
+        str(names.teacher.person_id)
+    }, f"The taught section's instructor, asking with `scope=None`, was answered {answered}."
+
+
+def test_the_door_refuses_a_chairs_key_with_another_leaders_scope_before_any_query(
+    staff_names_for_sections: SetWorld,
+) -> None:
+    """The chair's person key with the lead's `ActorScope`: `ValueError`, and no statement sent.
+
+    A scope resolved for one person and a reader key naming another is a caller
+    mixing two readers; the definer would answer the chair broadly over the lead's
+    purview. The check must come before the database is asked, so nothing is sent.
+
+    **The mutations this kill:** the scope's person not compared with the reader
+    key (the call is answered); the comparison made after the definer call (a
+    statement is recorded). **The twin** is the next test.
+    """
+    names = staff_names_for_sections.names
+    prepared(names)
+    assert names.chair is not None and names.lead is not None
+    lead_scope = leadership_scope_of(names.application_session, names.lead.person_id)
+    door = the_set_door()
+    with statements_sent() as sent, pytest.raises(ValueError):
+        door(
+            names.application_session,
+            section_ids=[names.taught],
+            reader_person_id=names.chair.person_id,
+            scope=lead_scope,
+        )
+    names.application_session.rollback()
+    assert sent == [], (
+        "The door, handed the chair's key with the lead's scope, raised only after sending "
+        f"{[statement.sql[:120] for statement in sent]}. The refusal comes before any query."
+    )
+
+
+def test_the_door_answers_a_chairs_key_with_the_chairs_own_scope(
+    staff_names_for_sections: SetWorld,
+) -> None:
+    """The twin: the chair's key with the chair's own resolved scope is answered for F1WW.
+
+    **The mutation this kills:** the identity check comparing the wrong things
+    (always unequal), which refuses every leadership page.
+    """
+    names = staff_names_for_sections.names
+    prepared(names)
+    assert names.chair is not None
+    scope = leadership_scope_of(names.application_session, names.chair.person_id)
+    answered = ask_the_set_door(
+        names.application_session,
+        section_ids=[names.taught],
+        reader_person_id=names.chair.person_id,
+        scope=scope,
+    )
+    assert rows_of(answered, names.taught), (
+        "The chair, asking with their own resolved scope about F1WW in their department, was "
+        "answered nothing."
+    )
+
+
+def test_the_door_refuses_a_user_key_passed_with_any_scope(
+    staff_names_for_sections: SetWorld,
+) -> None:
+    """A student's user key with a leader's scope: `ValueError`, and no definer call.
+
+    A scope is a leadership reader's, resolved from a person; a student is asked
+    by user key and has none. **The twin, in the same test:** the same student
+    with `scope=None` is answered.
+
+    **The mutation this kills:** the user-key check removed, so a student's call
+    is filtered by a leader's purview and answered under the student check.
+    """
+    names = staff_names_for_sections.names
+    prepared(names)
+    assert names.chair is not None
+    student = names.a_student("with-a-scope", names.taught)
+    twin = ask_the_set_door(
+        names.application_session,
+        section_ids=[names.taught],
+        reader_user_id=student.user_id,
+        scope=None,
+    )
+    assert rows_of(
+        twin, names.taught
+    ), "The twin: the student of F1WW, asking with `scope=None`, was answered nothing."
+    chair_scope = leadership_scope_of(names.application_session, names.chair.person_id)
+    door = the_set_door()
+    with statements_sent() as sent, pytest.raises(ValueError):
+        door(
+            names.application_session,
+            section_ids=[names.taught],
+            reader_user_id=student.user_id,
+            scope=chair_scope,
+        )
+    names.application_session.rollback()
+    assert not definer_calls(
+        sent
+    ), "The door, handed a user key with a leader's scope, called the definer before refusing."
+
+
+# ---------------------------------------------------------------------------
 # Done-when 6: the date is the app clock's.
 # ---------------------------------------------------------------------------
 
@@ -459,7 +622,10 @@ def test_an_enrollment_ending_on_the_institutions_today_is_answered_when_utc_has
         ended_on=day,
     )
     answered = ask_the_set_door(
-        names.application_session, section_ids=[names.taught], reader_user_id=student.user_id
+        names.application_session,
+        section_ids=[names.taught],
+        reader_user_id=student.user_id,
+        scope=None,
     )
     instructors = {
         row.person_id for row in rows_of(answered, names.taught) if row.role == AS_INSTRUCTOR
@@ -495,14 +661,20 @@ def test_an_enrollment_that_ended_the_institutions_yesterday_is_answered_nothing
     )
 
     twin = ask_the_set_door(
-        names.application_session, section_ids=[names.taught], reader_user_id=classmate.user_id
+        names.application_session,
+        section_ids=[names.taught],
+        reader_user_id=classmate.user_id,
+        scope=None,
     )
     assert rows_of(twin, names.taught), (
         "The twin: a classmate with an open enrollment in F1WW was answered nothing under the same "
         "clock, so the refusal below would mean nothing."
     )
     refused = ask_the_set_door(
-        names.application_session, section_ids=[names.taught], reader_user_id=ended.user_id
+        names.application_session,
+        section_ids=[names.taught],
+        reader_user_id=ended.user_id,
+        scope=None,
     )
     assert refused == [], (
         f"A student whose enrollment in F1WW ended on {day - timedelta(days=1)}, the day before the "

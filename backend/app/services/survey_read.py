@@ -253,7 +253,11 @@ def _instructors(
     return sorted(
         staff.display_name
         for staff in response_loop.section_staff_names(
-            session, section_ids=[section_id], reader_user_id=user_id, settings=settings
+            session,
+            section_ids=[section_id],
+            reader_user_id=user_id,
+            scope=None,
+            settings=settings,
         )
         if staff.role is response_loop.StaffNameRole.INSTRUCTOR and staff.person_id in teaching
     )

@@ -38,7 +38,7 @@ comes from.
   section passed. v001's "chair of an unled course" check is not repeated in v002,
   because the broad answer covers it. `CARE` and `ADMIN` reach nothing.
 - **The door** `response_loop.section_staff_names(session, *, section_ids,
-  reader_user_id=None, reader_person_id=None, scope=None, settings=None)` sends
+  reader_user_id=None, reader_person_id=None, scope, settings=None)` sends
   every id in one call. Given an `ActorScope`, it sends only the ids in
   `scope.purview.section_ids`, and it refuses a scope resolved for anyone other
   than `reader_person_id`. It computes the reader's date itself with
@@ -63,8 +63,11 @@ comes from.
 - **Residue (a): a chair, dean or VP who reaches the door with no `scope` is
   answered for every section passed.** The definer does not know the purview. So
   every Python caller asking as a leadership reader must pass the scope resolved
-  for that reader, and E9-12 asserts that at the staff-name door. The two callers
-  this ticket leaves ask about one section that their own gate has already
+  for that reader, and E9-12 asserts that at the staff-name door. The door's
+  `scope` is a required keyword with no default (the security review's fix
+  round), so the opt-out is explicit at every call site: a caller writes
+  `scope=None` or the call is a `TypeError`. The two callers this ticket leaves
+  write `scope=None` and ask about one section that their own gate has already
   approved.
 - **Residue (b): the reader's date is a parameter the definer trusts,** which ADR
   0191 had rejected. A caller who can run SQL as `pulse_app` could pass a past

@@ -442,8 +442,13 @@ def ask_the_service(
             "settlement makes the door set-based; this is E7-01's question asked through it."
             f"\n\n{DELIVERABLE}"
         )
+    # `scope=None` written out: since the E9-03 fix round `scope` is a required
+    # keyword, so a single-section caller's choice of no purview filter is visible.
     answered = function(
-        application_session, section_ids=[section_id], reader_person_id=reader_person_id
+        application_session,
+        section_ids=[section_id],
+        reader_person_id=reader_person_id,
+        scope=None,
     )
     application_session.rollback()
     assert isinstance(answered, list), (
