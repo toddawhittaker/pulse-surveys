@@ -9,7 +9,9 @@ to `services/moderation.py` and `services/response_loop.py`, none a heavy
 path. Its migration adds a column to `weekly_summary`, none of the four heavy
 kinds. It calls E9-05's reader-aware seal and changes nothing in it. It must
 not add or change an `invariant`-marked test: those are E9-12's. If any
-change reaches a heavy path, it stops and re-lanes.
+change reaches a heavy path, it stops and re-lanes; in particular, if scoping
+the exclusion log or the policy to a purview needs a new helper in
+`services/authz.py`, the ticket re-lanes to heavy.
 **Size:** L
 **Security-relevant:** the only place a leader reads raw comments and a
 section's benchmark lines. A defect here lets a leader open a section outside
@@ -114,7 +116,10 @@ filter's function (moved onto sequence, never copied); E9-01's
    and the vice president each read the exclusion log and the response policy
    for sections in their purview, and nothing outside it; each still gets the
    403 on the review queue and the on-behalf routes, with its existing
-   sentence.
+   sentence. A dean (and likewise an assistant dean or VP) who teaches, or
+   once taught, a section in their purview gets no exclusion-log row from
+   that section, where the instructor's own view governs (§5.2); the twin: a
+   row from an untaught section in the same purview is present.
 7. **Item 5.** The drill-down reuses the instructor report's surface, so the
    report's confidentiality line shows once on it; its context bar's words go
    under `leadership_rollup.`. No change to the copy inventory test.
