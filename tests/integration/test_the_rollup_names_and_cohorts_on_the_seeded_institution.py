@@ -187,34 +187,45 @@ def test_a_leads_own_tree_omits_her_name_and_her_chairs_tree_shows_it(
 # ---------------------------------------------------------------------------
 
 
-def start_dates_by_section(session: Any, college_id: Any) -> dict[str, date]:
+def start_dates_by_section(session: Any, college_id: Any) -> dict[str, tuple[date, str]]:
+    """Each of the college's sections: its start date and its section code."""
     from sqlalchemy import text
 
     rows = session.execute(
         text(
-            "SELECT s.id, s.start_date FROM public.containment_path cp "
+            "SELECT s.id, s.start_date, s.lms_section_code FROM public.containment_path cp "
             "JOIN public.section s ON s.id = cp.section_id "
             "WHERE cp.college_id = :college"
         ),
         {"college": college_id},
     ).all()
-    return {str(row[0]): row[1] for row in rows}
+    return {str(row[0]): (row[1], str(row[2])) for row in rows}
+
+
+# The label's head: one or more start letters joined by "/", then " sections".
+LABEL = re.compile(r"(?P<letters>[^ ]+) sections · started (?P<month>\d+)/(?P<day>\d+)")
 
 
 def test_a_college_with_two_start_cohorts_carries_one_labelled_series_each_on_the_term_axis(
     seeded_demo: Any, demo_database: Any, authz: Any
 ) -> None:
-    """One cohort per distinct start date, in date order, labelled with its count and date, on the term axis.
+    """One cohort per distinct start date, in date order, labelled with its start letters and date, on the term axis.
 
     Term week = course week + whole weeks from the term's first day to the
-    cohort's start. The label is "N sections · started M/D" (N counted over the
-    college's sections with that start date; "1 section" is allowed).
+    cohort's start. The label is "{letters} sections · started M/D" (SPEC §2.2's
+    "U sections · started 8/17"; ruling on `docs/disputes/E9-07-01.md`): the
+    letters are exactly the start letters (first character of the section code)
+    of the college's sections starting that day, joined by "/" when several
+    letters share the date. The order of the letters is not settled, so they are
+    compared as a set, each once.
 
     **The control:** the college's sections start on at least two dates (the
     ticket owns seed additions if the term is too thin), and at least one cohort
     carries a week. **The mutations it kills:** cohorts merged into one line;
-    points on the course-week axis (term week = course week); a cohort's label
-    counting another cohort's sections; cohorts ordered by a figure.
+    points on the course-week axis (term week = course week); a count in place
+    of the letters ("9 sections · started 8/17"); a letter missing, or one from
+    another cohort, in the label; the wrong date; cohorts ordered by a figure.
+    **The near miss it spares:** the same letters in another order.
     """
     from sqlalchemy import text
 
@@ -243,7 +254,7 @@ def test_a_college_with_two_start_cohorts_carries_one_labelled_series_each_on_th
             settings=Settings(),
         )
 
-    distinct = sorted(set(starts.values()))
+    distinct = sorted({begun for begun, _code in starts.values()})
     assert len(distinct) >= 2, (
         f"The {COLLEGE}'s sections start on {distinct}; done-when 6 needs a node holding two start "
         "cohorts, and E9-07 owns roll-up additions to `scripts/seed.py` if the seeded term is too "
@@ -259,10 +270,17 @@ def test_a_college_with_two_start_cohorts_carries_one_labelled_series_each_on_th
     wrong_weeks = []
     for cohort in figures.cohorts:
         start = cohort.section_start_date
-        count = sum(1 for begun in starts.values() if begun == start)
-        pattern = rf"{count} sections? · started {start.month}/{start.day}"
-        if not re.fullmatch(pattern, cohort.label):
-            wrong_labels.append((str(start), cohort.label, f"{count} sections · started …"))
+        letters = {code[0] for begun, code in starts.values() if begun == start}
+        expected = f"{'/'.join(sorted(letters))} sections · started {start.month}/{start.day}"
+        matched = LABEL.fullmatch(cohort.label)
+        served_letters = matched.group("letters").split("/") if matched else []
+        if (
+            matched is None
+            or len(served_letters) != len(set(served_letters))
+            or set(served_letters) != letters
+            or (int(matched.group("month")), int(matched.group("day"))) != (start.month, start.day)
+        ):
+            wrong_labels.append((str(start), cohort.label, expected))
         offset = (start - term_start).days // 7
         wrong_weeks.extend(
             (str(start), week.course_week, week.term_week)
