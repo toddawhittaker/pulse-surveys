@@ -16,15 +16,16 @@ only one serving a figure (E9-11 draws it).
 **Three moderation review routes** (E6-05), after the sets: the
 reader's review queue, a decision on one queued comment, and the exclusion log.
 
-**The response loop's routes** (E7-03, ADR 0194), at the end of this file: the
-response policy (read and switch), the responses owed, and the five on-behalf
-doors. Like the review routes, each is scoped to the reader's own leadership
-grant, in `app.services.response_loop`; the section at the foot of this file
-says what each refuses.
-Unlike the sets, these are scoped to the reader's own leadership grant
-(`app.services.authz.lead_review_courses`), and the module docstring of
-`app.services.moderation` says what each answers; the section at the foot of
-this file says what each refuses.
+**The response loop's routes** (ADR 0194): the response policy (read and
+switch), the responses owed, and the five on-behalf doors. Like the review
+routes, each is scoped to the reader's own leadership grant
+(`app.services.authz.lead_review_courses`), with one widening (ADR 0206): the
+exclusion log and the policy read also answer an assistant dean, a dean or a
+vice president over their purview, taken from `leadership_scope`. Each section
+below says what its routes refuse.
+
+**The drill-down** (SPEC §5.5, ADR 0206), last: one section's Monday report,
+read-only, for a section inside the reader's purview.
 
 **`/leadership/comparison-sets/options` is declared before
 `/leadership/comparison-sets/{set_id}`, and that is load-bearing.** FastAPI

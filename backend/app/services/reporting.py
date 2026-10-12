@@ -16,15 +16,13 @@ onwards is the read. Nothing on the read path writes, and nothing on it commits;
 what it reads is E4-03's three views, E4-04's comment service, E4-02's summary
 table, and the section's own calendar.
 
-**Where E9's leadership drill-down attaches.** SPEC §5.5 renders this same report
-read-only inside a leadership shell, and E4-07 deliberately took the narrowest
-possible authorization — the requesting session's own taught sections — so that
-E9 has one thing to widen rather than a second payload to build.
-`_readable_section` is that one thing: E9 adds a purview-based way of reaching a
-section beside the teaching check, and every function below it is untouched.
-Forking `instructor_report` instead would give the institution two answers to
-"what does this report say", which is how a suppression rule comes to hold on one
-surface and not the other.
+**Where the leadership drill-down attaches.** SPEC §5.5 renders this same report
+read-only inside a leadership shell. `leadership_report` reaches a section
+through the reader's purview where `instructor_report` reaches it through the
+teaching grant, and both build the one `_payload` (ADR 0206). Forking the
+payload instead would give the institution two answers to "what does this
+report say", which is how a suppression rule comes to hold on one surface and
+not the other.
 
 **One section-week is the unit of work, and it is one transaction.** §5.1 leads
 each of a week's two comment groups with its own summary and E4-11 renders both;
@@ -184,8 +182,8 @@ def generate_missing_summaries(
     held to one commit at the end loses every summary it had generated when the
     section after them fails.
 
-    **A window that has closed, and the comparison is the complement of the one
-    E2-06 already wrote.** `app.services.survey_windows._open_at` makes a window
+    **A window that has closed, and the comparison is the complement of the
+    window-open test.** `app.services.survey_windows._open_at` makes a window
     open when `opens_at <= t <= closes_at`, both ends inclusive, so closed is
     `closes_at < t` (`survey_windows.closed_by`, the one definition) and no
     instant is ever both. The instant is the *effective*
@@ -198,7 +196,7 @@ def generate_missing_summaries(
     whole of the idempotence: the second of two consecutive runs finds nothing to
     do, asks the provider nothing, and leaves every stored row exactly as it was.
     An upsert would converge on the same table and rewrite what an instructor read
-    this morning, which the E4 breakdown's decision 2 rules out.
+    this morning, and a stored summary is never regenerated (ADR 0182).
 
     **A provider failure is absorbed and nothing else is.** ADR 0056's gateway
     classes are the interface a caller branches on, and they are what this catches:
@@ -515,7 +513,7 @@ def _summary_row(
         response_count=record.response_count,
         # Stored as objects rather than as labels, because §5.3's draft check
         # "quietly names any theme not yet addressed (with its comment count)" and
-        # E4-10 renders the count beside the label. A list of strings keeps both
+        # the check renders the count beside the label. A list of strings keeps both
         # labels and loses both numbers, and nothing downstream could recover them.
         themes=[
             {"label": theme.label, "comment_count": theme.comment_count}
@@ -1219,7 +1217,7 @@ def comment_on_instructor_report(
 
 
 def comment_view(card: CommentCard, *, reader: UUID | None) -> "CommentView":
-    """One card as the payload carries it: E4-04's three fields and E6-03's three.
+    """One card as the payload carries it: the comment's three fields and the decision door's three.
 
     The one place a `CommentCard` becomes a `CommentView`, used by the report and
     by the decision route's answer, so the two cannot describe one comment two
@@ -1570,8 +1568,8 @@ def _benchmark_members(
     would let a reader subtract their own published weeks and read off which
     weeks other sections answered in, which is an existence oracle readable from
     a series where every figure is withheld (ADR 0170). And each week has a
-    **cutoff** — the owner's freeze-at-close ruling, as E5-14's round 4 shares it
-    across the population (`_population_cutoffs`): a comparison figure for a
+    **cutoff** — a figure is frozen at its week's close, shared across the
+    population (SPEC §5.1, ADR 0178) (`_population_cutoffs`): a comparison figure for a
     published week counts only answers fixed by then, so no later answer moves it
     and two reads of it cannot be subtracted into one student's answer.
 
@@ -1674,7 +1672,7 @@ def _payload(
 
     **Nothing is widened at the assembly layer.** The comments are exactly what
     `visible_cards` and `released_cards` answer with: the comment service's
-    three fields, and E6-03's three (the handle, the flag class and whether the
+    three fields, and the decision door's three (the handle, the flag class and whether the
     reader made the latest decision), built by `comment_view`. The summary is
     what the row holds, and an absent row is an absent member rather than an
     empty string. §4.1 item 6's spirit is that a suppression decided one layer
@@ -1715,8 +1713,7 @@ def _payload(
     # here instead would be a second source: the report would print the value the
     # application started with while the gate applied whatever `Settings()` says
     # when it is called, and the screen would describe a rule the query did not
-    # follow. E4-07's security round found exactly that, and
-    # `app.services.report_comments.n_threshold` carries the argument.
+    # follow; `app.services.report_comments.n_threshold` carries the argument.
     threshold = n_threshold()
     held = _held_streams(session, section_id=section.id, week_id=week.week_id)
     question_texts = _served_question_texts(session, section_id=section.id, week_id=week.week_id)
@@ -1795,13 +1792,10 @@ def _payload(
         ),
         workload=schema.WorkloadView(mean=workload_mean, median=workload_median),
         workload_benchmark=workload_benchmark,
-        # The member E4 shipped, now carrying what it was always for: the default
-        # comparison set's workload mean for this week. It is the *same object*
-        # `workload_benchmark.comparison.mean` carries — assigned twice, computed
-        # once — so the payload cannot say two things about one statistic. E5-05's
-        # decision 5 keeps it rather than retiring it, because every E4 reader and
-        # E4-07's own reconciliation test names it; a later ticket may retire it
-        # once nothing reads it.
+        # The default comparison set's workload mean for this week. It is the
+        # *same object* `workload_benchmark.comparison.mean` carries — assigned
+        # twice, computed once — so the payload cannot say two things about one
+        # statistic. It stays while readers of the older member remain.
         comparison=workload_benchmark.comparison.mean,
         released_from_earlier_weeks=_comment_views(released, reader=decider),
         institution_timezone=settings.institution_timezone,
@@ -1831,7 +1825,7 @@ def _held_streams(session: Session, *, section_id: UUID, week_id: UUID) -> dict[
 
 
 def _comment_views(cards: Sequence[CommentCard], *, reader: UUID | None) -> list["CommentView"]:
-    """E4-04's comments, each through `comment_view`, in the order the service gave them.
+    """The comment service's cards, each through `comment_view`, in the order it gave them.
 
     Written as one function rather than three comprehensions so there is one place
     a field could ever be introduced, and so the review that forbids one has one
@@ -1981,7 +1975,7 @@ def _stored_summaries(
     **An ordinary-mode summary of a stream that is now held is withheld.** A row
     written under `SUMMARY_PROMPT_VERSION` before the threshold became per stream
     (ADR 0182) may quote a thin stream's commenters, which the small-N prompt
-    forbids. Such a row is never regenerated (the E4 breakdown's decision 2), so
+    forbids. Such a row is never regenerated (ADR 0182), so
     it is left out here, at the one place a stored summary is read, and the
     stream shows the absent state instead.
 

@@ -991,12 +991,12 @@ def logged_decisions(
 ) -> tuple[LoggedDecision, ...]:
     """Every decision and undo a person made about a comment in these courses or sections, newest first.
 
-    E6-05's exclusion log (decision 1): every `moderation_state` row with a
+    The exclusion log (SPEC §5.2, ADR 0190): every `moderation_state` row with a
     decider. A decision leaves `EXCLUDED` or `KEPT`; an undo restores whatever
     the comment held before, which may also be the router's flag or the
     published state, and is marked `is_undo` (SPEC §8: "whether it undoes an
     earlier decision"), so the log shows it as a reversal rather than as a fresh
-    decision or not at all (E6-09). The router's flag has no decider and is not
+    decision or not at all. The router's flag has no decider and is not
     here.
 
     **The comments come through `report_comment` v004**, so a decision row about
@@ -1006,7 +1006,7 @@ def logged_decisions(
 
     **Newest is the order of insert**, `moderation_state.sequence`, the order
     every reader of this relation uses; it is here because this module is the
-    one home of that ordering (E4-07's deferral).
+    one home of that ordering.
     """
     answer_id = COMMENT_VIEW.c.answer_id
     asked = (
