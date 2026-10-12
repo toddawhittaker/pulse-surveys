@@ -14,9 +14,13 @@
 -- nothing a caller could not learn by calling the point resolver once per id;
 -- what it changes is the number of round trips.
 --
--- **Only the ids the caller supplies.** The body filters on the array it is
--- given and never reads `person` whole, so it cannot be asked for "every
--- link" without already holding every user id.
+-- **Only the ids the caller supplies, and that is no limit on a determined
+-- caller.** The body filters on the array it is given, but `pulse_app` can read
+-- every `user.id`, so one call over all of them returns the whole user-to-person
+-- map. That map is ids only and is what the point resolver gives one id at a
+-- time; what this gives up is ADR 0094's point-lookup property, which ADR 0205
+-- records as the cost. The narrower design, left unbuilt, is a definer keyed by
+-- section that answers only the enrolled users who are staff on that section.
 
 CREATE OR REPLACE FUNCTION public.resolve_persons_for_users(
     in_user_ids uuid[]
