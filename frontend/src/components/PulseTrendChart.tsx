@@ -63,6 +63,18 @@ export interface OverlayPoint {
  * minimums behind it are the server's (`comparison_after_suppression`, E5's
  * breakdown decision 2); every flag below is read, never computed.
  */
+/**
+ * One start cohort's line on an aggregate page's term axis (SPEC §2.2): its
+ * label, as the server wrote it, and its weeks, each placed at its term week.
+ */
+export interface CohortLine {
+  readonly label: string;
+  readonly points: readonly TrendPoint[];
+}
+
+/** How many distinct cohort strokes there are before the styles repeat. */
+const COHORT_STROKES = 6;
+
 export interface OverlaySeries {
   readonly points: readonly OverlayPoint[];
 }
@@ -306,6 +318,13 @@ function axisTicks(weeks: number, points: readonly TrendPoint[]): readonly AxisT
  * dash and the stroke stay in one place. On the colour those two lines take,
  * and where that departs from the brief, see the stylesheet.
  *
+ * **One line per start cohort, on an aggregate page.** Given `cohorts`, the
+ * chart draws each cohort's line in place of the single hero, each with its own
+ * terminal dot, its own table, and its own legend entry; the strokes are told
+ * apart by ink and, past the third, by a dash (`instructorReportTrend.css`).
+ * A caller that passes `cohorts` passes no overlay: a comparison line beside
+ * several cohorts would not say which one it compares.
+ *
  * **The axis is the whole term, and the line is what has happened so far**
  * (E4-21). Every one of the section's weeks gets a tick, whether or not a report
  * exists for it; the term-week sub-label appears only under the weeks the
@@ -349,6 +368,7 @@ export function PulseTrendChart({
   heroLabel,
   comparisonLabel: comparisonName,
   comparisonSuppressed,
+  cohorts,
 }: {
   /** One stream's published weeks, oldest first. */
   readonly points: readonly TrendPoint[];
@@ -400,6 +420,8 @@ export function PulseTrendChart({
   readonly comparisonLabel?: string;
   /** What a withheld comparison line says, in place of the comparable courses' sentence. */
   readonly comparisonSuppressed?: string;
+  /** One line per start cohort, drawn in place of `points`' single line. */
+  readonly cohorts?: readonly CohortLine[];
 }): JSX.Element {
   // What each comparison series actually contributes to the drawing. Absent and
   // suppressed both come out empty here, and they part company below: absent
@@ -408,7 +430,10 @@ export function PulseTrendChart({
   const tableClass = numbersShown ? 'pulse-trend-table' : 'sr-only';
   // The term-week column is the server's word for a section's place in the term;
   // a payload that sends none has no column rather than an empty one.
-  const showTermWeek = points.some((point) => point.termWeek !== null);
+  const lines: readonly { readonly label: string | null; readonly points: readonly TrendPoint[] }[] =
+    cohorts ?? [{ label: null, points }];
+  const everyPoint = lines.flatMap((line) => line.points);
+  const showTermWeek = everyPoint.some((point) => point.termWeek !== null);
   const comparisonPoints = drawnPoints(comparison);
   const universityPoints = drawnPoints(university);
 
@@ -416,9 +441,17 @@ export function PulseTrendChart({
   // the reason the section's own weeks are in it: a week past the end of the
   // axis would be drawn off the right-hand edge, where nobody would see that
   // the payload and the section's length disagreed.
-  const weeks = axisWeeks(lengthWeeks, [...points, ...comparisonPoints, ...universityPoints]);
-  const plotted = plot(points, weeks);
-  const path = linePath(plotted);
+  const weeks = axisWeeks(lengthWeeks, [...everyPoint, ...comparisonPoints, ...universityPoints]);
+  const drawn = lines.map((line, index) => {
+    const plotted = plot(line.points, weeks);
+    return {
+      key: line.label ?? String(index),
+      label: line.label,
+      stroke: cohorts === undefined ? '' : ` pulse-trend-cohort-${String(index % COHORT_STROKES)}`,
+      path: linePath(plotted),
+      terminal: plotted.reduce<PlottedPoint | null>((latest, point) => point ?? latest, null),
+    };
+  });
   const comparisonPath = linePath(plot(comparisonPoints, weeks));
   const universityPath = linePath(plot(universityPoints, weeks));
   const comparisonLabel =
@@ -434,10 +467,6 @@ export function PulseTrendChart({
       : 'instructor_report_trend.table_course_week_header',
   );
   const universityLabel = copy('instructor_report_trend.legend_university');
-  const terminal = plotted.reduce<PlottedPoint | null>(
-    (latest, point) => point ?? latest,
-    null,
-  );
   const viewHeight = showTicks ? PLOT_HEIGHT + AXIS_BAND : PLOT_HEIGHT;
 
   return (
@@ -490,15 +519,25 @@ export function PulseTrendChart({
             d={comparisonPath}
           />
         )}
-        {path !== '' && <path className="pulse-trend-line" d={path} pathLength={1} />}
-        {terminal !== null && (
+        {drawn.map((line) =>
+          line.path === '' ? null : (
+            <path key={line.key} className={`pulse-trend-line${line.stroke}`} d={line.path} pathLength={1} />
+          ),
+        )}
+        {drawn.map(({ key, stroke, terminal }) => terminal !== null && (
           // Rounded the way the path rounds, so the dot and the end of the line
           // it terminates are the same point rather than two points a
           // twentieth of a unit apart.
-          <circle className="pulse-trend-dot" cx={round(terminal.x)} cy={round(terminal.y)} r={4} />
-        )}
+          <circle
+            key={key}
+            className={`pulse-trend-dot${stroke}`}
+            cx={round(terminal.x)}
+            cy={round(terminal.y)}
+            r={4}
+          />
+        ))}
         {showTicks &&
-          axisTicks(weeks, points).map((tick) => (
+          axisTicks(weeks, everyPoint).map((tick) => (
             <g key={tick.courseWeek} className="pulse-trend-tick">
               <text
                 className="pulse-trend-tick-label"
@@ -548,41 +587,48 @@ export function PulseTrendChart({
             : 'instructor_report_trend.show_numbers',
         )}
       </button>
-      <table className={tableClass}>
-        <caption>
-          {fillCopy('instructor_report_trend.table_caption', { stream: label })}
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">{weekHeader}</th>
-            {showTermWeek && (
-              <th scope="col">{copy('instructor_report_trend.table_term_week_header')}</th>
-            )}
-            <th scope="col">{meanHeader ?? copy('instructor_report_trend.table_mean_header')}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {points.map((point) => (
-            <tr key={point.courseWeek}>
-              <th scope="row">{fillCopy(weekTick, { week: padWeek(point.courseWeek) })}</th>
+      {lines.map((line) => (
+        <table key={line.label ?? ''} className={tableClass}>
+          <caption>
+            {line.label === null
+              ? fillCopy('instructor_report_trend.table_caption', { stream: label })
+              : fillCopy('instructor_report_trend.overlay_table_caption', {
+                  stream: label,
+                  series: line.label,
+                })}
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">{weekHeader}</th>
               {showTermWeek && (
-                <td>
-                  {point.termWeek === null
-                    ? null
-                    : fillCopy('instructor_report_trend.term_week_tick', {
-                        week: padWeek(point.termWeek),
-                      })}
-                </td>
+                <th scope="col">{copy('instructor_report_trend.table_term_week_header')}</th>
               )}
-              <td>
-                {point.mean === null
-                  ? (absentText ?? copy('instructor_report_trend.no_responses'))
-                  : point.mean.toFixed(1)}
-              </td>
+              <th scope="col">{meanHeader ?? copy('instructor_report_trend.table_mean_header')}</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {line.points.map((point) => (
+              <tr key={point.courseWeek}>
+                <th scope="row">{fillCopy(weekTick, { week: padWeek(point.courseWeek) })}</th>
+                {showTermWeek && (
+                  <td>
+                    {point.termWeek === null
+                      ? null
+                      : fillCopy('instructor_report_trend.term_week_tick', {
+                          week: padWeek(point.termWeek),
+                        })}
+                  </td>
+                )}
+                <td>
+                  {point.mean === null
+                    ? (absentText ?? copy('instructor_report_trend.no_responses'))
+                    : point.mean.toFixed(1)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ))}
       {comparisonPoints.length > 0 && (
         <OverlayTable
           stream={label}
@@ -625,13 +671,15 @@ export function PulseTrendChart({
       )}
       {showLegend && (
         <figcaption className="pulse-trend-legend">
-          <span className="pulse-trend-legend-item">
-            <svg width="28" height="8" aria-hidden="true" focusable="false">
-              <line className="pulse-trend-legend-line" x1="2" y1="4" x2="20" y2="4" />
-              <circle className="pulse-trend-legend-dot" cx="24" cy="4" r="2.5" />
-            </svg>
-            {heroLabel ?? copy('instructor_report_trend.legend_section')}
-          </span>
+          {drawn.map((line) => (
+            <span key={line.key} className="pulse-trend-legend-item">
+              <svg width="28" height="8" aria-hidden="true" focusable="false">
+                <line className={`pulse-trend-legend-line${line.stroke}`} x1="2" y1="4" x2="20" y2="4" />
+                <circle className={`pulse-trend-legend-dot${line.stroke}`} cx="24" cy="4" r="2.5" />
+              </svg>
+              {line.label ?? heroLabel ?? copy('instructor_report_trend.legend_section')}
+            </span>
+          ))}
           {/* A legend entry only for a line that is on the plot. A legend naming
               a suppressed series would be the chart claiming a line a reader
               cannot find, and a legend naming an absent one would be comparison

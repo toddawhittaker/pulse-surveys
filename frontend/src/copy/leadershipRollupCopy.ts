@@ -58,6 +58,7 @@ export const LEADERSHIP_ROLLUP_COPY = {
   'leadership_rollup.trend.heading': 'Ratings over the term',
   'leadership_rollup.trend.legend_node': 'These sections',
   'leadership_rollup.cohort.label': 'Start cohort',
+  'leadership_rollup.cohort.all': 'All starts',
   'leadership_rollup.workload.heading': 'Workload',
   'leadership_rollup.workload.absent': 'No workload figures for this start cohort yet.',
   'leadership_rollup.participation.heading': 'Participation',
@@ -72,6 +73,8 @@ export const LEADERSHIP_ROLLUP_COPY = {
   // The named-set line beside the node's own (SPEC §5.5).
   'leadership_rollup.set.label': 'Compare with a named set',
   'leadership_rollup.set.none': 'No named set',
+  'leadership_rollup.set.choose_one':
+    'Choose one start cohort to see the {name} line beside it.',
   'leadership_rollup.set.loading': 'Opening the named set’s figures…',
   'leadership_rollup.set.unavailable':
     'The named set’s figures could not be loaded just now. Choose it again to retry.',

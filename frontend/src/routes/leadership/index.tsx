@@ -437,6 +437,9 @@ function NodeFigures({
   );
 }
 
+/** The cohort chip that shows every start cohort at once: the default (SPEC §2.2). */
+const ALL_STARTS = 'all';
+
 function Figures({
   figures,
   term,
@@ -444,18 +447,20 @@ function Figures({
   readonly figures: RollupFiguresView;
   readonly term: RollupTermView;
 }): JSX.Element {
-  const [cohortAt, setCohortAt] = useState(0);
-  const cohort: RollupCohortView | undefined = figures.cohorts[cohortAt] ?? figures.cohorts[0];
+  const [picked, setPicked] = useState<string>(ALL_STARTS);
+  const chosen = figures.cohorts.filter((cohort) => cohort.section_start_date === picked);
+  const shown = chosen.length > 0 ? chosen : figures.cohorts;
 
   return (
     <>
-      {cohort === undefined ? (
+      {figures.cohorts.length === 0 ? (
         <p className="pulse-rollup-note">{copy('leadership_rollup.figures.no_cohorts')}</p>
       ) : (
         <CohortFigures
           cohorts={figures.cohorts}
-          cohort={cohort}
-          onChoose={setCohortAt}
+          shown={shown}
+          picked={chosen.length > 0 ? picked : ALL_STARTS}
+          onPick={setPicked}
           term={term}
         />
       )}
@@ -479,15 +484,26 @@ function Figures({
   );
 }
 
+/**
+ * The trend, workload and participation for the start cohorts the chips show.
+ *
+ * "All starts" draws every cohort's line on the one term axis; a cohort chip
+ * draws that cohort alone, and only then is the named set's line drawn beside
+ * it, because a set's line beside several cohorts would not say which one it
+ * compares. Workload and participation follow the chips, one block per cohort
+ * shown, each named by its cohort when there is more than one.
+ */
 function CohortFigures({
   cohorts,
-  cohort,
-  onChoose,
+  shown,
+  picked,
+  onPick,
   term,
 }: {
   readonly cohorts: readonly RollupCohortView[];
-  readonly cohort: RollupCohortView;
-  readonly onChoose: (index: number) => void;
+  readonly shown: readonly RollupCohortView[];
+  readonly picked: string;
+  readonly onPick: (key: string) => void;
   readonly term: RollupTermView;
 }): JSX.Element {
   const [sets, setSets] = useState<readonly ComparisonSetSummaryView[]>([]);
@@ -509,40 +525,64 @@ function CohortFigures({
     ),
   );
   const chosenSet = sets.find((candidate) => candidate.id === setId) ?? null;
-  const setLine = chosenSet === null ? null : namedSetLines(series, cohort);
-  const latest = latestWorkload(cohort.weeks);
-  const participation = cohort.participation;
+  const single = shown.length === 1 ? (shown[0] ?? null) : null;
+  const setLine = chosenSet === null || single === null ? null : namedSetLines(series, single);
+  const named = shown.length > 1;
 
   return (
     <>
       <h3 className="pulse-rollup-heading">{copy('leadership_rollup.trend.heading')}</h3>
-      <TrendPair
-        axis="term"
-        lengthWeeks={term.length_weeks}
-        instructor={termAxis(cohort.weeks, 'instructor_mean')}
-        course={termAxis(cohort.weeks, 'course_mean')}
-        heroLabel={copy('leadership_rollup.trend.legend_node')}
-        instructorBenchmark={setLine === null ? undefined : { comparison: setLine.instructor }}
-        courseBenchmark={setLine === null ? undefined : { comparison: setLine.course }}
-        {...(chosenSet === null
-          ? {}
-          : {
-              comparisonLabel: chosenSet.name,
-              comparisonSuppressed: fillCopy('leadership_rollup.set.suppressed', {
-                name: chosenSet.name,
-              }),
-            })}
-      />
+      {single === null ? (
+        <TrendPair
+          axis="term"
+          lengthWeeks={term.length_weeks}
+          instructor={[]}
+          course={[]}
+          cohorts={shown.map((cohort) => ({
+            label: cohort.label,
+            instructor: termAxis(cohort.weeks, 'instructor_mean'),
+            course: termAxis(cohort.weeks, 'course_mean'),
+          }))}
+        />
+      ) : (
+        <TrendPair
+          axis="term"
+          lengthWeeks={term.length_weeks}
+          instructor={termAxis(single.weeks, 'instructor_mean')}
+          course={termAxis(single.weeks, 'course_mean')}
+          heroLabel={copy('leadership_rollup.trend.legend_node')}
+          instructorBenchmark={setLine === null ? undefined : { comparison: setLine.instructor }}
+          courseBenchmark={setLine === null ? undefined : { comparison: setLine.course }}
+          {...(chosenSet === null
+            ? {}
+            : {
+                comparisonLabel: chosenSet.name,
+                comparisonSuppressed: fillCopy('leadership_rollup.set.suppressed', {
+                  name: chosenSet.name,
+                }),
+              })}
+        />
+      )}
       <div className="pulse-rollup-choices">
         <div role="group" aria-label={copy('leadership_rollup.cohort.label')} className="pulse-rollup-field">
-          {cohorts.map((candidate, index) => (
+          <button
+            type="button"
+            className="pulse-rollup-mode"
+            aria-pressed={picked === ALL_STARTS}
+            onClick={() => {
+              onPick(ALL_STARTS);
+            }}
+          >
+            {copy('leadership_rollup.cohort.all')}
+          </button>
+          {cohorts.map((candidate) => (
             <button
               key={candidate.section_start_date}
               type="button"
               className="pulse-rollup-mode"
-              aria-pressed={candidate === cohort}
+              aria-pressed={picked === candidate.section_start_date}
               onClick={() => {
-                onChoose(index);
+                onPick(candidate.section_start_date);
               }}
             >
               {candidate.label}
@@ -567,24 +607,70 @@ function CohortFigures({
           </select>
         </label>
       </div>
-      <p className="pulse-rollup-status" role="status">
-        {setId === null
-          ? ''
-          : series === null
-            ? copy('leadership_rollup.set.loading')
-            : series.kind === 'ok'
-              ? ''
-              : refusalLine(series, 'leadership_rollup.set.unavailable')}
-      </p>
+      {chosenSet !== null && single === null ? (
+        <p className="pulse-rollup-note">
+          {fillCopy('leadership_rollup.set.choose_one', { name: chosenSet.name })}
+        </p>
+      ) : null}
+      <LiveStatus
+        className="pulse-rollup-status"
+        text={
+          setId === null
+            ? ''
+            : series === null
+              ? copy('leadership_rollup.set.loading')
+              : series.kind === 'ok'
+                ? ''
+                : refusalLine(series, 'leadership_rollup.set.unavailable')
+        }
+      />
 
       <h3 className="pulse-rollup-heading">{copy('leadership_rollup.workload.heading')}</h3>
+      {shown.map((cohort) => (
+        <CohortWorkload key={cohort.section_start_date} cohort={cohort} named={named} />
+      ))}
+
+      <h3 className="pulse-rollup-heading">{copy('leadership_rollup.participation.heading')}</h3>
+      {shown.map((cohort) => (
+        <CohortParticipation key={cohort.section_start_date} cohort={cohort} named={named} />
+      ))}
+    </>
+  );
+}
+
+/** One cohort's latest workload, under its label when several are shown. */
+function CohortWorkload({
+  cohort,
+  named,
+}: {
+  readonly cohort: RollupCohortView;
+  readonly named: boolean;
+}): JSX.Element {
+  const latest = latestWorkload(cohort.weeks);
+  return (
+    <>
+      {named ? <h4 className="pulse-rollup-subheading">{cohort.label}</h4> : null}
       {latest === null ? (
         <p className="pulse-rollup-note">{copy('leadership_rollup.workload.absent')}</p>
       ) : (
         <StatPair median={latest.median} mean={latest.mean} />
       )}
+    </>
+  );
+}
 
-      <h3 className="pulse-rollup-heading">{copy('leadership_rollup.participation.heading')}</h3>
+/** One cohort's latest participation, under its label when several are shown. */
+function CohortParticipation({
+  cohort,
+  named,
+}: {
+  readonly cohort: RollupCohortView;
+  readonly named: boolean;
+}): JSX.Element {
+  const participation = cohort.participation;
+  return (
+    <>
+      {named ? <h4 className="pulse-rollup-subheading">{cohort.label}</h4> : null}
       {participation === null || participation.response_rate === null ? (
         <p className="pulse-rollup-note">{copy('leadership_rollup.participation.absent')}</p>
       ) : (
