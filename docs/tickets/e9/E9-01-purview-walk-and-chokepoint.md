@@ -111,35 +111,46 @@ reused); `scripts/seed.py`'s worked example.
    asserts that it does (MISTAKES entry 15).
 5. **Parent covers child, generated.** For every edge, the parent's purview
    contains the child's clamped purview. Marked `invariant`.
-6. **Care and Admin never contribute, generated.** Adding a `CARE` or `ADMIN`
+6. **The purview equals an independent computation, generated.** Over
+   generated forests and mappings, for every assignment, its purview equals a
+   set the test computes on its own: the assignment's own grant, together with
+   the clamped purviews of its children (a child `LEAD_FACULTY` assignment
+   contributing its own grant only). The person's leadership scope equals the
+   union of those sets across their leadership assignments. The expected sets
+   are computed by the test from the generated graph, never by calling the
+   code under test (MISTAKES entry 19), and the generator's draw of an
+   instructor edge into a lead is asserted as in done-when 4. This catches a
+   walk that clamps a lead's own result but passes the unclamped set up to
+   the chair. Marked `invariant`.
+7. **Care and Admin never contribute, generated.** Adding a `CARE` or `ADMIN`
    assignment to any person in a generated forest changes no leadership scope.
    Marked `invariant`.
-7. **Instructor hats stay out (ruling 4).** A chair who also teaches a section
+8. **Instructor hats stay out (ruling 4).** A chair who also teaches a section
    in another department has a leadership scope without that section, and the
    section is reached through the instructor session only.
-8. **Two `LEAD_FACULTY` assignments under two chairs.** A person who holds two
+9. **Two `LEAD_FACULTY` assignments under two chairs.** A person who holds two
    lead assignments, each reporting to a different chair, hands both chairs
    every course mapped to that person, because the mapping is per person. Test
    it as the spec's literal meaning, and say so in ADR 0199.
-9. **The chokepoint refuses any other id.** No leadership route accepts a
+10. **The chokepoint refuses any other id.** No leadership route accepts a
    person, assignment or scope id that decides whose scope is resolved. A
    request carrying another person's id in a query string, a path segment or
    a body is answered from the session's own person. The caller sweep finds
    `resolve_scope` called only from `leadership_scope` and the services it
    passes the scope to, with a planted second caller going red and the
    allowed caller found as a control (MISTAKES entry 35).
-10. **The launch binding follows the purview.** `leadership_grant_covers`
+11. **The launch binding follows the purview.** `leadership_grant_covers`
     admits the assistant dean's launch into a section of a supervised chair's
     department, and still refuses a lead's launch into a sibling lead's
     course (the existing test stays green unchanged).
-11. **The chair walk is written once.** `lead_review_courses` and
+12. **The chair walk is written once.** `lead_review_courses` and
     `chaired_courses_with_a_lead` share one statement of the walk to a
     department's courses with a lead. Their existing tests stay green
     unchanged.
-12. **`transitive_purview` no longer raises,** and every test that asserted
+13. **`transitive_purview` no longer raises,** and every test that asserted
     the seam raised is rewritten in its own commit, saying in the pull request
     why the old assertion is now wrong (MISTAKES entry 22).
-13. **The records match.** ADR 0199 is written and indexed; ADR 0003, 0046 and
+14. **The records match.** ADR 0199 is written and indexed; ADR 0003, 0046 and
     0108 each gain a line pointing at it. Comments in `authz.py` that say
     "E9 lands it" or name a ticket are rewritten to say what the code does.
 
