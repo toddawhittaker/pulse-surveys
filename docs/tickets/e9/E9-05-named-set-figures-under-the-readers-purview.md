@@ -86,6 +86,12 @@ seal) and §5.5; ADRs 0164, 0166, 0173, 0178, 0179 and 0180;
   viewed term and return per-cohort series; `named_set_term_axis` deleted.
 - `backend/app/services/comparison_sets.py` and the named-set routes'
   refusal: the normalized-name refusal.
+- `backend/app/services/authz.py`: the one helper `leadership_section_ids`,
+  because only `authz.py` may resolve a person's purview for the seal.
+- `backend/app/models/benchmark.py`: the normalized-name index, so
+  `alembic check` agrees with the migration.
+- SPEC §5.1: the seal sentences, so "her sections" means taught plus purview
+  in every clause.
 - `backend/app/api/leadership.py`: the named-set series route.
 - `backend/app/schemas/` for the series payload; the near-duplicate refusal
   under the existing `leadership_comparison_sets` prefix.
@@ -186,6 +192,19 @@ E9-01's `Purview` and `leadership_scope`; the E5-14 sweep that allows only
     gain their lines; the docstrings in `benchmarks.py` that say E9 decides
     the cutoffs or that a named set has no reader are rewritten. SPEC §13
     reflects any file added or removed.
+16. **The two extra pieces count a two-hat instructor's purview.** The
+    instructor of the reported section also chairs department D, and a section
+    in D belongs to a course whose lead also leads a course outside D, of the
+    same term, length and level. She reads her own report with no leadership
+    reader passed. (a) U less her sections (taught and purview) meets both
+    minimums, but that lead's default set less her sections is non-empty and
+    one respondent below a minimum: U is suppressed, and at the minimum it is
+    shown. (b) U less her sections and every such default set is non-empty and
+    one respondent below a minimum: U is suppressed, and at the minimum it is
+    shown. A twin with the chair assignment removed shows U, which proves the
+    piece came from the purview. Marked `invariant`. (Added by the build
+    interface; a chair is chosen because a lead's default sets lie inside her
+    own purview, so for a lead both pieces are empty.)
 
 ## Shares files with
 
