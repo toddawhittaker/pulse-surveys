@@ -48,7 +48,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from app import __version__
-from app.api import auth, dev, health, instructor, leadership, lti, student
+from app.api import admin, auth, dev, health, instructor, leadership, lti, student
 from app.config import Settings, is_development
 from app.db import SessionLocal
 from app.lti.registration import launcher_origins
@@ -319,6 +319,9 @@ def create_app() -> FastAPI:
     # what makes every route this router serves findable to a sweep that asks the
     # running application.
     app.include_router(leadership.router)
+    # The admin console's people editor (SPEC §6.3), behind `require_admin` or
+    # `csrf_verified_admin` on every route, for the same findability reason.
+    app.include_router(admin.router)
     # The developer test console. Always registered; the handler gates itself on
     # `ENVIRONMENT == development` and answers 404 elsewhere, so production is
     # indistinguishable from a route that does not exist (ADR 0074).

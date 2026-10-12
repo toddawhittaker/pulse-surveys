@@ -30,10 +30,9 @@ figure, and two reads of one world are compared by how many they show
 are not named). Each suppression sits beside a read of the same world in which
 the university line is shown (`docs/MISTAKES.md` entry 3).
 
-**Which failure a red is, before E9-05 lands:** the reads that name a reader
-FAIL naming `section_benchmarks`' missing `scope`; the reads with no reader run,
-and their suppression assertions FAIL, because today an instructor's sections
-are only those she teaches.
+**Which failure a red is, before E9-05 lands:** every read FAILS naming
+`section_benchmarks`' missing `scope`, the reads with no reader too, since they
+pass `scope=None` explicitly (E9-05's fix round, P2).
 """
 
 from decimal import Decimal

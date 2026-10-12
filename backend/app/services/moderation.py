@@ -114,7 +114,12 @@ from app.models.report import REASON_BOUND, DeciderRole, ModerationState
 from app.models.survey import Answer, Question, QuestionKind, Response
 from app.models.term import SurveyWindow, Term
 from app.services import clock
-from app.services.authz import lead_review_courses, taught_or_once_taught_section_ids
+from app.services.authz import (
+    ActorScope,
+    Purview,
+    lead_review_courses,
+    taught_or_once_taught_section_ids,
+)
 from app.services.section_codes import course_label
 from app.services.survey_windows import closed_by
 
@@ -805,16 +810,39 @@ def decide_as_leader(
     session.commit()
 
 
+# The three roles that read the exclusion log and the response policy over their
+# purview and review nothing (SPEC §5.2, §5.3; ADR 0206). The queue and the
+# on-behalf doors stay with the lead and, for an unled course, the chair.
+PURVIEW_READERS: frozenset[AssignmentRole] = frozenset(
+    {AssignmentRole.ASSISTANT_DEAN, AssignmentRole.DEAN, AssignmentRole.VP_ACADEMICS}
+)
+
+
+def purview_read(scope: ActorScope) -> Purview:
+    """The union of the reader's `PURVIEW_READERS` grants: what the log and policy read over.
+
+    Only those grants: a lead's or chair's grant reaches the log and the policy
+    through `authz.lead_review_courses`, as before, so a chair does not read a
+    led course's log by holding its department.
+    """
+    read = Purview.empty()
+    for grant in scope.grants:
+        if grant.role in PURVIEW_READERS:
+            read = read.union(grant.purview)
+    return read
+
+
 def exclusion_log(
-    session: Session, *, person_id: UUID | None, settings: Settings
+    session: Session, *, scope: ActorScope, settings: Settings
 ) -> list[ExclusionLogRow]:
-    """Every exclusion, keep and undo a person made inside this reader's own grant, newest first.
+    """Every exclusion, keep and undo a person made inside this reader's reach, newest first.
 
     SPEC §5.2's anti-cherry-picking trail, in both directions (§11 question 5,
-    settled). The rows are `report_comments.logged_decisions` over the courses
-    `authz.lead_review_courses` gives this reader, so a Care-class comment's
-    decision is never a row (view v004 leaves it out) and a sibling lead's
-    course is never read.
+    settled). The rows are `report_comments.logged_decisions` over two reaches,
+    unioned: the courses `authz.lead_review_courses` gives a lead or chair, and
+    the sections of an assistant dean's, dean's or vice president's purview
+    (`purview_read`, ADR 0206). A Care-class comment's decision is never a row
+    (view v004 leaves it out), and a sibling lead's course is never read.
 
     **The excerpt is withheld when the comment's own instructor's report does
     not show it under its week**: the comment is in a held stream, its week is
@@ -827,30 +855,34 @@ def exclusion_log(
 
     The date is the decision's instant in the institution's zone, and no time.
 
-    **No row from a section the reader teaches** (E6-08, after ruling 7). A row
-    names the section, the date, the role, the flag and another reviewer's
-    reason, so it would tell a reader who teaches that section that it held a
-    flagged comment, and roughly when, which their own report hides. The row is
-    removed, not redacted; the filter is `authz.taught_or_once_taught_section_ids`,
-    the same one `_queue_select` applies, so a section whose teaching grant the
-    roster ended stays out too (E6-09).
+    **No row from a section the reader teaches or once taught**, whichever role
+    they read under. A row names the section, the date, the role, the flag and
+    another reviewer's reason, so it would tell a reader who teaches that
+    section that it held a flagged comment, and roughly when, which their own
+    report hides. The row is removed, not redacted; the filter is
+    `authz.taught_or_once_taught_section_ids`, the same one `_queue_select`
+    applies.
 
-    Raises `NoReviewGrantError` for a reader whose own grant covers nothing.
+    Raises `NoReviewGrantError` for a reader whose reach covers nothing.
     """
     from app.services.report_comments import logged_decisions, shown_under_their_week
 
-    if person_id is None:
+    person_id = scope.person_id
+    courses = lead_review_courses(session, person_id=person_id)
+    purview = purview_read(scope)
+    if not courses and not purview.section_ids:
         raise NoReviewGrantError
-    courses = _review_courses(session, person_id)
     taught = taught_or_once_taught_section_ids(session, person_id=person_id)
     decisions = [
         decision
-        for decision in logged_decisions(session, course_ids=courses.keys())
+        for decision in logged_decisions(
+            session, course_ids=courses.keys(), section_ids=purview.section_ids
+        )
         if decision.section_id not in taught
     ]
     labels = _section_labels(session, {decision.section_id for decision in decisions})
     # Once for every decision, in a fixed number of statements, so a log over a
-    # term costs what a log over one week costs (E6-09).
+    # term costs what a log over one week costs.
     shown = shown_under_their_week(
         session,
         {(decision.answer_id, decision.section_id, decision.week_id) for decision in decisions},

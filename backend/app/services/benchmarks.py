@@ -130,8 +130,9 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, column, func, select, table, text
-from sqlalchemy.orm import Session
+from sqlalchemy import Select, Uuid, any_, bindparam, column, func, select, table, text
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.orm import Session, aliased
 
 from app.config import Settings
 from app.models.benchmark import ComparisonSet, ComparisonSetMember
@@ -299,24 +300,53 @@ def resolve_default_set(session: Session, *, section_id: UUID) -> list[UUID]:
         section's own answers.
 
     A course with no lead has no default set, and resolves to nothing rather than
-    to everything.
+    to everything. A section that does not exist resolves to nothing too.
+
+    The rule itself is `_default_sets_of`, which answers it for many sections in
+    one statement; this is that, asked about one.
     """
-    hero = _hero_of(session, section_id)
-    if hero is None:
-        return []
-    the_lead = select(_LEAD_FACULTY_COURSE.c.person_id).where(
-        _LEAD_FACULTY_COURSE.c.course_id == hero.course_id
-    )
-    their_courses = select(_LEAD_FACULTY_COURSE.c.course_id).where(
-        _LEAD_FACULTY_COURSE.c.person_id.in_(the_lead)
-    )
+    return _default_sets_of(session, [section_id])[section_id]
+
+
+def _default_sets_of(session: Session, section_ids: Collection[UUID]) -> dict[UUID, list[UUID]]:
+    """`resolve_default_set` for every section asked about, in one statement (E9-05 fix round).
+
+    One row per (asked section, member of its default set): the asked section's
+    course's lead, every course that same person leads, and those courses'
+    sections at the asked section's length and level, the asked section left out.
+    Every section asked about is a key, with an empty list when it has no
+    default set. The ids are bound as one array, so the statement is the same
+    size however many sections a reader's purview holds.
+    """
+    asked = sorted(set(section_ids))
+    found: dict[UUID, list[UUID]] = {section: [] for section in asked}
+    if not asked:
+        return found
+    hero, member = aliased(Section), aliased(Section)
+    hero_course, member_course = aliased(Course), aliased(Course)
+    hero_lead = _LEAD_FACULTY_COURSE.alias("hero_lead")
+    member_lead = _LEAD_FACULTY_COURSE.alias("member_lead")
     statement = (
-        _matching_sections(hero)
-        .where(Section.course_id.in_(their_courses))
-        .where(Section.id != section_id)
-        .order_by(Section.id)
+        select(hero.id.label("hero_id"), member.id.label("member_id"))
+        .select_from(hero)
+        .join(hero_course, hero_course.id == hero.course_id)
+        .join(hero_lead, hero_lead.c.course_id == hero.course_id)
+        .join(member_lead, member_lead.c.person_id == hero_lead.c.person_id)
+        .join(member, member.course_id == member_lead.c.course_id)
+        .join(member_course, member_course.id == member.course_id)
+        .where(
+            hero.id == any_(bindparam("asked", asked, type_=ARRAY(Uuid))),
+            member.length_weeks == hero.length_weeks,
+            member_course.level == hero_course.level,
+            member.id != hero.id,
+        )
+        .distinct()
     )
-    return [row.id for row in session.execute(statement)]
+    for row in session.execute(statement):
+        found[row.hero_id].append(row.member_id)
+    for members in found.values():
+        members.sort()
+    return found
 
 
 def resolve_university(session: Session, *, section_id: UUID) -> list[UUID]:
@@ -843,37 +873,41 @@ def _section_populations(
     section_id: UUID,
     cutoffs: Mapping[int, datetime],
     wanted: Collection[BenchmarkPopulation],
-    scope: ActorScope | None = None,
+    scope: ActorScope | None,
 ) -> dict[BenchmarkPopulation, _Population]:
     """The section-keyed populations asked for, each resolved once and read through one `_Reads`.
 
     Each reader's sections are read once (`_known_by_reader`). The default set
-    of every one of a reader's sections here — this term, this length and level
-    — is resolved once per read and shared between readers;
-    `_university_population` says why the university needs them. For a reader
-    whose purview is a whole college, that is one default-set resolution per
-    alike section, which is the cost of sealing against everything she knows.
+    of the reported section and of every one of each reader's sections here —
+    this term, this length and level — is resolved in **one** statement
+    (`_default_sets_of`) and shared between readers; `_university_population`
+    says why the university needs them. Each reader's lead sets are kept once
+    per distinct set, and `_Reads` asks the set functions once per distinct
+    section set, so the number of statements does not grow with the number of
+    sections in a reader's purview (E9-05 fix round). It grows only with the
+    number of distinct lead sets among them, and the one default-set statement
+    answers more rows.
     """
     reads = _Reads(session, cutoffs)
-    default_sets: dict[UUID, list[UUID]] = {
-        section_id: resolve_default_set(session, section_id=section_id)
-    }
-
-    def default_set_of(section: UUID) -> list[UUID]:
-        if section not in default_sets:
-            default_sets[section] = resolve_default_set(session, section_id=section)
-        return default_sets[section]
-
     known = _known_by_reader(session, section_id=section_id, scope=scope)
+    alike = (
+        _alike_in_this_term(session, section_id=section_id)
+        if BenchmarkPopulation.UNIVERSITY in wanted
+        else set()
+    )
+    mine_here = [hers & alike for hers in known]
+    default_sets = _default_sets_of(
+        session, {section_id}.union(*mine_here) if mine_here else {section_id}
+    )
     populations: dict[BenchmarkPopulation, _Population] = {}
     if BenchmarkPopulation.DEFAULT_SET in wanted:
         populations[BenchmarkPopulation.DEFAULT_SET] = _default_population(
             reads, default_set=default_sets[section_id], known=known
         )
     if BenchmarkPopulation.UNIVERSITY in wanted:
-        alike = _alike_in_this_term(session, section_id=section_id)
         lead_sets_seen = [
-            [set(default_set_of(mine)) for mine in sorted(hers & alike)] for hers in known
+            list(dict.fromkeys(frozenset(default_sets[mine]) for mine in sorted(here)))
+            for here in mine_here
         ]
         populations[BenchmarkPopulation.UNIVERSITY] = _university_population(
             reads,
@@ -908,7 +942,7 @@ def section_benchmarks(
     course_week: int,
     streams: Sequence[str],
     cutoffs: Mapping[int, datetime],
-    scope: ActorScope | None = None,
+    scope: ActorScope | None,
 ) -> SectionBenchmarks:
     """SPEC §5.1's comparison and university figures for one report, each population read once.
 
@@ -927,7 +961,10 @@ def section_benchmarks(
     `scope` is the leadership reader, when one reads the report (E9-09's
     drill-down). She enters the seal exactly as an instructor of the section
     does, with every section in her purview and every section she teaches as
-    what she already knows (SPEC §5.1). An instructor's own report passes none.
+    what she already knows (SPEC §5.1). An instructor's own report passes
+    `scope=None`. **Required, with no default:** a leadership caller that
+    forgot its reader would otherwise be sealed against the instructors alone,
+    so every caller states which it is.
     """
     _the_weeks_cutoff(cutoffs, course_week)  # the reported week must be among those read
     by_population = _section_populations(
@@ -974,6 +1011,7 @@ def benchmark_trend(
         section_id=section_id,
         cutoffs=cutoffs,
         wanted=(population,),
+        scope=None,
     )
     return _trend(populations[population], stream=stream, cutoffs=cutoffs)
 
@@ -993,6 +1031,7 @@ def benchmark_workload(
         section_id=section_id,
         cutoffs=week_cutoff,
         wanted=(population,),
+        scope=None,
     )
     return _workload(populations[population], course_week=course_week)
 
@@ -1037,6 +1076,10 @@ def _purview_cohorts(
     wholly outside the purview answers the same cohorts as a thin set inside it,
     each week suppressed, and a reader cannot tell "outside my purview" from
     "too few" (E9-05 done-when 9).
+
+    The statement selects the term's sections at that length and level, and the
+    purview is applied here in Python, so the statement carries no parameter per
+    purview section.
     """
     if not purview:
         return {}
@@ -1044,7 +1087,6 @@ def _purview_cohorts(
         select(Section.id, Section.start_date)
         .join(Course, Course.id == Section.course_id)
         .where(
-            Section.id.in_(sorted(purview)),
             Section.term_id == term_id,
             Section.length_weeks == length_weeks,
             Course.level == level,
@@ -1052,7 +1094,8 @@ def _purview_cohorts(
     ).all()
     cohorts: dict[date, set[UUID]] = {}
     for section_id, start_date in rows:
-        cohorts.setdefault(start_date, set()).add(section_id)
+        if section_id in purview:
+            cohorts.setdefault(start_date, set()).add(section_id)
     return cohorts
 
 

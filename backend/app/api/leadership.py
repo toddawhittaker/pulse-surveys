@@ -21,15 +21,16 @@ reader's purview in one term, and one node's figures and attention cards. Both
 take their scope from `leadership_scope` and nothing in the request, and both
 are §5.5's, so neither carries a comment.
 
-**The response loop's routes** (E7-03, ADR 0194), at the end of this file: the
-response policy (read and switch), the responses owed, and the five on-behalf
-doors. Like the review routes, each is scoped to the reader's own leadership
-grant, in `app.services.response_loop`; the section at the foot of this file
-says what each refuses.
-Unlike the sets, these are scoped to the reader's own leadership grant
-(`app.services.authz.lead_review_courses`), and the module docstring of
-`app.services.moderation` says what each answers; the section at the foot of
-this file says what each refuses.
+**The response loop's routes** (ADR 0194): the response policy (read and
+switch), the responses owed, and the five on-behalf doors. Like the review
+routes, each is scoped to the reader's own leadership grant
+(`app.services.authz.lead_review_courses`), with one widening (ADR 0206): the
+exclusion log and the policy read also answer an assistant dean, a dean or a
+vice president over their purview, taken from `leadership_scope`. Each section
+below says what its routes refuse.
+
+**The drill-down** (SPEC §5.5, ADR 0206), last: one section's Monday report,
+read-only, for a section inside the reader's purview.
 
 **`/leadership/comparison-sets/options` is declared before
 `/leadership/comparison-sets/{set_id}`, and that is load-bearing.** FastAPI
@@ -112,6 +113,7 @@ from app.api.deps import (
 )
 from app.api.instructor import assistant_busy, assistant_unusable
 from app.config import Settings
+from app.copy.instructor_report import SECTION_UNAVAILABLE, WEEK_UNAVAILABLE
 from app.copy.leadership_moderation import (
     NO_REVIEW_GRANT,
     NOT_IN_QUEUE,
@@ -131,7 +133,12 @@ from app.schemas.comparison_sets import (
     SetWrite,
 )
 from app.schemas.moderation import ExclusionLog, LeadDecision, LogRow, QueueItem, ReviewQueue
-from app.schemas.report import DraftCheckRequest, DraftCheckView, ResponseDraftView
+from app.schemas.report import (
+    DraftCheckRequest,
+    DraftCheckView,
+    InstructorReport,
+    ResponseDraftView,
+)
 from app.schemas.response_loop import (
     OnBehalfWeek,
     OwedWeek,
@@ -169,7 +176,10 @@ from app.services.moderation import (
 )
 from app.services.reporting import (
     AssistantBusyError,
+    CourseWeekUnavailableError,
+    SectionUnavailableError,
     UnusableAnswerError,
+    leadership_report,
     one_assistant_call_at_a_time,
 )
 from app.services.response_loop import (
@@ -582,18 +592,22 @@ def decide_on_queued_comment(
         ) from None
 
 
-@router.get(LOG_PATH, summary="The exclusion log inside my own grant")
+@router.get(LOG_PATH, summary="The exclusion log inside my own grant or purview")
 def read_exclusion_log(
     request: Request,
     response: Response,
-    claims: SessionClaims = Depends(require_leadership),
+    scope: ActorScope = Depends(leadership_scope),
     session: Session = Depends(get_session),
 ) -> ExclusionLog:
-    """Every exclusion, keep and undo a person made inside the reader's own grant, newest first."""
+    """Every exclusion, keep and undo a person made inside the reader's reach, newest first.
+
+    A lead's or chair's own grant, and an assistant dean's, dean's or vice
+    president's purview (ADR 0206); the scope is the session's own.
+    """
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = NO_STORE
     try:
-        logged = exclusion_log(session, person_id=person_of(claims), settings=settings)
+        logged = exclusion_log(session, scope=scope, settings=settings)
     except NoReviewGrantError:
         raise _no_review_grant() from None
     return ExclusionLog(
@@ -647,12 +661,13 @@ ON_BEHALF_UNAVAILABLE_STATUS = 404
 @router.get(POLICY_PATH, summary="The response policy of every course I set or read it for")
 def read_response_policy(
     response: Response,
-    claims: SessionClaims = Depends(require_leadership),
+    scope: ActorScope = Depends(leadership_scope),
     session: Session = Depends(get_session),
 ) -> PolicyOverview:
-    """The courses the reader sets the policy for, and a chair's led courses, which they read."""
+    """The courses the reader sets the policy for, and those they read: a chair's led
+    courses, and every course of an assistant dean's, dean's or vice president's purview."""
     response.headers["Cache-Control"] = NO_STORE
-    return policy_overview(session, person_id=person_of(claims))
+    return policy_overview(session, scope=scope)
 
 
 @router.put(POLICY_PREFIX_PATH, summary="Switch the response policy for my courses in one prefix")
@@ -661,14 +676,16 @@ def switch_response_policy(
     write: PolicyWrite,
     response: Response,
     claims: SessionClaims = Depends(csrf_verified_leadership),
+    scope: ActorScope = Depends(leadership_scope),
     session: Session = Depends(get_session),
 ) -> PolicyOverview:
-    """One row per course of the prefix the reader sets the policy for; answered with the new read."""
+    """One row per course of the prefix the reader sets the policy for; answered with the new read.
+
+    `claims` is the CSRF-checked gate; the reader is the same session's `scope`.
+    """
     response.headers["Cache-Control"] = NO_STORE
     try:
-        return set_policy(
-            session, person_id=person_of(claims), prefix_id=prefix_id, mode=write.mode
-        )
+        return set_policy(session, scope=scope, prefix_id=prefix_id, mode=write.mode)
     except NoPolicyToSetError:
         raise HTTPException(
             status_code=NO_POLICY_TO_SET_STATUS, detail=NO_POLICY_TO_SET.text
@@ -839,3 +856,54 @@ def _on_behalf_unavailable() -> HTTPException:
     return HTTPException(
         status_code=ON_BEHALF_UNAVAILABLE_STATUS, detail=ON_BEHALF_UNAVAILABLE.text
     )
+
+
+# ---------------------------------------------------------------------------
+# The drill-down (SPEC §5.5, ADR 0206).
+#
+# One section's Monday report, wholesale and read-only, for a section inside the
+# reader's purview. A section outside it and a section that does not exist get
+# the instructor report's one 404 and sentence; a week with no published report
+# gets its other one. The route carries no write, and the report it serves
+# carries no action.
+# ---------------------------------------------------------------------------
+
+DRILL_DOWN_PATH = "/leadership/sections/{section_id}/weeks/{course_week}/report"
+DRILL_DOWN_UNAVAILABLE_STATUS = 404
+
+
+@router.get(DRILL_DOWN_PATH, summary="One section's Monday report, read-only, inside my purview")
+def read_drill_down(
+    section_id: UUID,
+    course_week: int,
+    request: Request,
+    response: Response,
+    scope: ActorScope = Depends(leadership_scope),
+    session: Session = Depends(get_session),
+) -> InstructorReport:
+    """The instructor's report of one section-week, as a leader reads it (SPEC §5.5).
+
+    The scope comes from `leadership_scope` and from nothing in the request
+    (ADR 0199). Comments show under the section's own per-stream threshold and
+    release batches, exactly as its instructor reads them; no comment is marked
+    as the reader's decision, and the benchmark lines are sealed against the
+    reader (SPEC §5.1).
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return leadership_report(
+            session,
+            scope=scope,
+            section_id=section_id,
+            course_week=course_week,
+            settings=settings,
+        )
+    except SectionUnavailableError:
+        raise HTTPException(
+            status_code=DRILL_DOWN_UNAVAILABLE_STATUS, detail=SECTION_UNAVAILABLE.text
+        ) from None
+    except CourseWeekUnavailableError:
+        raise HTTPException(
+            status_code=DRILL_DOWN_UNAVAILABLE_STATUS, detail=WEEK_UNAVAILABLE.text
+        ) from None

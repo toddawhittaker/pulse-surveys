@@ -61,6 +61,23 @@ call through an aliased module among them — one level out, entry 53) and near
 misses; the walk over a planted tree; and the real `services/authz.py` required
 to be *found* referencing each guarded name, so a misspelt name cannot make the
 sweep vacuous (entry 35).
+
+**The seal's helper is a third door** (E9-05's privacy review, P1).
+`authz.leadership_section_ids(session, *, person_id)` answers any person's whole
+leadership purview, as a set of section ids, for the benchmark seal (E9-05: "only
+`authz.py` may resolve a person's purview for the seal"). A route that called it
+with a person id off the request would read somebody else's purview without
+naming `resolve_scope` or the walk. So it is referenced nowhere under
+`backend/app/` but two modules:
+
+  - `services/authz.py`, which defines it;
+  - `services/benchmarks.py`, the seal, which uses the purview only to decide
+    what to withhold and never returns it.
+
+Controlled the same three ways: planted references (an aliased import and a call
+through an aliased module, entry 53) and near misses; a planted tree with a
+caller in each of `api/` and another service; and both allowed modules required
+to be *found* referencing it (entry 35).
 """
 
 import ast
@@ -81,6 +98,10 @@ RESOLVER = "resolve_scope"
 # helpers that perform it. Each is a way to a purview without going through
 # `resolve_scope`.
 THE_WALK = ("transitive_purview", "_transitive_purview_of", "_clamped_subtree")
+# The seal's helper (E9-05), and the only modules that may name it.
+THE_SEAL_HELPER = "leadership_section_ids"
+THE_SEAL = Path("services/benchmarks.py")
+THE_SEAL_HELPER_MODULES = (THE_CHOKEPOINT, THE_SEAL)
 
 
 def named(name: str) -> re.Pattern[str]:
@@ -487,4 +508,193 @@ def test_no_module_but_authz_reaches_the_purview_walk() -> None:
         f"The purview walk ({', '.join(THE_WALK)}) is referenced outside `{THE_CHOKEPOINT}`: "
         f"{offenders}. E9-01: 'no route takes a person, assignment or scope id from the request "
         f"to resolve a scope'; take an `ActorScope` from the `{THE_DEPENDENCY}` dependency instead."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The seal's helper: `leadership_section_ids` (E9-05).
+# ---------------------------------------------------------------------------
+
+
+def seal_helper_offending(relative: Path, source: str) -> list[int]:
+    """The lines of one module that reference the seal's helper where the rule forbids it.
+
+    A closed set of two modules: `services/authz.py` and `services/benchmarks.py`.
+    `api/deps.py` gets no exemption; the dependency resolves a scope through
+    `resolve_scope`, never a bare set of section ids.
+    """
+    if relative in THE_SEAL_HELPER_MODULES:
+        return []
+    return sorted({line for line, _, _ in references(source, str(relative), THE_SEAL_HELPER)})
+
+
+def seal_helper_offenders_under(root: Path) -> list[str]:
+    out: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        for line in seal_helper_offending(relative, path.read_text(encoding="utf-8")):
+            out.append(f"{relative}:{line}")
+    return out
+
+
+PLANTED_SEAL_HELPER_REFERENCES = {
+    "an aliased import, called with a person off the request": (
+        "from app.services.authz import leadership_section_ids as purview_of\n\n\n"
+        "def read(session, request):\n"
+        "    return purview_of(session, person_id=request.query_params['person'])\n"
+    ),
+    "a call through an aliased module": (
+        "from app.services import authz as az\n\n\n"
+        "def read(session, person_id):\n"
+        "    return az.leadership_section_ids(session, person_id=person_id)\n"
+    ),
+    "a call through the dotted module path": (
+        "import app.services.authz\n\n\n"
+        "def read(session, person_id):\n"
+        "    return app.services.authz.leadership_section_ids(session, person_id=person_id)\n"
+    ),
+    "a getattr by string": (
+        "from app.services import authz\n\nIDS = getattr(authz, 'leadership_section_ids')\n"
+    ),
+}
+
+PLANTED_SEAL_HELPER_NEAR_MISSES = {
+    "prose": (
+        '"""The seal asks leadership_section_ids, inside the benchmarks module."""\n\n'
+        "# leadership_section_ids is the seal's alone.\n\n\n"
+        "def ping():\n"
+        '    """This never calls leadership_section_ids."""\n'
+        "    return 'pong'\n"
+    ),
+    "longer and shorter names": (
+        "leadership_section_ids_label = 'Sections'\n"
+        "FLAG = 'leadership_section_idss'\n"
+        "OTHER = 'leadership_section'\n"
+    ),
+    "the section ids a scope carries": (
+        "def read(scope):\n    return frozenset(scope.purview.section_ids)\n"
+    ),
+}
+
+PLANTED_SEAL_HELPER_TREE = {
+    "services/authz.py": (
+        "def leadership_section_ids(session, *, person_id):\n    return frozenset()\n"
+    ),
+    "services/benchmarks.py": (
+        "from app.services.authz import leadership_section_ids\n\n\n"
+        "def _known(session, person_id):\n"
+        "    return leadership_section_ids(session, person_id=person_id)\n"
+    ),
+    "api/deps.py": (
+        "from app.services.authz import leadership_section_ids\n\n\n"
+        "def leadership_scope(session, person_id):\n"
+        "    return leadership_section_ids(session, person_id=person_id)\n"
+    ),
+    "api/leadership.py": (
+        "from app.services.authz import leadership_section_ids as purview_of\n\n\n"
+        "def rollup(session, request):\n"
+        "    return purview_of(session, person_id=request.query_params['person'])\n"
+    ),
+    "services/rollups.py": (
+        "from app.services import authz as az\n\n\n"
+        "def tree(session, person_id):\n"
+        "    return az.leadership_section_ids(session, person_id=person_id)\n"
+    ),
+    "services/reports.py": ("def read(scope):\n    return frozenset(scope.purview.section_ids)\n"),
+}
+
+
+def test_the_seal_helper_matcher_finds_planted_references_and_spares_its_near_misses() -> None:
+    """The instrument for the seal's helper, both ways. **A red means this module is broken.**
+
+    **The mutations this kills:** a matcher that does not follow an import alias
+    (misses `purview_of(...)`); one reading `ast.Name` only (misses the call
+    through the aliased module and the dotted path); one dropping the string
+    branch (misses the `getattr`). **The near misses it spares:** a plain
+    substring search flags `leadership_section_ids_label` and
+    `leadership_section_idss`; a matcher that reads docstrings flags the prose;
+    one matching `section_ids` alone flags a scope's own purview.
+    """
+    found = {
+        name: references(source, name, THE_SEAL_HELPER)
+        for name, source in PLANTED_SEAL_HELPER_REFERENCES.items()
+    }
+    missed = sorted(name for name, hits in found.items() if not hits)
+    assert not missed, f"The seal-helper matcher missed these planted references: {missed}."
+
+    spared = {
+        name: references(source, name, THE_SEAL_HELPER)
+        for name, source in PLANTED_SEAL_HELPER_NEAR_MISSES.items()
+    }
+    flagged = {name: hits for name, hits in spared.items() if hits}
+    assert not flagged, f"The seal-helper matcher flagged these near misses: {flagged}."
+
+
+def test_the_seal_helper_sweep_flags_callers_one_level_out_and_spares_authz_and_the_seal(
+    tmp_path: Path,
+) -> None:
+    """The control on the rule, over a planted tree: three callers red, `authz` and the seal not.
+
+    **The mutations this kills:** the rule exempting all of `services/` (the
+    planted `services/rollups.py` walks free); `api/deps.py` given the
+    `resolve_scope` exemption here too (the planted dependency calling the helper
+    walks free); an import alias or a module alias not followed one level out
+    (the planted `api/leadership.py` or `services/rollups.py` walks free —
+    `docs/MISTAKES.md` entry 53). **The near misses it spares:** `services/authz.py`
+    defining the helper, `services/benchmarks.py` calling it, and a service
+    reading `scope.purview.section_ids`.
+    """
+    for name, source in PLANTED_SEAL_HELPER_TREE.items():
+        planted = tmp_path / name
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(source, encoding="utf-8")
+    assert seal_helper_offenders_under(tmp_path) == [
+        "api/deps.py:1",
+        "api/deps.py:5",
+        "api/leadership.py:1",
+        "api/leadership.py:5",
+        "services/rollups.py:5",
+    ]
+
+
+@pytest.mark.parametrize(
+    "allowed", THE_SEAL_HELPER_MODULES, ids=[str(module) for module in THE_SEAL_HELPER_MODULES]
+)
+def test_each_allowed_module_is_found_referencing_the_seal_helper(allowed: Path) -> None:
+    """The allowed modules, found: `authz` defines `leadership_section_ids`, the seal calls it.
+
+    `docs/MISTAKES.md` entry 35: the rule below reports absence, and absence of a
+    misspelt or renamed helper is guaranteed. **A red in `services/authz.py`
+    means the helper is renamed or gone** and the rule has gone blind to it;
+    **a red in `services/benchmarks.py` means the seal reaches a person's purview
+    some way this sweep does not name** — update `THE_SEAL_HELPER`, never delete
+    this check.
+    """
+    module = APP_ROOT / allowed
+    assert module.is_file(), f"{module.relative_to(REPO_ROOT)} does not exist."
+    found = references(module.read_text(encoding="utf-8"), str(module), THE_SEAL_HELPER)
+    assert found, (
+        f"The sweep finds no reference to `{THE_SEAL_HELPER}` in {module.relative_to(REPO_ROOT)}. "
+        "E9-05: the seal resolves a person's purview through this one helper in `authz.py`."
+    )
+
+
+def test_no_module_but_authz_and_the_seal_names_leadership_section_ids() -> None:
+    """The rule over the real tree: `leadership_section_ids` lives in `authz` and the seal only.
+
+    **The mutation this kills:** a route or a service calling
+    `leadership_section_ids(session, person_id=…)` with a person id of its own
+    choosing — reading another person's whole purview as section ids, past
+    both `resolve_scope` and the walk rules above (E9-05's privacy review, P1).
+    **The non-emptiness control:** the walk reads more than the two modules the
+    rule names.
+    """
+    assert APP_ROOT.is_dir(), f"{APP_ROOT} is not a directory, so this sweep walked nothing."
+    swept = list(APP_ROOT.rglob("*.py"))
+    assert len(swept) > 2, f"{APP_ROOT} holds next to nothing to sweep."
+    offenders = seal_helper_offenders_under(APP_ROOT)
+    assert not offenders, (
+        f"`{THE_SEAL_HELPER}` is referenced outside {[str(m) for m in THE_SEAL_HELPER_MODULES]}: "
+        f"{offenders}. It answers any person's leadership purview; every other module takes an "
+        f"`ActorScope` from the `{THE_DEPENDENCY}` dependency instead."
     )

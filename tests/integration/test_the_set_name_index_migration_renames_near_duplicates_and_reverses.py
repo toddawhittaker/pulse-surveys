@@ -35,8 +35,15 @@ takes " (4)". "Nursing core (2)" and "Biology" are untouched. A numbering that
 ignored what is free makes the index creation fail, which `migrate` reports as
 the step that did not complete.
 
+**`updated_at` (E9-05's fix round, P5).** Every row is planted with
+`updated_at` equal to its January creation instant. A rename is a change to the
+row, so each renamed row's `updated_at` is stamped by the upgrade — no earlier
+than the database's own clock read just before it — and every row that keeps its
+name keeps the stamp it was planted with.
+
 **Which failure a red is, before E9-05 lands:** FAILED naming the missing
-revision `e9a7c9e1b807`.
+revision `e9a7c9e1b807`. On the migration before the fix round, the stamping
+test FAILS on its assertion, listing the renamed rows still stamped in January.
 """
 
 from datetime import UTC, datetime
@@ -65,6 +72,7 @@ pytestmark = pytest.mark.integration
 THE_REVISION = "e9a7c9e1b807"
 THE_INDEX = "uq_comparison_set_normalized_name"
 CREATED_AT_COLUMN = "created_at"
+UPDATED_AT_COLUMN = "updated_at"
 
 # (name, created at) — planted at the revision below, in this order of creation.
 PLANTED = (
@@ -102,6 +110,32 @@ def names_by_creation(database: Any) -> dict[datetime, str]:
         engine.dispose()
 
 
+def updated_by_creation(database: Any) -> dict[datetime, datetime]:
+    """Every set's `updated_at`, keyed by the creation instant this module planted it with."""
+    engine = create_engine(database.superuser_url)
+    try:
+        with engine.connect() as connection:
+            columns = f"{CREATED_AT_COLUMN}, {UPDATED_AT_COLUMN}"
+            rows = connection.execute(
+                text(f"SELECT {columns} FROM {COMPARISON_SET_TABLE}")  # noqa: S608
+            )
+            return {row[0]: row[1] for row in rows}
+    finally:
+        engine.dispose()
+
+
+def database_now(database: Any) -> datetime:
+    """The database's own clock, so a stamp written by `now()` is compared on one clock."""
+    engine = create_engine(database.superuser_url)
+    try:
+        with engine.connect() as connection:
+            stamp = connection.execute(text("SELECT now()")).scalar()
+    finally:
+        engine.dispose()
+    assert isinstance(stamp, datetime), f"`SELECT now()` answered {stamp!r}."
+    return stamp
+
+
 def index_is_there(database: Any) -> bool:
     engine = create_engine(database.superuser_url)
     try:
@@ -125,6 +159,7 @@ def plant_the_sets(database: Any, metadata_tables: dict[str, Any]) -> None:
                     LENGTH_COLUMN: 6,
                     LEVEL_COLUMN: "UG",
                     CREATED_AT_COLUMN: created_at,
+                    UPDATED_AT_COLUMN: created_at,
                 },
             )
             chain.pop(COMPARISON_SET_TABLE, None)
@@ -163,6 +198,79 @@ def test_the_upgrade_renames_near_duplicates_by_creation_order_and_the_smallest_
         "normalized form is free. Rows are renamed, never deleted."
     )
     assert index_is_there(empty_database), f"`{THE_INDEX}` is not in the catalog after the upgrade."
+
+
+RENAMED = tuple(name for name, after in EXPECTED_AFTER.items() if after != name)
+KEPT = tuple(name for name, after in EXPECTED_AFTER.items() if after == name)
+
+
+def the_upgrade_over_the_planted_sets(
+    database: Any, alembic_config_pointed_at: Any, metadata_tables: dict[str, Any]
+) -> tuple[dict[datetime, datetime], datetime, dict[datetime, datetime]]:
+    """Plant at the revision below, upgrade; answer `updated_at` before, the clock, and after."""
+    config = alembic_config_pointed_at(database)
+    require_revision(config, THE_REVISION, "E9-05's set-name index migration")
+    below = the_revision_below(config, THE_REVISION)
+    migrate(config, "upgrade", below, f"standing at {below}, below the set-name index")
+    plant_the_sets(database, metadata_tables)
+    before = updated_by_creation(database)
+    assert sorted(before) == sorted(created_at for _, created_at in PLANTED) and all(
+        before[created_at] == created_at for _, created_at in PLANTED
+    ), f"The planted rows' `updated_at` read back as {before}; a broken world, not a red."
+    clock = database_now(database)
+    migrate(config, "upgrade", THE_REVISION, "applying the set-name index")
+    return before, clock, updated_by_creation(database)
+
+
+def test_the_upgrade_stamps_updated_at_on_every_row_it_renames(
+    empty_database: Any, alembic_config_pointed_at: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """A renamed row's `updated_at` is no earlier than the database clock before the upgrade.
+
+    E9-05 fix round, P5: the rename is a change to the row, and `updated_at` is
+    what says when a row last changed. The planted stamps are January 2026, so
+    a rename that leaves the column alone fails by months.
+
+    **The mutation this kills:** the rename's `UPDATE … SET name = …` without
+    `, updated_at = now()`. **The near miss it spares:** the next test's rows
+    that keep their names.
+    """
+    _, clock, after = the_upgrade_over_the_planted_sets(
+        empty_database, alembic_config_pointed_at, metadata_tables
+    )
+    created = dict(PLANTED)
+    stale = {name: after[created[name]] for name in RENAMED if not after[created[name]] >= clock}
+    assert RENAMED, "No planted row is renamed by the rule; a broken world, not a red."
+    assert not stale, (
+        f"The upgrade renamed {list(RENAMED)} but left `updated_at` at {stale}, before the "
+        f"database clock read just before the upgrade ({clock}). E9-05 fix round, P5: the rename "
+        "sets `updated_at = now()`."
+    )
+
+
+def test_the_upgrade_leaves_updated_at_alone_on_every_row_that_keeps_its_name(
+    empty_database: Any, alembic_config_pointed_at: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """The first row of the group, the row that only looks like a rename, and the control.
+
+    **The mutation this kills:** a stamp written to every row of a
+    near-duplicate group (the first, which keeps its name, changes), or to every
+    row the migration reads ("Biology" changes). **The near miss it spares:**
+    the renamed rows, stamped (the test above).
+    """
+    before, _, after = the_upgrade_over_the_planted_sets(
+        empty_database, alembic_config_pointed_at, metadata_tables
+    )
+    created = dict(PLANTED)
+    moved = {
+        name: (before[created[name]], after[created[name]])
+        for name in KEPT
+        if after[created[name]] != before[created[name]]
+    }
+    assert KEPT, "No planted row keeps its name by the rule; a broken world, not a red."
+    assert (
+        not moved
+    ), f"The upgrade changed `updated_at` on rows it did not rename, as (before, after): {moved}."
 
 
 def test_the_downgrade_drops_the_index_and_nothing_else(
