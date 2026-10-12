@@ -92,6 +92,9 @@ export const INSTRUCTOR_REPORT_PAGE_COPY = {
   // `design/Usage Rules.md` §4 sets for counting people. The percent is the
   // Participation region's, beside the bar it belongs to.
   'instructor_report_page.subline': '{code} · Monday Report · {responses} of {enrolled} responded',
+  // SPEC §2.1: the course's Lead Faculty, by name, under the heading. A course
+  // nobody leads shows no line at all, never a placeholder.
+  'instructor_report_page.lead_faculty': 'Lead Faculty: {name}',
 
   // The report's own regions, in the order `design/InstructorMondayReport.dc.html`
   // lays them out. Each is a second-level heading on the page, so the report is

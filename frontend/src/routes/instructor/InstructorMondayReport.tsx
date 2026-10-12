@@ -288,6 +288,12 @@ export function InstructorMondayReport({
           })}
         </p>
       )}
+      {/* SPEC §2.1: the course's Lead Faculty, by name. No line when nobody leads it. */}
+      {report === null || report.section.lead_name === null ? null : (
+        <p className="pulse-report-subline" data-testid="pulse-report-lead">
+          {fillCopy('instructor_report_page.lead_faculty', { name: report.section.lead_name })}
+        </p>
+      )}
       <PulseDivider />
       <ReportBody load={load} sectionId={sectionId} />
     </main>

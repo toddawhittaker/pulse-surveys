@@ -132,6 +132,85 @@
         }
       }
     },
+    "/session/landings": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "The views this session may switch to",
+        "description": "The session's own view and every view its person holds at its door, read now.\n\nSPEC \u00a72.1's door rules come from `app.services.authz.resolve_landings`, over\nthe assignments' own door columns: a web session is never offered the\ninstructor or student view, and a launch session never Care or Admin.",
+        "operationId": "read_session_landings_session_landings_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionLandings"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/switch": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Switch to another view this session's person holds",
+        "description": "A new session in the asked view, the old one revoked; or a 403 that changes nothing.\n\n`app.services.session.switch_session` re-reads the person's views at this\ndoor and decides. On success the new token is answered in the body, for the\nSPA's Bearer carrier, and set as the session cookie beside a fresh CSRF\ntoken bound to it; it keeps the old token's expiry. A refusal, including a\nswitch to the session's own role, sets no cookie and leaves the old session\nlive. A token another switch spent first gets the expired-token 401.",
+        "operationId": "switch_session_session_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionSwitch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionSwitched"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/session/logout": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "End this session",
+        "description": "Revoke this session and clear both cookies: 204, whatever was presented.\n\nThe session is read by `app.api.deps.ending_session`, which checks the\nsignature and expiry but not revocation, so a second logout with the same\ntoken answers exactly as the first did; the revocation is an insert that\ndoes nothing on conflict. That read also applies the double-submit check\nwhen the session rides the cookie, and a refusal there is a 403 that ends\nnothing. With no valid session at all, the cookies are still cleared, so a\nbrowser holding a cookie the server no longer accepts is not stranded.\n\nBack-channel logout from the identity provider is E13's (ruling 8).",
+        "operationId": "log_out_session_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        }
+      }
+    },
     "/student/survey": {
       "get": {
         "tags": [
@@ -202,7 +281,7 @@
           "student"
         ],
         "summary": "One week's results for one of my sections",
-        "description": "The week's state and the response published to it, for one of this student's sections.\n\n**This route takes a section and a week, which the survey read refuses to,\nand the check is what makes that safe.** The student's results page is one\nweek of one course, so it has to be named. The section is then looked for\namong the session's own live enrollments, never read by its key, so a\nsection the student is not in is not found, exactly as one that does not\nexist is not (`app.services.response_loop.student_week_results`).\n\n**Every refusal is one 404 with one sentence**, byte-identical: not enrolled,\nan ended enrollment, a week whose report has not opened, and a week or a\nsection that does not exist. A session with no `user`, or a `user_id` claim\nthat is not a uuid, is answered the same way, as the submission route does,\nso this route says nothing about which door a session came through.\n\n`Cache-Control: no-store`, as the survey read: the answer is about this\nreader, and an edit changes it.",
+        "description": "The week's state and the response published to it, for one of this student's sections.\n\n**This route takes a section and a week, which the survey read refuses to,\nand the check is what makes that safe.** The student's results page is one\nweek of one course, so it has to be named. The section is then looked for\namong the session's own live enrollments, never read by its key, so a\nsection the student is not in is not found, exactly as one that does not\nexist is not (`app.services.student_results.student_week_results`).\n\n**Every refusal is one 404 with one sentence**, byte-identical: not enrolled,\nan ended enrollment, a week whose report has not opened, and a week or a\nsection that does not exist. A session with no `user`, or a `user_id` claim\nthat is not a uuid, is answered the same way, as the submission route does,\nso this route says nothing about which door a session came through.\n\n`Cache-Control: no-store`, as the survey read: the answer is about this\nreader, and an edit changes it.",
         "operationId": "student_week_results_read_student_sections__section_id__weeks__course_week__results_get",
         "parameters": [
           {
@@ -3919,16 +3998,115 @@
             "type": "integer",
             "title": "Length Weeks",
             "description": "How many weeks this section runs (SPEC \u00a72.2)."
+          },
+          "lead_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Name",
+            "description": "The Lead Faculty's name for the page header; null when nobody leads it."
           }
         },
         "type": "object",
         "required": [
           "code",
           "course_label",
-          "length_weeks"
+          "length_weeks",
+          "lead_name"
         ],
         "title": "SectionView",
         "description": "Which section this report is about, in the words its instructor knows it by."
+      },
+      "SessionLandings": {
+        "properties": {
+          "current": {
+            "type": "string",
+            "enum": [
+              "student",
+              "instructor",
+              "leadership",
+              "care",
+              "admin"
+            ],
+            "title": "Current"
+          },
+          "landings": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "student",
+                "instructor",
+                "leadership",
+                "care",
+                "admin"
+              ]
+            },
+            "type": "array",
+            "title": "Landings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "current",
+          "landings"
+        ],
+        "title": "SessionLandings",
+        "description": "`GET /session/landings`: the session's own view, and every view held at its door.\n\n`landings` is in `LANDING_PRECEDENCE` order with the student view last, and\nincludes `current`."
+      },
+      "SessionSwitch": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "student",
+              "instructor",
+              "leadership",
+              "care",
+              "admin"
+            ],
+            "title": "Role"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role"
+        ],
+        "title": "SessionSwitch",
+        "description": "`POST /session/switch`: the one view to switch to."
+      },
+      "SessionSwitched": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "student",
+              "instructor",
+              "leadership",
+              "care",
+              "admin"
+            ],
+            "title": "Role"
+          },
+          "session": {
+            "type": "string",
+            "title": "Session"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "role",
+          "session"
+        ],
+        "title": "SessionSwitched",
+        "description": "What a switch answers with: the role of the new session, and the session itself.\n\nThe token is also set as the session cookie, beside a fresh CSRF token. It is\nin the body for the SPA's Bearer carrier, which is how the session travels\ninside the LMS's iframe (ADR 0089)."
       },
       "SetDetail": {
         "properties": {
@@ -4458,6 +4636,18 @@
             "title": "Course Label",
             "description": "The course's label, with its section code and term."
           },
+          "lead_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Name",
+            "description": "The Lead Faculty's name for the page header; null when nobody leads it."
+          },
           "state": {
             "type": "string",
             "enum": [
@@ -4546,6 +4736,7 @@
         "type": "object",
         "required": [
           "course_label",
+          "lead_name",
           "state",
           "response",
           "published_weeks",

@@ -309,6 +309,7 @@ pytest_plugins = (
     "fixtures.the_hold",
     "fixtures.response_draft",
     "fixtures.response_loop_doors",
+    "fixtures.session_switch",
     "fixtures.people_graph",
     "fixtures.people_editor",
 )

@@ -448,6 +448,7 @@ pulse-surveys/
 │       │   ├── benchmark.py        # comparison_set, comparison_set_member
 │       │   ├── grades.py           # grade_sync
 │       │   ├── safety.py           # threat_case (its opening row; E10 adds the case lifecycle)
+│       │   ├── session.py          # revoked_session: the sessions ended before their tokens expired
 │       │   ├── audit.py            # audit_log
 │       │   └── clock.py            # the development clock override
 │       │
@@ -470,11 +471,13 @@ pulse-surveys/
 │       │   ├── comparison_sets.py  # the named-set management API
 │       │   ├── admin.py            # the people editor's tables, writes, and CSV import diffs
 │       │   ├── response_loop.py    # a student's week state and the response published to it
-│       │   └── moderation.py       # the Lead Faculty review queue, a leader's decision, the exclusion log
+│       │   ├── moderation.py       # the Lead Faculty review queue, a leader's decision, the exclusion log
+│       │   └── session.py          # the role switcher: the views a session holds, a switch, the new session
 │       │
 │       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
 │       │   ├── admin_people.py     # the admin gate's sentences, the people-graph writes' refusals, the import's
 │       │   ├── entry.py            # the four pages a door answers with when there is no landing
+│       │   ├── landing.py          # the role switch's refusal
 │       │   ├── submit.py           # the weekly survey's submit path
 │       │   ├── student_read.py     # the student read path
 │       │   ├── instructor_report.py # the instructor report's refusals, and the writing assistant's
@@ -487,7 +490,7 @@ pulse-surveys/
 │       │   ├── deps.py             # auth context, role scoping, n-threshold guards
 │       │   ├── health.py           # liveness
 │       │   ├── lti.py              # the launch door: login-init, launch, JWKS
-│       │   ├── auth.py             # the web door: OIDC login and callback
+│       │   ├── auth.py             # the web door: OIDC login and callback; the role switcher and logout
 │       │   ├── dev.py              # the development-only test console
 │       │   ├── student.py          # survey fetch/submit
 │       │   ├── instructor.py       # the Monday report reads, comment decisions, the response draft and check, the week's response
@@ -497,7 +500,7 @@ pulse-surveys/
 │       │
 │       ├── services/               # domain logic (the real app lives here)
 │       │   ├── authz.py            # the one chokepoint every entry point reads through
-│       │   ├── session.py          # the session both doors issue and every request reads
+│       │   ├── session.py          # the session both doors issue and every request reads, and its revocation
 │       │   ├── tokens.py           # verifying another party's signed token against its key set
 │       │   ├── identity.py         # who a verified subject is
 │       │   ├── provisioning.py     # what a verified launch discovers, and what it refuses
@@ -517,7 +520,8 @@ pulse-surveys/
 │       │   ├── people.py           # the people editor: sorting, paging, the reports-to selector, CSV import with a dry run
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
-│       │   ├── response_loop.py    # the staff names of a set of sections for a reader of them; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)
+│       │   ├── response_loop.py    # the staff names of a set of sections for a reader of them, and a course page's lead; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)
+│       │   ├── student_results.py  # a student's week results (§5.4)
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration

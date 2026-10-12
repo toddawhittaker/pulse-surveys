@@ -4,9 +4,13 @@ Today that is four things:
 
 * **the role gates** — `require_student`, `require_instructor` and
   `require_leadership`, which read a session back off a request and say what it
-  may act as, and `person_of`, which reads the person a session names;
+  may act as, `require_session`, which admits a live session in any role, and
+  `person_of`, which reads the person a session names. Every gate refuses a
+  session that was revoked before its token expired (E9-04, ADR 0202);
 * **the CSRF check** a writing route carries on top of its role gate,
-  `csrf_verified_student` and `csrf_verified_leadership`;
+  `csrf_verified_student`, `csrf_verified_leadership`,
+  `csrf_verified_instructor` and `csrf_verified_session`, and `ending_session`,
+  logout's own read, which applies the same check;
 * **the landing tail** both doors share, `landing_with_session`, which turns
   verified claims into a session and a landing redirect, or into a calm page;
 * **the door pages** — the four pages a door can answer with that are not a
@@ -60,6 +64,7 @@ from app.copy.instructor_report import NOT_AN_INSTRUCTOR
 from app.copy.leadership_sets import NOT_LEADERSHIP, NOT_YOUR_ROLE
 from app.copy.student_read import NOT_A_STUDENT
 from app.copy.submit import COPY
+from app.db import get_session
 from app.services.authz import Door, LandingRole, resolve_landing
 from app.services.identity import (
     ResolvedIdentity,
@@ -69,7 +74,9 @@ from app.services.identity import (
 from app.services.session import (
     SessionClaims,
     bearer_token,
+    claim_key,
     fragment_redirect,
+    is_revoked,
     issue_csrf_token,
     issue_session,
     session_from_request,
@@ -101,8 +108,11 @@ __all__ = [
     "csrf_verified_admin",
     "csrf_verified_instructor",
     "csrf_verified_leadership",
+    "csrf_verified_session",
     "csrf_verified_student",
+    "ending_session",
     "landing_with_session",
+    "no_live_session",
     "no_access",
     "no_access_page",
     "no_account",
@@ -113,7 +123,9 @@ __all__ = [
     "require_admin",
     "require_instructor",
     "require_leadership",
+    "require_session",
     "require_student",
+    "user_of",
 ]
 
 # What a refused launch or sign-in answers. 400 rather than 401 or 403: nothing
@@ -147,7 +159,7 @@ BEARER_SCHEME = "Bearer"
 NOT_A_STUDENT_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
 
 
-def require_student(request: Request) -> SessionClaims:
+def require_student(request: Request, db: Session = Depends(get_session)) -> SessionClaims:
     """The verified session of a student, or one refusal for everybody else.
 
     E2-09's student read path depends on this, E2-08's submit path depends on the
@@ -186,6 +198,7 @@ def require_student(request: Request) -> SessionClaims:
     """
     return _session_in_role(
         request,
+        db,
         LandingRole.STUDENT,
         status=NOT_A_STUDENT_STATUS,
         detail=NOT_A_STUDENT.text,
@@ -209,7 +222,7 @@ NOT_AN_INSTRUCTOR_STATUS = 401
 NOT_AN_INSTRUCTOR_CHALLENGE = {"WWW-Authenticate": BEARER_SCHEME}
 
 
-def require_instructor(request: Request) -> SessionClaims:
+def require_instructor(request: Request, db: Session = Depends(get_session)) -> SessionClaims:
     """The verified session of an instructor, or one refusal for everybody else.
 
     Every route in `app.api.instructor` depends on this — E4-07's two report reads
@@ -242,6 +255,7 @@ def require_instructor(request: Request) -> SessionClaims:
     """
     return _session_in_role(
         request,
+        db,
         LandingRole.INSTRUCTOR,
         status=NOT_AN_INSTRUCTOR_STATUS,
         detail=NOT_AN_INSTRUCTOR.text,
@@ -285,7 +299,7 @@ NOT_YOUR_ROLE_STATUS = 403
 NOT_YOUR_ROLE_CHALLENGE = {"WWW-Authenticate": f'{BEARER_SCHEME} error="insufficient_scope"'}
 
 
-def require_leadership(request: Request) -> SessionClaims:
+def require_leadership(request: Request, db: Session = Depends(get_session)) -> SessionClaims:
     """The verified session of a leader, a 403 for a real session in another role, or one 401.
 
     Every route in `app.api.leadership` depends on this or on
@@ -326,7 +340,7 @@ def require_leadership(request: Request) -> SessionClaims:
     reaches a leadership page from a link in the product, and was told their
     session had ended.
     """
-    session = session_from_request(request, request.app.state.session_secret)
+    session = _unrevoked_session(request, db)
     if session is None:
         raise HTTPException(
             status_code=NOT_LEADERSHIP_STATUS,
@@ -342,7 +356,7 @@ def require_leadership(request: Request) -> SessionClaims:
     return session
 
 
-def require_admin(request: Request) -> SessionClaims:
+def require_admin(request: Request, db: Session = Depends(get_session)) -> SessionClaims:
     """The verified session of an admin, a 403 for a real session in another role, or one 401.
 
     E9-06's admin routes depend on this or on `csrf_verified_admin` below, so a
@@ -363,7 +377,8 @@ def require_admin(request: Request) -> SessionClaims:
     person.
 
     **Two refusals, in the order `require_leadership` gives them (ADR 0196).**
-    A token that is absent, malformed, expired or signed with another key gets
+    A token that is absent, malformed, expired, revoked (ADR 0202) or signed with
+    another key gets
     `NOT_LEADERSHIP_STATUS` (401), the `Bearer` challenge and `NOT_ADMIN`'s
     words, before any claim is read. A real, verified, live session in any other
     role gets `NOT_YOUR_ROLE_STATUS` (403), the `insufficient_scope` challenge
@@ -371,7 +386,7 @@ def require_admin(request: Request) -> SessionClaims:
     leadership gate's; only the sentences differ, because those say
     "leadership".
     """
-    session = session_from_request(request, request.app.state.session_secret)
+    session = _unrevoked_session(request, db)
     if session is None:
         raise HTTPException(
             status_code=NOT_LEADERSHIP_STATUS,
@@ -389,6 +404,7 @@ def require_admin(request: Request) -> SessionClaims:
 
 def _session_in_role(
     request: Request,
+    db: Session,
     role: LandingRole,
     *,
     status: int,
@@ -414,10 +430,63 @@ def _session_in_role(
     so every one of them gets the same status, the same words and the same
     challenge — the reason each gate's own docstring gives.
     """
-    session = session_from_request(request, request.app.state.session_secret)
+    session = _unrevoked_session(request, db)
     if session is None or session.role is not role:
         raise HTTPException(status_code=status, detail=detail, headers=challenge)
     return session
+
+
+def _unrevoked_session(request: Request, db: Session) -> SessionClaims | None:
+    """The verified session on `request`, or `None` if there is none or it was revoked.
+
+    E9-04 (ADR 0202): a role switch and a logout end a session before its token
+    expires, by recording its `jti`. Every gate reads the session through this,
+    so a revoked session joins the absent, malformed, expired and wrongly signed
+    ones in the one `None` each gate already refuses. That is what makes a
+    revoked token's answer the same answer an expired token gets, on every route
+    kind, with nothing for a caller to tell the two apart by.
+
+    `db` is the request's own session (`app.db.get_session`); FastAPI hands a
+    route and its gate the same one, so the check costs one query and no
+    second connection.
+    """
+    session = session_from_request(request, request.app.state.session_secret)
+    if session is None or is_revoked(db, session.jti):
+        return None
+    return session
+
+
+def require_session(request: Request, db: Session = Depends(get_session)) -> SessionClaims:
+    """A verified, unrevoked session in any role, or `require_student`'s refusal (E9-04).
+
+    The gate of the role switcher's two routes: the landings a person may open
+    at this door, and (through `csrf_verified_session`) the switch itself. Any
+    role, because every role may ask which other views it holds.
+
+    **The refusal is `require_student`'s own**, status, words and challenge, and
+    it borrows that gate's constants on purpose: E9-04's settled interface says
+    the switcher's refusal is the same answer, so it moves when that one does.
+    It is the one 401 for every way a request carries no live session, so a
+    caller trying tokens learns nothing from it.
+    """
+    session = _unrevoked_session(request, db)
+    if session is None:
+        raise no_live_session()
+    return session
+
+
+def no_live_session() -> HTTPException:
+    """`require_session`'s refusal, for a route that finds the session ended after the gate.
+
+    The role switch is the one caller: two switches with one token both pass
+    the gate, and the one whose revocation comes back empty answers this, the
+    answer an expired or revoked token gets at the same route (ruling G2).
+    """
+    return HTTPException(
+        status_code=NOT_A_STUDENT_STATUS,
+        detail=NOT_A_STUDENT.text,
+        headers=NOT_A_STUDENT_CHALLENGE,
+    )
 
 
 def person_of(claims: SessionClaims) -> UUID | None:
@@ -434,12 +503,16 @@ def person_of(claims: SessionClaims) -> UUID | None:
     Here because it is what a router needs from the request: `app.api.instructor`
     and `app.api.leadership` each held a copy of these four lines until E5.1-03.
     """
-    if claims.person_id is None:
-        return None
-    try:
-        return UUID(claims.person_id)
-    except ValueError:
-        return None
+    return claim_key(claims.person_id)
+
+
+def user_of(claims: SessionClaims) -> UUID | None:
+    """The launch-side `user` row this session was resolved to, or `None` where it names none.
+
+    `person_of`'s twin for `user_id`, read the same way
+    (`app.services.session.claim_key`). A web session carries none (E1-12).
+    """
+    return claim_key(claims.user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -1057,6 +1130,24 @@ def csrf_verified_instructor(
     return _double_submit_verified(request, claims)
 
 
+def csrf_verified_session(
+    request: Request, claims: SessionClaims = Depends(require_session)
+) -> SessionClaims:
+    """`require_session`, plus the same double-submit check every other write carries (E9-04).
+
+    The role switch carries this. A switch revokes the session it is asked from
+    and issues another, so a forged one would end a person's session and put
+    their browser in a role they did not choose, from a page on the internet.
+
+    **`require_session` is *declared* as a dependency rather than called**, for
+    the reason the student pair gives, and its 401 is raised before this body
+    runs. **The check is `_double_submit_verified`**, shared with the other
+    three, so the Bearer exemption and the HMAC binding to this session's `jti`
+    are one implementation.
+    """
+    return _double_submit_verified(request, claims)
+
+
 def csrf_verified_admin(
     request: Request, claims: SessionClaims = Depends(require_admin)
 ) -> SessionClaims:
@@ -1073,6 +1164,31 @@ def csrf_verified_admin(
     internet using an admin's signed-in browser to grant somebody Care or Admin.
     """
     return _double_submit_verified(request, claims)
+
+
+def ending_session(request: Request) -> SessionClaims | None:
+    """The session a logout ends: signature and expiry checked, revocation not (E9-04).
+
+    Logout must answer a second logout with the same token as it answered the
+    first, so it reads the token without asking whether it was revoked; the
+    revocation it then writes does nothing on conflict. Absent, malformed,
+    expired and wrongly signed tokens answer `None`, and logout still clears the
+    cookies.
+
+    **The double-submit check applies when the session rides the cookie**:
+    without it, another site could end a person's session by making her browser
+    post to the logout route. It is `_double_submit_verified` itself, so the
+    Bearer exemption is the same. Called from the logout endpoint's body rather
+    than declared as a dependency, so it is no member of the `csrf_verified_*`
+    family, whose read refuses a revoked id; the route sweep's exemption ledger
+    names the logout path for that reason.
+
+    Here, because this module is the one place a session is read off a request.
+    """
+    session = session_from_request(request, request.app.state.session_secret)
+    if session is None:
+        return None
+    return _double_submit_verified(request, session)
 
 
 def _double_submit_verified(request: Request, claims: SessionClaims) -> SessionClaims:
