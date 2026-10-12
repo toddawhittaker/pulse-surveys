@@ -139,6 +139,7 @@ __all__ = [
     "WriteSanction",
     "chosen_landing",
     "guard_write",
+    "held_landings",
     "holds_care",
     "holds_leadership",
     "chaired_courses_with_a_lead",
@@ -147,6 +148,7 @@ __all__ = [
     "own_grant",
     "raw_comments_permitted",
     "resolve_landing",
+    "resolve_landings",
     "resolve_scope",
     "sanction_for",
     "scoped_reader",
@@ -1714,10 +1716,11 @@ LANDING_FOR_ROLE: Final[Mapping[AssignmentRole, LandingRole]] = {
 # enrolled in the course she grades would open on her own results page instead of
 # her section's.
 #
-# E9's role switcher is §2's real answer for people with several hats and
-# supersedes this ordering when it lands. Until then this is the minimal recorded
-# rule, and it is pinned over every ordered pair in the unit suite and again over
-# rows and real doors in the integration suite.
+# E9-04's role switcher is §2's real answer for people with several hats, and it
+# did not replace this ordering: this still decides the view a door opens on, and
+# `held_landings` offers every other held view in this same order. It is pinned
+# over every ordered pair in the unit suite and again over rows and real doors in
+# the integration suite.
 LANDING_PRECEDENCE: Final[tuple[LandingRole, ...]] = (
     LandingRole.LEADERSHIP,
     LandingRole.INSTRUCTOR,
@@ -1821,6 +1824,35 @@ def chosen_landing(
     return None
 
 
+def held_landings(
+    roles: Collection[AssignmentRole],
+    *,
+    enrolled_today: bool,
+    door: Door,
+) -> tuple[LandingRole, ...]:
+    """Every view this set of roles may open at this door, in `LANDING_PRECEDENCE` order.
+
+    E9-04's role switcher offers this list, and the switch accepts only a role
+    in it. **Pure, like `chosen_landing`**, and over the same inputs: `roles` is
+    already filtered by the door's permission column (ADR 0026), so the door
+    rule is the column's and is not written a second time here
+    (`docs/MISTAKES.md` entry 13).
+
+    **The student view comes last, and only at the launch door.** Enrollment is
+    a fallback for the first landing (ADR 0098), so the teaching assistant who
+    is also enrolled opens on her section; the switcher still offers her own
+    results, because SPEC §2 gives a person with several hats a way between
+    them. Last in the list is the same rule as "an assignment always beats an
+    enrollment", which is why the first entry of this list is exactly what
+    `chosen_landing` answers.
+    """
+    landings = {LANDING_FOR_ROLE[role] for role in roles if role in LANDING_FOR_ROLE}
+    held = [landing for landing in LANDING_PRECEDENCE if landing in landings]
+    if door is Door.LAUNCH and enrolled_today:
+        held.append(LandingRole.STUDENT)
+    return tuple(held)
+
+
 def _enrolled_today(session: Session, *, user_id: UUID, settings: Settings) -> bool:
     """Is this user enrolled in anything on the institution's current day?
 
@@ -1909,3 +1941,40 @@ def resolve_landing(
         enrolled_today=_enrolled_today(session, user_id=user_id, settings=settings),
         door=door,
     )
+
+
+def resolve_landings(
+    session: Session,
+    *,
+    door: Door,
+    person_id: UUID | None,
+    user_id: UUID | None,
+    settings: Settings,
+) -> tuple[LandingRole, ...]:
+    """Every view this session's own identity may open at this door, read now (E9-04).
+
+    The same two reads as `resolve_landing`, both taken every time: the role
+    switcher lists every view a person holds, not only the first, so the
+    enrollment is read even when an assignment lands. Read at the moment of
+    asking and never carried in a session, so an assignment deleted between
+    listing and switching is not offered to the switch (ruling 7: revoking
+    deletes the row).
+
+    **Only the session's own identity is resolved here**, as for
+    `resolve_landing`: both ids come from the verified session, and no route
+    passes another person's.
+    """
+    roles: list[AssignmentRole] = []
+    if person_id is not None:
+        roles = [
+            AssignmentRole(role)
+            for role in session.execute(
+                _ASSIGNED_ROLES_AT[door], {"person_id": person_id}
+            ).scalars()
+        ]
+    enrolled = (
+        door is Door.LAUNCH
+        and user_id is not None
+        and _enrolled_today(session, user_id=user_id, settings=settings)
+    )
+    return held_landings(roles, enrolled_today=enrolled, door=door)
