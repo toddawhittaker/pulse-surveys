@@ -4447,6 +4447,14 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "moderation_attempt", "INSERT"),
         (APPLICATION_ROLE, "instructor_response", "SELECT"),
         (APPLICATION_ROLE, "response_policy", "SELECT"),
+        # E9-04 (ADR 0202): the revoked-session ledger. SELECT is the revocation
+        # check every gate makes; INSERT is revoke_session (switch, logout);
+        # DELETE is the purge revoke_session runs in the same transaction.
+        # UPDATE is withheld: an expires_at moved earlier would bring an ended
+        # session back. The table holds a random jti and two timestamps, no person.
+        (APPLICATION_ROLE, "revoked_session", "SELECT"),
+        (APPLICATION_ROLE, "revoked_session", "INSERT"),
+        (APPLICATION_ROLE, "revoked_session", "DELETE"),
     }
 )
 

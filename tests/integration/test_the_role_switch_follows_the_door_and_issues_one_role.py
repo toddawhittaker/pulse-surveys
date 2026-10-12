@@ -72,6 +72,13 @@ pytestmark = pytest.mark.integration
 # A role value that names no `LandingRole` member, for the 422 case.
 A_ROLE_NOBODY_HAS = "e9-04-not-a-role"
 
+# The leadership gate's answer to a verified, live session in any other role,
+# since E7-08 (ADR 0196): 403, with RFC 6750's `insufficient_scope` in the
+# challenge. The student and instructor gates keep 401 (ruling on dispute
+# E9-04-01).
+OTHER_ROLE_REFUSED = 403
+INSUFFICIENT_SCOPE = "insufficient_scope"
+
 
 # ---------------------------------------------------------------------------
 # Readers.
@@ -556,8 +563,9 @@ def test_a_care_session_issued_by_a_switch_reaches_no_leadership_or_instructor_r
     """Done-when 4: "a Care session issued by a switch reaches no leadership or instructor route".
 
     A person holding dean, instructor and Care switches from her web leadership
-    session into Care; the Care session is refused (401) by the leadership route
-    and by the instructor route. (The other half, "a leadership session reaches
+    session into Care; the Care session is refused by the leadership route (403
+    with `insufficient_scope`, that gate's other-role answer since ADR 0196) and
+    by the instructor route (401). (The other half, "a leadership session reaches
     no Care route", waits for E10's Care routes: the ruling's second narrowing.)
 
     **The mutations it kills:** a switch that adds Care to the session rather
@@ -574,9 +582,12 @@ def test_a_care_session_issued_by_a_switch_reaches_no_leadership_or_instructor_r
 
     at_leadership = world.probe(LEADERSHIP, care)
     at_instructor = world.probe(INSTRUCTOR, care)
-    assert at_leadership.status_code == SESSION_REFUSED, (
-        f"A Care session issued by a switch was answered {at_leadership.status_code} by the "
-        "leadership route. SPEC §2: Care is deliberately not composable with reporting roles."
+    challenge = at_leadership.headers.get("www-authenticate") or ""
+    assert at_leadership.status_code == OTHER_ROLE_REFUSED and INSUFFICIENT_SCOPE in challenge, (
+        f"A Care session issued by a switch was answered {at_leadership.status_code} with "
+        f"challenge {challenge!r} by the leadership route, not {OTHER_ROLE_REFUSED} with "
+        f"`{INSUFFICIENT_SCOPE}` (ADR 0196: the leadership gate's answer to a live session in "
+        "another role). SPEC §2: Care is deliberately not composable with reporting roles."
     )
     assert at_instructor.status_code == SESSION_REFUSED, (
         f"A Care session issued by a switch was answered {at_instructor.status_code} by the "
@@ -601,7 +612,7 @@ def test_a_leadership_session_issued_by_a_switch_reaches_the_leadership_route(
     world.jti_of(leadership)
 
     answered = world.probe(LEADERSHIP, leadership)
-    assert answered.status_code != SESSION_REFUSED, (
-        f"The leadership route refused a leadership session a switch issued "
+    assert 200 <= answered.status_code < 300, (
+        f"The leadership route did not admit a leadership session a switch issued "
         f"({answered.status_code}, {answered.text[:200]!r})."
     )
