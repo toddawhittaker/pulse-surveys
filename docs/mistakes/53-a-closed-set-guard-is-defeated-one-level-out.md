@@ -1,6 +1,6 @@
 # Entry 53. A closed-set guard is defeated one level out
 
-**Caught: 5**
+**Caught: 7**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
@@ -88,3 +88,5 @@ depth and through included routers, with a control asserting it finds the ten
 routes two other suites name. What would have shipped: a results payload in
 `app.schemas.response_loop` outside the sweep, and a leadership route gated one
 dependency down outside the 403 tests.)*
+
+**Instance, 2026-10-12 (E9-01 and E9-07).** E9-01's caller sweep follows calls through an aliased module, and E9-07's test author made the roll-up schema sweep read every model reachable from a roll-up payload's fields, so the report's comment model imported into one is read all the same (`tests/unit/test_no_rollup_schema_carries_a_comment.py`). What would have shipped: a comment member reaching the roll-up through an imported model, with the sweep green.
