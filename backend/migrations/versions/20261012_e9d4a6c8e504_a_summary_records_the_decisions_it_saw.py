@@ -16,7 +16,9 @@ by `generated_at`, exactly as every row was before this revision, so no summary
 anybody can read today changes. A backfill would have to guess which decisions
 the walk saw from instants, which is the comparison this revision replaces.
 
-The downgrade drops the column.
+The downgrade drops the column, and with it every stored sequence; nothing can
+recover them. After a downgrade and a re-upgrade every row is null again, so it
+is judged by `generated_at` as a row written before this revision is.
 """
 
 from collections.abc import Sequence

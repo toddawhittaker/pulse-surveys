@@ -70,7 +70,12 @@ today changes; no backfill guesses what an old walk saw.
   inserted before another decision in the same section-week, and committed
   after both that decision and the walk's read, sits below the recorded number
   though the walk did not see it. It needs two decisions racing in one
-  section-week while its summary is written; holding the walk's read against
-  in-flight decisions would make a decision wait on a model call.
+  section-week while its summary is written. It reaches every up-chain reader
+  of a stored summary: the drill-down, the on-behalf read, and the on-behalf
+  draft and check, which gather through the same filter. The closing option,
+  left unbuilt: each moderation decision takes a per-section-week
+  `pg_advisory_xact_lock`, and the walk takes and releases the same key just
+  before it reads the sequence, so the walk waits only for decisions already in
+  flight and never holds the lock during the model call.
 - Every reader of a stored summary other than the instructor's own report goes
   through `_summary_rows_since_latest_removal`.
