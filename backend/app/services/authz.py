@@ -552,9 +552,9 @@ _TEACHING_INSTRUCTOR_GRANTS_OF_A_SECTION = text(
 # at section grain by a later ticket is staff of that section on the day it is
 # added and nobody should have to remember to add it here.
 _SECTION_SCOPED_ASSIGNEES = text(
-    "SELECT DISTINCT granted.person_id"
+    "SELECT DISTINCT granted.section_id, granted.person_id"
     " FROM public.assignment_scope AS granted"
-    " WHERE granted.section_id = :section_id"
+    " WHERE granted.section_id = ANY(CAST(:section_ids AS uuid[]))"
 )
 
 # Which courses a person leads, out of the Lead Faculty mapping and not out of
@@ -1421,7 +1421,26 @@ def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]
     caller's rule. A false *yes* withholds a grade from a student; a false *no*
     posts one to a member of staff. Neither widens anybody's purview.
     """
-    return set(session.execute(_SECTION_SCOPED_ASSIGNEES, {"section_id": section_id}).scalars())
+    return section_scoped_assignees_of(session, section_ids=[section_id]).get(section_id, set())
+
+
+def section_scoped_assignees_of(
+    session: Session, *, section_ids: Collection[UUID]
+) -> dict[UUID, set[UUID]]:
+    """`section_scoped_assignees` for a set of sections, in one statement.
+
+    Each section's staff by person id; a section nobody is assigned to is
+    absent. The roll-up figures ask this for every section of a node at once
+    (ADR 0205), and the one-section form above calls this, so the question is
+    written once.
+    """
+    asked = sorted(set(section_ids))
+    if not asked:
+        return {}
+    staff: dict[UUID, set[UUID]] = {}
+    for section_id, person_id in session.execute(_SECTION_SCOPED_ASSIGNEES, {"section_ids": asked}):
+        staff.setdefault(section_id, set()).add(person_id)
+    return staff
 
 
 def resolve_scope(

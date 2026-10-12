@@ -43,7 +43,7 @@ callers hand in a session and the institution's timezone, which is the zone ever
 window's wall clock is stated in (SPEC §3.1).
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -53,15 +53,17 @@ from sqlalchemy.orm import Session
 
 from app.models.base import Base
 from app.models.identity import Enrollment
-from app.services.authz import section_scoped_assignees
-from app.services.identity import person_for_user
+from app.services.authz import section_scoped_assignees_of
+from app.services.identity import persons_for_users
 
 __all__ = [
     "began_by",
     "enrolled_from",
     "first_sync_day",
+    "first_sync_days",
     "live_on",
     "without_staff",
+    "without_staff_of",
 ]
 
 # Tier 3 compares against the section's earliest roster sync (ADR 0131). The row is
@@ -102,13 +104,32 @@ def first_sync_day(session: Session, *, section_id: UUID, zone: ZoneInfo) -> dat
     `tests/integration/test_a_refused_roster_call_does_not_date_a_late_add.py`
     holds that distinction and names this function.
     """
-    earliest: datetime | None = session.scalar(
-        select(func.min(NRPS_CALL.c.called_at)).where(
-            NRPS_CALL.c.section_id == section_id,
-            NRPS_CALL.c.members_seen.is_not(None),
+    return first_sync_days(session, section_ids=[section_id], zone=zone).get(section_id)
+
+
+def first_sync_days(
+    session: Session, *, section_ids: Iterable[UUID], zone: ZoneInfo
+) -> dict[UUID, date]:
+    """`first_sync_day` for a set of sections, in one grouped statement.
+
+    A section never synced is absent, which a caller reads as `None`. The
+    one-section form calls this, so the rule above (only calls that read a
+    roster count) is written once.
+    """
+    asked = sorted(set(section_ids))
+    if not asked:
+        return {}
+    return {
+        section_id: earliest.astimezone(zone).date()
+        for section_id, earliest in session.execute(
+            select(NRPS_CALL.c.section_id, func.min(NRPS_CALL.c.called_at))
+            .where(
+                NRPS_CALL.c.section_id.in_(asked),
+                NRPS_CALL.c.members_seen.is_not(None),
+            )
+            .group_by(NRPS_CALL.c.section_id)
         )
-    )
-    return None if earliest is None else earliest.astimezone(zone).date()
+    }
 
 
 def enrolled_from(
@@ -193,7 +214,30 @@ def without_staff(session: Session, *, section_id: UUID, user_ids: Iterable[UUID
     entirely for the ordinary section whose staff nobody has entered in the people
     graph.
     """
-    staff = section_scoped_assignees(session, section_id=section_id)
-    if not staff:
-        return set(user_ids)
-    return {user_id for user_id in user_ids if person_for_user(session, user_id) not in staff}
+    return without_staff_of(session, members={section_id: set(user_ids)})[section_id]
+
+
+def without_staff_of(
+    session: Session, *, members: Mapping[UUID, Iterable[UUID]]
+) -> dict[UUID, set[UUID]]:
+    """`without_staff` for a set of sections: each section's members less its own staff.
+
+    Two statements however many sections and members: one read of every
+    section's staff through the authorization chokepoint, and, only when some
+    section has staff, one call of the set resolver for the members of those
+    sections (ADR 0205; ADR 0094 forbids looping the point resolver). A member
+    is left out only of the section whose staff their person is.
+    """
+    asked = {section_id: set(user_ids) for section_id, user_ids in members.items()}
+    staff = section_scoped_assignees_of(session, section_ids=list(asked))
+    staffed_members = {user_id for section_id in staff for user_id in asked.get(section_id, ())}
+    person_of = persons_for_users(session, staffed_members)
+    return {
+        section_id: {
+            user_id
+            for user_id in user_ids
+            if person_of.get(user_id) is None
+            or person_of[user_id] not in staff.get(section_id, set())
+        }
+        for section_id, user_ids in asked.items()
+    }

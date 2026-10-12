@@ -38,6 +38,17 @@ this ticket failed on exactly that.
   `benchmark_set_rating_week` once per cohort. Node figures are plain values,
   not sealed comparison figures: every section in the node is one the reader
   may open.
+- **A node's enrolment, read as a set.** A response rate divides by the
+  students enrolled in the section's latest published week, less its staff.
+  `reporting._enrolled_students_of` answers that for every section of a node
+  in a fixed number of statements: one grouped first-sync-day read
+  (`enrollment_windows.first_sync_days`), one `enrollment` read, one read of
+  every section's staff (`authz.section_scoped_assignees_of`), and one call of
+  `public.resolve_persons_for_users(uuid[])`, a set form of ADR 0094's
+  `resolve_person_for_user` with the same owner and the same one column read
+  (`views_sql/identity_resolution_v003.sql`). The one-section functions call
+  the set forms, so each rule is written once. ADR 0094 says a bulk need must
+  not loop the point resolver and needs its own mechanism; this is it.
 - **One owed rule, read as a set.** `response_loop.owed_section_weeks` answers
   every owed (section, course week) for a set of sections with a fixed number
   of statements, and `is_owed` calls it. The attention list imports it by name.
@@ -67,13 +78,19 @@ this ticket failed on exactly that.
   the same view; the cost is the next consequence.
 - **One request per tree level.** Expanding a node would cost a round trip and
   a purview resolution each time, for a tree a few hundred rows deep at most.
+- **Calling `resolve_person_for_user` over an array in one statement.** No new
+  grant, but it is the loop ADR 0094 forbids, written in SQL.
 - **Applying §4.1 item 7's minimums to node figures.** A node is not a
   comparison set; its sections are the reader's own.
 
 ## Consequences
 
 - The course-form label is spelled twice, in `section_codes.course_label` and
-  in `org_node_label_v001.sql`. They must move together; nothing yet checks it.
+  in `org_node_label_v001.sql`. A test compares every course row of the view
+  with `course_label`, so the two cannot drift silently.
+- `pulse_app` gains `EXECUTE` on one more identity definer. It answers ids
+  only, for the user ids the caller supplies, which is what the point resolver
+  answers one call at a time.
 - A section whose path is incomplete in the view fails the read loudly
   (`LookupError`) rather than leaving a node unnamed.
 - The view lists every org node to `pulse_app`; the narrowing to the reader's

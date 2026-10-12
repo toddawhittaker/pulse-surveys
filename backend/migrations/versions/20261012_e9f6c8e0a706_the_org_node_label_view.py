@@ -1,15 +1,23 @@
-"""the org node label view
+"""the org node label view, and a set-based person-for-user resolver
 
 Revision ID: e9f6c8e0a706
 Revises: e9a7c9e1b807
 Create Date: 2026-10-12 14:00:00.000000
 
-E9-07, ADR 0205. `org_node_label_v001.sql`: `public.org_node_label (level,
-node_id, name, parent_id)`, one row per institution, college, department, prefix
-and course, and `SELECT` on it to `pulse_app` and to nobody else. The roll-up
-tree names departments and colleges, and `pulse_app` holds nothing on
-`institution`, `college` or `department`; the view gives it the four columns and
-leaves those tables shut.
+E9-07, ADR 0205. Two objects.
+
+`org_node_label_v001.sql`: `public.org_node_label (level, node_id, name,
+parent_id)`, one row per institution, college, department, prefix and course,
+and `SELECT` on it to `pulse_app` and to nobody else. The roll-up tree names
+departments and colleges, and `pulse_app` holds nothing on `institution`,
+`college` or `department`; the view gives it the four columns and leaves those
+tables shut.
+
+`identity_resolution_v003.sql`: `public.resolve_persons_for_users(uuid[])`, the
+set form of ADR 0094's `resolve_person_for_user`, owned by the same
+`pulse_resolve_definer` and reading the same `person (id, user_id)`, with
+`EXECUTE` to `pulse_app`. A node's response rate leaves out each section's
+staff, and ADR 0094 forbids looping the point resolver for that.
 
 **No index.** The breakdown reserved this revision for an index on
 `instructor_response (section_id, week_id, sequence)` if `EXPLAIN` over a
@@ -18,8 +26,8 @@ term-sized seed asked for one. It did not: the owed read's one statement over
 existing `ix_instructor_response_section_id_week_id` answers it. ADR 0205
 records the plan.
 
-**The downgrade** drops the view, which takes its grant with it. It holds no
-data, so it needs no guard.
+**The downgrade** drops the function and the view, which takes their grants
+with them. Neither holds data, so it needs no guard.
 """
 
 from collections.abc import Sequence
@@ -35,10 +43,12 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    """Apply this revision: the org-node label view and `pulse_app`'s `SELECT` on it."""
+    """Apply this revision: the label view, the set resolver, and `pulse_app`'s grants on both."""
     op.execute(read_sql("org_node_label_v001"))
+    op.execute(read_sql("identity_resolution_v003"))
 
 
 def downgrade() -> None:
-    """Reverse this revision: drop the view, and its grant with it."""
+    """Reverse this revision: drop the set resolver and the view, and their grants with them."""
+    op.execute("DROP FUNCTION public.resolve_persons_for_users(uuid[])")
     op.execute("DROP VIEW public.org_node_label")

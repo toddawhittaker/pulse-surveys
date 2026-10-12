@@ -639,9 +639,11 @@ def _section_week_figures(
 ) -> dict[UUID, SectionWeekFigures]:
     """Each section's published weeks, rating means, and latest week's responses and enrolment.
 
-    Three set-based reads (the windows, the response counts, the rating
-    counts), then one enrolment count per section for its latest week, through
-    the report's own `_enrolled_students` so the denominator is the report's.
+    Every read is set-based: the windows, the response counts, the rating
+    counts, then each section's enrolment in its latest published week through
+    the report's own rule (`reporting._enrolled_students_of`, which
+    `_enrolled_students` calls), so the denominator is the report's and the
+    number of statements does not grow with the node (ADR 0205).
     """
     ids = sorted(section.section_id for section in chosen)
     by_id = {section.section_id: section for section in chosen}
@@ -694,7 +696,12 @@ def _section_week_figures(
         ).where(view.c.section_id.in_(ids), view.c.week_id.in_(week_ids))
     ):
         ratings[(section_id, week_id, str(stream))][int(rating)] = int(responses)
-    sections = {row.id: row for row in session.scalars(select(Section).where(Section.id.in_(ids)))}
+    latest_weeks = {
+        section_id: published[max(published)]
+        for section_id, published in weeks.items()
+        if published
+    }
+    enrolled = reporting._enrolled_students_of(session, weeks=latest_weeks, settings=settings)
     figures: dict[UUID, SectionWeekFigures] = {}
     for section_id in ids:
         published = weeks.get(section_id, {})
@@ -715,9 +722,7 @@ def _section_week_figures(
             },
             responses=counts.get((section_id, latest.week_id), (0, 0))[0],
             valid_responses=counts.get((section_id, latest.week_id), (0, 0))[1],
-            enrolled=reporting._enrolled_students(
-                session, section=sections[section_id], week=latest, settings=settings
-            ),
+            enrolled=enrolled[section_id],
         )
     return figures
 

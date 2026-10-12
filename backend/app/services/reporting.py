@@ -2160,23 +2160,44 @@ def _enrolled_students(
     assignment at all (ADR 0028). The filter is `enrollment_windows.without_staff`,
     which `app.services.grading._live_enrollments` calls too about today.
     """
+    return _enrolled_students_of(session, weeks={section.id: week}, settings=settings)[section.id]
+
+
+def _enrolled_students_of(
+    session: Session, *, weeks: Mapping[UUID, _SectionWeek], settings: Settings
+) -> dict[UUID, int]:
+    """`_enrolled_students` for many sections, each in its own week, in a fixed number of reads.
+
+    The rule is the one `_enrolled_students` documents, and that function calls
+    this one, so it is written once. What changes is the reads: one grouped
+    first-sync-day read, one `enrollment` read for every section, and
+    `without_staff_of`'s two, whatever the number of sections and members. The
+    roll-up figures ask this for every section of a node (ADR 0205).
+    """
+    if not weeks:
+        return {}
     zone = ZoneInfo(settings.institution_timezone)
-    opened_on = week.opens_at.astimezone(zone).date()
-    synced_on = enrollment_windows.first_sync_day(session, section_id=section.id, zone=zone)
-    enrolled = {
-        enrollment.user_id
-        for enrollment in session.scalars(
-            select(Enrollment).where(
-                Enrollment.section_id == section.id,
-                or_(Enrollment.ended_on.is_(None), Enrollment.ended_on >= opened_on),
-            )
-        )
-        if enrollment_windows.began_by(
-            enrollment_windows.enrolled_from(enrollment, first_sync_day=synced_on, zone=zone),
-            closes_at=week.closes_at,
-        )
+    opened_on = {
+        section_id: week.opens_at.astimezone(zone).date() for section_id, week in weeks.items()
     }
-    return len(enrollment_windows.without_staff(session, section_id=section.id, user_ids=enrolled))
+    synced_on = enrollment_windows.first_sync_days(session, section_ids=list(weeks), zone=zone)
+    enrolled: dict[UUID, set[UUID]] = {section_id: set() for section_id in weeks}
+    for enrollment in session.scalars(
+        select(Enrollment).where(
+            Enrollment.section_id.in_(sorted(weeks)),
+            or_(Enrollment.ended_on.is_(None), Enrollment.ended_on >= min(opened_on.values())),
+        )
+    ):
+        section_id = enrollment.section_id
+        if enrollment.ended_on is not None and enrollment.ended_on < opened_on[section_id]:
+            continue
+        began = enrollment_windows.enrolled_from(
+            enrollment, first_sync_day=synced_on.get(section_id), zone=zone
+        )
+        if enrollment_windows.began_by(began, closes_at=weeks[section_id].closes_at):
+            enrolled[section_id].add(enrollment.user_id)
+    students = enrollment_windows.without_staff_of(session, members=enrolled)
+    return {section_id: len(students[section_id]) for section_id in weeks}
 
 
 def _course_label(session: Session, section: Section) -> str:
