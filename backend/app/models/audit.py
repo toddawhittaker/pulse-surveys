@@ -6,17 +6,32 @@ response-on-behalf actions, imports (with their dry-run diffs), and admin config
 edits". E0-10 needs exactly one of those: §4's "every identity access is
 automatically audit-logged with actor, timestamp, and case".
 
-**Only one action can be written today, and the enum says so.** `audit_action`
-has a single member, `IDENTITY_REVEAL`, because that is the only thing in this
-repository that writes a row here. Each later ticket that logs something adds its
-own member in the same change as the code that writes it, so the type is a list
-of things that actually happen rather than a forecast — the same reasoning
-`AssignmentRole` gives for leaving `STUDENT` out.
+**Six actions can be written, and the enum lists exactly those.** E0-10 added
+`IDENTITY_REVEAL`. E9-02 added five for the admin's people-graph writes
+(`ROLE_GRANTED`, `ROLE_REVOKED`, `REPORTS_TO_SET`, `LEAD_MAPPING_CHANGED` and
+`WEB_LOGIN_LINKAGE_CHANGED`), because the E9 owner ruling makes every grant and
+revocation made in the People editor audited: that row, not a code refusal, is
+what keeps a Care or Admin grant visible to the outside review (SPEC §6.2,
+[ADR 0200](../../../docs/adr/0200-the-admins-people-graph-definers.md)). Each
+later ticket that logs something adds its own member in the same change as the
+code that writes it, so the type is a list of things that actually happen rather
+than a forecast — the same reasoning `AssignmentRole` gives for leaving `STUDENT`
+out.
 
-**Nothing in the application writes this table, and that is the design.** The row
-is written inside `public.record_identity_reveal`, a `SECURITY DEFINER` function
-that returns the row's id and no identity at all. Neither runtime role holds
+**Nothing in the application writes this table, and that is the design.** Every
+row is written inside a `SECURITY DEFINER` function: a reveal by
+`public.record_identity_reveal`, which returns the row's id and no identity at
+all, and an admin write by the people-graph definer that made the write, in the
+same transaction and with no exception handler around the insert, so a write
+whose row cannot be written is not committed. Neither runtime role holds
 `INSERT` here, so there is no second way to write a row.
+
+**Two shapes of row, each held by a check.** A reveal names a student
+(`subject_user_id`) and no person written about; an admin write names the person
+written about (`subject_person_id`) and, for an assignment or a mapping, the
+role and the scope node, and names no student. `subject_user_id` was `NOT NULL`
+while the reveal was the only action; it is nullable now, and the check
+`a_reveal_names_its_student` keeps a reveal from losing its student.
 
 **A row has to be committed before any name is handed over, and that is what
 makes it a record rather than a courtesy.**
@@ -55,24 +70,37 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import UUID
 
-from sqlalchemy import Enum, ForeignKey, Uuid, text
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import AwareDateTime, Base, UuidPrimaryKey
+from app.models.identity import AssignmentRole
 
 
 class AuditAction(StrEnum):
     """What an `audit_log` row records having happened.
 
-    One member, and it is the whole of E0-10's audit surface: a Care staff
-    member was authorised to obtain a student's name and email address through
-    the reveal function. "Authorised" rather than "obtained" since ADR 0071 — the
-    row is committed before the name is read, so it records the access having
-    been opened. The member's value is its name, as every other enum in this
-    model layer does it — one spelling in Python and in the database.
+    `IDENTITY_REVEAL` is E0-10's: a Care staff member was authorised to obtain a
+    student's name and email address through the reveal function. "Authorised"
+    rather than "obtained" since ADR 0071 — the row is committed before the name
+    is read, so it records the access having been opened.
+
+    The other five are E9-02's, one per kind of people-graph write an admin
+    makes (ADR 0200). One member covers each pair: `REPORTS_TO_SET` a set and a
+    clear, `LEAD_MAPPING_CHANGED` a map and an unmap, and
+    `WEB_LOGIN_LINKAGE_CHANGED` a link and an unlink. Creating or editing a
+    person record is not audited.
+
+    Each member's value is its name, as every other enum in this model layer
+    does it — one spelling in Python and in the database.
     """
 
     IDENTITY_REVEAL = "IDENTITY_REVEAL"
+    ROLE_GRANTED = "ROLE_GRANTED"
+    ROLE_REVOKED = "ROLE_REVOKED"
+    REPORTS_TO_SET = "REPORTS_TO_SET"
+    LEAD_MAPPING_CHANGED = "LEAD_MAPPING_CHANGED"
+    WEB_LOGIN_LINKAGE_CHANGED = "WEB_LOGIN_LINKAGE_CHANGED"
 
 
 class AuditLog(UuidPrimaryKey, Base):
@@ -86,6 +114,19 @@ class AuditLog(UuidPrimaryKey, Base):
     """
 
     __tablename__ = "audit_log"
+    __table_args__ = (
+        # Relaxing `subject_user_id` for the admin's writes must not let a reveal
+        # lose its student (E9-02's known trap).
+        CheckConstraint(
+            "action <> 'IDENTITY_REVEAL' OR subject_user_id IS NOT NULL",
+            name="a_reveal_names_its_student",
+        ),
+        # Every admin write names the person it was about.
+        CheckConstraint(
+            "action = 'IDENTITY_REVEAL' OR subject_person_id IS NOT NULL",
+            name="an_admin_write_names_its_person",
+        ),
+    )
 
     # Server-side, not application-side: the one writer is SQL inside the
     # database, and a timestamp a caller could choose is not evidence of when
@@ -103,12 +144,30 @@ class AuditLog(UuidPrimaryKey, Base):
     actor_person_id: Mapped[UUID] = mapped_column(
         ForeignKey("person.id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    # The student whose identity was revealed. NOT NULL because the only action
-    # this table can hold names one; a later action that names no subject is a
-    # migration that relaxes this, in the ticket that adds the action.
-    subject_user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True
+    # The student whose identity was revealed. Nullable since E9-02, whose admin
+    # writes name no student; the `a_reveal_names_its_student` check above keeps
+    # it required on a reveal.
+    subject_user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id", ondelete="RESTRICT"), nullable=True, index=True
     )
+    # The person an admin's people-graph write was about: the grantee, the
+    # revoked or re-pointed assignment's holder, the lead mapped or unmapped, or
+    # the person linked or unlinked (ADR 0200). NULL on a reveal. RESTRICT, as
+    # `actor_person_id` is and for the same reason.
+    subject_person_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("person.id", ondelete="RESTRICT"), nullable=True, index=True
+    )
+    # For an assignment write, the assignment's role and its scope node; for a
+    # mapping write, `LEAD_FACULTY` and the course. A Care grant is told apart by
+    # this role, so E10's access log can show it. NULL on a reveal and on a
+    # web-login linkage.
+    role: Mapped[AssignmentRole | None] = mapped_column(
+        Enum(AssignmentRole, name="assignment_role"), nullable=True
+    )
+    # No foreign key: which table the id belongs to is decided by `role`, by the
+    # level rule `SCOPE_GRAIN_RULE` in `app.models.identity` sets out. The row is a
+    # record of what was written, and it must outlive a node deleted later.
+    scope_node_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     # §4 asks for "actor, timestamp, and case". The case is nullable and carries
     # no foreign key because `threat_case` does not exist until E10 — E0-10
     # ships the reveal as a proof of mechanism, before there is any case model
