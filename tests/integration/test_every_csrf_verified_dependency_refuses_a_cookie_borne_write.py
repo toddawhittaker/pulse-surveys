@@ -39,9 +39,11 @@ _double_submit_check` is the cheap structural second line beside it.
 by prefix off `app.api.deps` — the same discovery the route sweep uses
 (`docs/MISTAKES.md` entry 13) — and `test_the_family_is_exactly_the_members_this
 _module_drives` requires the discovered set to equal the set this module knows
-how to drive. A future `csrf_verified_admin` that forgets the delegation is
-therefore not quietly unswept: this module goes red naming it, and the repair is
-to add its writing route to `DRIVERS` rather than to widen anything.
+how to drive. A new member that forgets the delegation is therefore not quietly
+unswept: this module goes red naming it, and the repair is to add its writing
+route to `DRIVERS` rather than to widen anything. E9-02's `csrf_verified_admin`
+was the first to arrive that way; its real routes are E9-06's, so it is driven on
+a stub route the test mounts (`fixtures/admin_gate.py`).
 
 **Why the worlds are fetched inside the body.** Each member needs a different
 world — the student's submit window, the leadership set surface — and a test
@@ -92,7 +94,12 @@ INSTRUCTOR = "csrf_verified_instructor"
 # Its write is the old session's revocation, so "took effect" is a `revoked_session`
 # row for the old token's `jti`, and "nothing written" is none.
 SESSION = "csrf_verified_session"
-DRIVERS = (STUDENT, LEADERSHIP, INSTRUCTOR, SESSION)
+# E9-02's: the admin's write gate. Its real routes are E9-06's, so it is driven on
+# a stub POST route the test mounts on the built application, its endpoint
+# declaring the dependency (done-when 10's device, `fixtures/admin_gate.py`), and
+# "the write" is the stub's endpoint being reached.
+ADMIN = "csrf_verified_admin"
+DRIVERS = (STUDENT, LEADERSHIP, INSTRUCTOR, SESSION, ADMIN)
 
 
 class CookieBorneWrite(NamedTuple):
@@ -234,11 +241,50 @@ def a_two_hat_person_switching_roles(request: pytest.FixtureRequest) -> CookieBo
     )
 
 
+def an_admin_writing_through_a_stub_route(request: pytest.FixtureRequest) -> CookieBorneWrite:
+    """E9-02's `csrf_verified_admin`, on a stub POST route, by an admin whose session rides the cookie.
+
+    The real admin write routes are E9-06's, so the stub stands in for one: a POST
+    route mounted on the built application whose endpoint declares the dependency,
+    as done-when 10 drives `require_admin`. What is counted is how many times the
+    endpoint was reached — 0 before, 0 after both refusals, 1 after the bound
+    token — because a stub has no row of its own to write.
+
+    **Expected red before E9-02 lands:** a FAILED naming the missing dependency.
+    """
+    from fixtures.admin_gate import (
+        CSRF_VERIFIED_ADMIN,
+        admin_dependency,
+        an_admin,
+        ask_as_a_browser,
+        mount_stub,
+    )
+
+    review = request.getfixturevalue("lead_review")
+    dependency = admin_dependency(CSRF_VERIFIED_ADMIN)
+    reached: list[Any] = []
+    path, remove = mount_stub(review.door.door.application, "POST", dependency, reached.append)
+    request.addfinalizer(remove)
+    admin = an_admin(review)
+    forged = review.another_sessions_csrf_token(admin.token)
+
+    return CookieBorneWrite(
+        what="an admin's write",
+        without_a_token=lambda: ask_as_a_browser(review, path, admin.token, csrf_token=None),
+        with_another_sessions_token=lambda: ask_as_a_browser(
+            review, path, admin.token, csrf_token=forged
+        ),
+        with_the_bound_token=lambda: ask_as_a_browser(review, path, admin.token),
+        writes=lambda: len(reached),
+    )
+
+
 DRIVE = {
     STUDENT: a_student_submitting,
     LEADERSHIP: a_leader_defining_a_set,
     INSTRUCTOR: an_instructor_excluding_a_comment,
     SESSION: a_two_hat_person_switching_roles,
+    ADMIN: an_admin_writing_through_a_stub_route,
 }
 
 

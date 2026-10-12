@@ -457,6 +457,7 @@ pulse-surveys/
 │       │   ├── response_loop_grants_v002.sql # the course a policy row covers, which the application names
 │       │   ├── response_loop_guard_v001.sql  # who may write a response or a policy, checked at insert
 │       │   ├── response_loop_guard_v002.sql  # who may set a policy, checked for the one course a row covers
+│       │   ├── people_graph_v001.sql         # the admin's writes to the people graph and the admin's reads, each admin-checked and audited
 │       │   ├── section_staff_names_v001.sql  # the one channel a staff name reaches a reader through
 │       │   ├── section_staff_names_v002.sql  # the same channel over a set of sections, with each name's role
 │       │   └── queries.py          # typed ways into the read views
@@ -473,6 +474,7 @@ pulse-surveys/
 │       │   └── session.py          # the role switcher: the views a session holds, a switch, the new session
 │       │
 │       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
+│       │   ├── admin_people.py     # the admin gate's sentences and the people-graph writes' refusals
 │       │   ├── entry.py            # the four pages a door answers with when there is no landing
 │       │   ├── landing.py          # the role switch's refusal
 │       │   ├── submit.py           # the weekly survey's submit path
