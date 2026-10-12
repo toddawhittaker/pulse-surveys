@@ -514,6 +514,7 @@ pulse-surveys/
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
 │       │   ├── response_loop.py    # the staff names of a set of sections for a reader of them; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)
+│       │   ├── student_results.py  # a student's week results (§5.4)
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration
