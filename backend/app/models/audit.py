@@ -151,6 +151,20 @@ class AuditLog(UuidPrimaryKey, Base):
             "action = 'REPORTS_TO_SET' OR parent_assignment_id IS NULL",
             name="only_an_edge_write_names_a_parent",
         ),
+        # An assignment or mapping write names the role and the scope node it
+        # wrote (ADR 0200), so a Care grant cannot be recorded without saying
+        # so; and no other row carries both, so none reads as a grant (E9-14).
+        CheckConstraint(
+            "(action IN ('ROLE_GRANTED', 'ROLE_REVOKED', 'REPORTS_TO_SET', "
+            "'LEAD_MAPPING_CHANGED')) = (role IS NOT NULL AND scope_node_id IS NOT NULL)",
+            name="an_admin_write_names_its_role_and_scope",
+        ),
+        # A linkage row may carry the linked person's privilege as its role, and
+        # never a scope node: a login is linked to a person, not to a node.
+        CheckConstraint(
+            "action <> 'WEB_LOGIN_LINKAGE_CHANGED' OR scope_node_id IS NULL",
+            name="a_linkage_names_no_scope",
+        ),
     )
 
     # Server-side, not application-side: the one writer is SQL inside the

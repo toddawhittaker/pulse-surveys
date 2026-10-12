@@ -40,6 +40,14 @@ refuses (409) if the digest differs, and otherwise applies and commits. A
 serialization failure at any point is the same refusal. The apply answers the
 same diff the dry run answered.
 
+*Amended by E9-14:* the apply compares the digest after its last line and before
+it records or commits anything, rather than before its first write. The digest
+is still computed from the state read before the first write, so a stale apply
+still commits nothing; what changes is only which refusal a file with both
+faults hears. A file one of whose lines the definers refuse is answered with that
+line (422) whatever digest came with it, so a file that can never be applied
+says why, rather than asking for a dry run that would refuse it anyway.
+
 **Strict reading, all or nothing.** A line with the wrong number of cells, a key
 not written the way the export writes it, a repeated key, or a name or category
 with spaces at either end is refused (422) naming its line, and nothing is

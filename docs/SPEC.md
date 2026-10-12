@@ -460,6 +460,7 @@ pulse-surveys/
 │       │   ├── people_graph_v001.sql         # the admin's writes to the people graph and the admin's reads, each admin-checked and audited
 │       │   ├── org_node_label_v001.sql       # each org node's display name and containing node, for the roll-up tree
 │       │   ├── people_graph_v002.sql         # the record of an applied people or mapping import, with its dry-run diff, admin-checked
+│       │   ├── people_graph_v003.sql         # a course is mapped only to a Lead Faculty holder, and a lead who still leads is not revoked
 │       │   ├── section_staff_names_v001.sql  # the one channel a staff name reaches a reader through
 │       │   ├── section_staff_names_v002.sql  # the same channel over a set of sections, with each name's role
 │       │   └── queries.py          # typed ways into the read views

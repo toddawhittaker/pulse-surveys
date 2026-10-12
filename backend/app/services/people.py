@@ -1,7 +1,8 @@
 """The admin's people editor: the two tables, their writes, and their CSV import (SPEC §6.3).
 
 Every read and every write goes through E9-02's `SECURITY DEFINER` functions in
-`app/views_sql/people_graph_v001.sql` (ADR 0200) and `people_graph_v002.sql`. This module never touches
+`app/views_sql/people_graph_v001.sql` (ADR 0200), `people_graph_v002.sql` and
+`people_graph_v003.sql`. This module never touches
 `person`, `role_assignment`, `lead_faculty_mapping` or `web_login_subject`
 itself; it orders, pages and diffs what the definers answer, and it turns their
 named refusals into the sentences in `app.copy.admin_people`.
@@ -21,12 +22,14 @@ file does not name is left as it is. A dry run applies the file inside the
 request's transaction, reads the named records back, diffs them against what it
 read before, and rolls back. Its digest is a hash over the file and the named
 records' before-state, and an apply recomputes it inside a `SERIALIZABLE`
-transaction before writing, so an apply makes the dry run's changes or none: if
-a named record moved, a concurrent writer collided, or any one line was
-refused, the whole file is rolled back. An apply that commits leaves one
-`IMPORT_APPLIED` audit row holding its kind and its diff, written by
-`admin_record_import` (`people_graph_v002.sql`) in the same transaction; a dry
-run leaves none.
+transaction, from the state it reads before its first write, and compares it
+after its last line and before anything is recorded or committed. So an apply
+makes the dry run's changes or none: if a named record moved, a concurrent
+writer collided, or any one line was refused, the whole file is rolled back, and
+a refused line is named whatever digest came with the file. An apply that
+commits leaves one `IMPORT_APPLIED` audit row holding its kind and its diff,
+written by `admin_record_import` (`people_graph_v002.sql`) in the same
+transaction; a dry run leaves none.
 """
 
 import csv
@@ -131,7 +134,9 @@ SERIALIZATION_FAILURE = "40001"
 
 # The named refusals that carry a count, as digits in the error's detail field,
 # for the `{count}` in their sentence (`app.copy.admin_people`).
-COUNTED_REFUSALS: frozenset[str] = frozenset({"admin_people.assignment_has_reports"})
+COUNTED_REFUSALS: frozenset[str] = frozenset(
+    {"admin_people.assignment_has_reports", "admin_people.lead_still_leads_courses"}
+)
 
 # A spreadsheet runs a cell that starts with one of these as a formula. The
 # export writes such a cell, and any cell starting with the escape itself, with
@@ -740,6 +745,18 @@ def _begin(session: Session, *, applying: bool) -> None:
         session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
 
 
+def _refuse_a_stale_apply(*, applying: bool, digest: str | None, expected: str) -> None:
+    """`ImportStaleError` when an apply's digest is not the one its file and state give now.
+
+    Asked after every line has been written and before anything is recorded or
+    committed, so a file one of whose lines is refused answers that line (422)
+    whatever digest it was sent with, and a stale apply still commits nothing:
+    `expected` was computed from the state read before the first write.
+    """
+    if applying and digest != expected:
+        raise ImportStaleError
+
+
 _RECORD_IMPORT = (
     "SELECT public.admin_record_import(CAST(:actor AS uuid), :kind, CAST(:diff AS jsonb))"
 )
@@ -796,8 +813,6 @@ def _import_people(
             [str(person), row["identity_name"], row["category"]] for person, row in watched.items()
         )
         expected = _digest("people", body, state)
-        if applying and digest != expected:
-            raise ImportStaleError
         created: list[UUID] = []
         for row in rows:
             if row.person_id is None:
@@ -813,6 +828,7 @@ def _import_people(
                 continue
             edit = _edit_values(actor, row.person_id, row.name, row.category)
             _on_line(row.line, session, _EDIT_PERSON, edit)
+        _refuse_a_stale_apply(applying=applying, digest=digest, expected=expected)
         everyone_after = _people(session, actor)
         diff = PeopleDiff(
             digest=expected,
@@ -861,8 +877,6 @@ def _import_mappings(
         before = {course: everything[course] for course in wanted if course in everything}
         state = sorted([str(course), _key(before.get(course)) or ""] for course in wanted)
         expected = _digest("mappings", body, state)
-        if applying and digest != expected:
-            raise ImportStaleError
         for course, (line, person) in wanted.items():
             current = before.get(course)
             if current == person:
@@ -873,6 +887,7 @@ def _import_mappings(
             if person is not None:
                 values = {"actor": _key(actor), "person": str(person), "course": str(course)}
                 _on_line(line, session, _MAP, values)
+        _refuse_a_stale_apply(applying=applying, digest=digest, expected=expected)
         everything_after = _mappings(session, actor)
         after = {
             course: everything_after[course] for course in wanted if course in everything_after
