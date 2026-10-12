@@ -103,7 +103,7 @@ test('an admin imports a mapping file, reads the diff, applies it, and sees the 
 
   // Nothing can be applied before a dry run has answered.
   await expect(page.getByRole('button', { name: APPLY })).toHaveCount(0);
-  await page.getByLabel('CSV file').setInputFiles({
+  await page.getByLabel('CSV file', { exact: true }).setInputFiles({
     name: 'lead-mappings.csv',
     mimeType: 'text/csv',
     buffer: Buffer.from(withTheNewRow),
@@ -138,7 +138,7 @@ test('the People table opens a person’s panel, and every page scans clean', as
   const panel = page.getByTestId(PERSON_PANEL);
   await expect(panel).toBeVisible();
   // Every Pulse-owned role is offered, the Care and Admin roles included.
-  const offered = await panel.getByLabel('Role').locator('option').allTextContents();
+  const offered = await panel.getByLabel('Role', { exact: true }).locator('option').allTextContents();
   expect(offered).toContain('Care');
   expect(offered).toContain('Admin');
   expect(offered).not.toContain('Instructor');
