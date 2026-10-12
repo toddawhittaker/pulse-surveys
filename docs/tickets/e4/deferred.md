@@ -403,6 +403,12 @@ copy module per surface, rows in the governance map, the line-or-no-line
 decision made for each landing), or a recorded decision widens the sweep's
 scope over `frontend/src/lib/` instead.
 
+**Closed by E9-04** (2026-10-12). The sentences moved, word for word, into
+`frontend/src/copy/landings.ts` under the `landing.` prefix, which the
+inventory governs as the `landing` surface with its no-line reason recorded;
+`frontend/src/lib/landings.ts` keeps only test ids and copy keys, and a rule in
+the component-string sweep refuses a sentence there.
+
 ## The student survey still renders the eyebrow's double separator
 
 **What is not enforced.** The 2026-09-07 ruling's eyebrow reads
