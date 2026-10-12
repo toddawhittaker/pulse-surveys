@@ -144,7 +144,11 @@ PAYLOAD_MEMBERS = frozenset({STATE, RESPONSE, PUBLISHED_WEEKS, PARTICIPATION})
 # members through `tests/fixtures/student_week.py::read` (`docs/MISTAKES.md`
 # entry 22: a new member reaches every fixture).
 E8_01_MEMBERS = frozenset({"course_label", "streams", "workload_median", "released"})
-MEMBERS_LATER_TICKETS_ADD = E8_01_MEMBERS
+# E9-08 adds `lead_name` (the course's Lead Faculty name, or `null` for a course
+# with no lead), on every state, admitted here by name for the same reason; E9-08's
+# own tests require it (`tests/fixtures/course_page_lead.py`).
+E9_08_MEMBERS = frozenset({"lead_name"})
+MEMBERS_LATER_TICKETS_ADD = E8_01_MEMBERS | E9_08_MEMBERS
 TEXT = "text"
 AUTHOR_NAME = "author_name"
 AUTHOR_ROLE = "author_role"
@@ -364,7 +368,7 @@ def payload_of(answered: Any, what: str) -> dict[str, Any]:
     if not isinstance(body, dict) or not members >= PAYLOAD_MEMBERS or unsettled:
         pytest.fail(
             f"{what} answered {str(body)[:400]!r}. Decision 4 settles `StudentWeekResults` as "
-            f"{sorted(PAYLOAD_MEMBERS)}, and E8's tickets add only "
+            f"{sorted(PAYLOAD_MEMBERS)}, and later tickets (E8-01, E9-08) add only "
             f"{sorted(MEMBERS_LATER_TICKETS_ADD)} beside them."
         )
     response = body[RESPONSE]

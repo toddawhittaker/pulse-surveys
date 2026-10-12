@@ -28,9 +28,11 @@ missing route (`results_route`), or naming M2's `course_id` where it plants a
 policy row first.
 """
 
+import json
 from datetime import timedelta
 
 import pytest
+from fixtures.course_page_lead import LEAD_NAME_MEMBER
 from fixtures.lead_review import UNMAPPED_COHORT
 from fixtures.staff_names import (
     CHAIR_NAME,
@@ -39,7 +41,7 @@ from fixtures.staff_names import (
     TEACHER_NAME,
     UNMAPPED_TEACHER_NAME,
 )
-from fixtures.student_read import response_surface
+from fixtures.student_read import decoded, response_surface
 from fixtures.the_hold import (
     AUTHOR_NAME,
     AUTHOR_ROLE,
@@ -247,7 +249,15 @@ def test_one_instructor_row_reads_published_with_its_text_name_role_and_time(
     assert (
         instant(response[PUBLISHED_AT], "`published_at`") == published_at
     ), f"`published_at` is {response[PUBLISHED_AT]!r}; the row was published at {published_at}."
-    surface = response_surface(answered)
+    # Since E9-08 the payload carries the course's Lead Faculty name in `lead_name`,
+    # in every state (SPEC §2.1: course-level pages carry it in the header), so the
+    # lead may be named there and only there. Everywhere else in the answer, the
+    # published week names nobody beside its author.
+    served = decoded(answered, "The published week's read")
+    assert isinstance(served, dict), f"The published week's read decoded to {served!r}."
+    beside_the_header = {key: value for key, value in served.items() if key != LEAD_NAME_MEMBER}
+    headers = " ".join(f"{name}: {value}" for name, value in answered.headers.items())
+    surface = f"{headers} {json.dumps(beside_the_header, ensure_ascii=False)}"
     others = [name for name in (LEAD_NAME, SIBLING_SECTION_TEACHER_NAME) if name in surface]
     assert not others, f"The published week names {others} beside its author."
 
