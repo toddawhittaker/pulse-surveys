@@ -1,0 +1,241 @@
+import { useEffect, useId, useState, type FormEvent, type JSX } from 'react';
+
+import {
+  addPerson,
+  readPeople,
+  type Order,
+  type PeoplePageView,
+  type PeopleSort,
+} from '../../api/admin';
+import { copy, fillCopy } from '../../copy/adminPeople';
+import { AdminPage, type Gate } from './AdminPage';
+import { ImportPanel } from './ImportPanel';
+import { Field, PersonPanel, roleLabel } from './PersonPanel';
+import { settle } from './outcome';
+import { Pager, SortHeader, nextOrder } from './tableParts';
+
+/** The address of the People & reporting table, under the admin area. */
+export const PEOPLE_ROUTE = '/admin/people';
+
+/** Where a spec finds the page, and its table. */
+export const PEOPLE_TESTID = 'pulse-admin-people';
+export const PEOPLE_TABLE_TESTID = 'pulse-admin-people-table';
+
+const HEADING_ID = 'pulse-admin-people-heading';
+
+type Load =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'error' }
+  | { readonly kind: 'page'; readonly page: PeoplePageView };
+
+/**
+ * `/admin/people` — the People & reporting editor (SPEC §6.3).
+ *
+ * **The rows keep the server's order.** Names sort by last name with titles
+ * stripped, and category by hierarchy rank; both are the server's, so nothing
+ * here sorts, filters or groups what it was sent. A click on a header asks for
+ * the other order and the page shows what comes back.
+ */
+export function PeopleRoute(): JSX.Element {
+  const [sort, setSort] = useState<PeopleSort>('name');
+  const [order, setOrder] = useState<Order>('asc');
+  const [pageNumber, setPageNumber] = useState(1);
+  const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  const [reloads, setReloads] = useState(0);
+  const [gate, setGate] = useState<Gate>(null);
+  const [announcement, setAnnouncement] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void readPeople(sort, order, pageNumber).then((answer) => {
+      if (!live) return;
+      if (answer.kind === 'ok') {
+        setLoad({ kind: 'page', page: answer.value });
+      } else if (answer.kind === 'session-ended' || answer.kind === 'not-your-role') {
+        setGate(answer.kind);
+      } else {
+        setLoad({ kind: 'error' });
+        setAnnouncement(copy('admin_people.page.unavailable'));
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [sort, order, pageNumber, reloads]);
+
+  const reload = (): void => setReloads((count) => count + 1);
+
+  function sortBy(column: PeopleSort): void {
+    setOrder(nextOrder(sort === column, order));
+    setSort(column);
+    setPageNumber(1);
+  }
+
+  const people = load.kind === 'page' ? load.page.people : [];
+  const chosen = people.find((person) => person.person_id === selected) ?? null;
+
+  return (
+    <AdminPage
+      testid={PEOPLE_TESTID}
+      headingId={HEADING_ID}
+      heading={copy('admin_people.page.people_heading')}
+      intro={copy('admin_people.page.people_intro')}
+      announcement={load.kind === 'loading' ? copy('admin_people.page.loading') : announcement}
+      gate={gate}
+    >
+      {load.kind === 'page' ? (
+        <>
+          <p className="pulse-admin-help">
+            {fillCopy('admin_people.page.total_people', { total: String(load.page.total) })}
+          </p>
+          {people.length === 0 ? (
+            <p className="pulse-admin-help">{copy('admin_people.page.people_empty')}</p>
+          ) : (
+            <div className="pulse-admin-scroll">
+              <table className="pulse-admin-table" data-testid={PEOPLE_TABLE_TESTID}>
+                <caption className="pulse-admin-caption">
+                  {copy('admin_people.page.people_table_label')}
+                </caption>
+                <thead>
+                  <tr>
+                    <SortHeader
+                      label={copy('admin_people.page.column_name')}
+                      active={sort === 'name'}
+                      order={order}
+                      onSort={() => sortBy('name')}
+                    />
+                    <SortHeader
+                      label={copy('admin_people.page.column_category')}
+                      active={sort === 'category'}
+                      order={order}
+                      onSort={() => sortBy('category')}
+                    />
+                    <th scope="col">{copy('admin_people.page.column_roles')}</th>
+                    <th scope="col">{copy('admin_people.page.column_login')}</th>
+                    <th scope="col">{copy('admin_people.page.column_actions')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {people.map((person) => (
+                    <tr key={person.person_id}>
+                      <th scope="row">{person.name}</th>
+                      <td>{person.category}</td>
+                      <td>
+                        {person.assignments.length === 0 ? (
+                          copy('admin_people.page.no_roles')
+                        ) : (
+                          <ul className="pulse-admin-assignments">
+                            {person.assignments.map((assignment) => (
+                              <li key={assignment.assignment_id}>
+                                {roleLabel(assignment.role)}
+                                {' · '}
+                                {assignment.reports_to_name === null ||
+                                assignment.reports_to_role === null
+                                  ? copy('admin_people.page.reports_to_nobody')
+                                  : fillCopy('admin_people.page.reports_to', {
+                                      name: assignment.reports_to_name,
+                                      role: roleLabel(assignment.reports_to_role),
+                                    })}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </td>
+                      <td>
+                        {person.web_login_linked
+                          ? copy('admin_people.page.login_linked')
+                          : copy('admin_people.page.login_not_linked')}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="pulse-admin-button-plain"
+                          onClick={() => setSelected(person.person_id)}
+                        >
+                          {fillCopy('admin_people.page.manage', { name: person.name })}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <Pager
+            page={load.page.page}
+            pageSize={load.page.page_size}
+            total={load.page.total}
+            onPage={setPageNumber}
+          />
+        </>
+      ) : null}
+
+      {chosen === null ? null : (
+        <PersonPanel
+          key={chosen.person_id}
+          person={chosen}
+          announce={setAnnouncement}
+          onGate={setGate}
+          onChanged={reload}
+          onClose={() => setSelected(null)}
+        />
+      )}
+
+      <AddPerson announce={setAnnouncement} onGate={setGate} onAdded={reload} />
+      <ImportPanel table="people" announce={setAnnouncement} onGate={setGate} onApplied={reload} />
+    </AdminPage>
+  );
+}
+
+function AddPerson({
+  announce,
+  onGate,
+  onAdded,
+}: {
+  readonly announce: (message: string) => void;
+  readonly onGate: (gate: Exclude<Gate, null>) => void;
+  readonly onAdded: () => void;
+}): JSX.Element {
+  const id = useId();
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('');
+
+  async function submit(event: FormEvent): Promise<void> {
+    event.preventDefault();
+    if (settle(await addPerson(name, category), copy('admin_people.page.person_added'), announce, onGate)) {
+      setName('');
+      setCategory('');
+      onAdded();
+    }
+  }
+
+  return (
+    <section className="pulse-admin-section" aria-labelledby={`${id}-heading`}>
+      <h2 className="pulse-admin-subheading" id={`${id}-heading`}>
+        {copy('admin_people.page.add_heading')}
+      </h2>
+      <form className="pulse-admin-form" onSubmit={(event) => void submit(event)}>
+        <Field id={`${id}-name`} label={copy('admin_people.page.field_name')}>
+          <input
+            id={`${id}-name`}
+            className="pulse-admin-input"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </Field>
+        <Field id={`${id}-category`} label={copy('admin_people.page.field_category')}>
+          <input
+            id={`${id}-category`}
+            className="pulse-admin-input"
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+          />
+        </Field>
+        <button type="submit" className="pulse-admin-button">
+          {copy('admin_people.page.add_submit')}
+        </button>
+      </form>
+    </section>
+  );
+}

@@ -1,0 +1,247 @@
+/* The admin's People & reporting and Lead Faculty mapping screens (SPEC §6.3).
+ *
+ * Tokens only (SPEC §7.6): every colour, face, size, space, radius and shadow is
+ * a `var(--*)` reference into `design/tokens.css`. The register is the Admin
+ * Console's: a full browser page, density allowed, mono as the dominant voice
+ * for the table's labels, 4px on inputs and buttons, 8px on the page card.
+ * Nothing here animates. */
+
+.pulse-admin-page {
+  box-sizing: border-box;
+  width: min(1080px, 100% - var(--space-7));
+  margin: var(--space-6) auto;
+  padding: var(--space-6) var(--space-7);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+}
+
+.pulse-admin-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-4);
+  font-weight: 600;
+}
+
+.pulse-admin-intro,
+.pulse-admin-help {
+  margin: 0 0 var(--space-3);
+  color: var(--spruce-60);
+  font-size: var(--text-1);
+}
+
+/* In the page from the first render so a screen reader announces what arrives
+   in it, and it takes no space while it is empty. */
+.pulse-admin-announcement {
+  margin: 0;
+  font-size: var(--text-1);
+}
+
+.pulse-admin-announcement:not(:empty) {
+  margin: 0 0 var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background: var(--chalk);
+  border-left: 2px solid var(--marigold);
+  border-radius: var(--radius-input);
+}
+
+.pulse-admin-link {
+  color: var(--marigold-deep);
+  text-decoration: underline;
+}
+
+.pulse-admin-section {
+  margin: var(--space-6) 0 0;
+}
+
+.pulse-admin-subheading {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-3);
+  font-weight: 600;
+}
+
+.pulse-admin-panel {
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  background: var(--chalk);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+}
+
+/* ---- Tables --------------------------------------------------------------- */
+
+.pulse-admin-scroll {
+  overflow-x: auto;
+}
+
+.pulse-admin-table {
+  width: 100%;
+  margin: var(--space-3) 0;
+  border-collapse: collapse;
+  font-size: var(--text-1);
+}
+
+.pulse-admin-table caption {
+  padding: var(--space-2) 0;
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.pulse-admin-table th,
+.pulse-admin-table td {
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--hairline);
+  text-align: left;
+  vertical-align: top;
+}
+
+.pulse-admin-table thead th {
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.pulse-admin-table tbody th {
+  font-weight: 500;
+}
+
+.pulse-admin-sort {
+  padding: 0;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.pulse-admin-assignments {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pulse-admin-assignment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.pulse-admin-role {
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+}
+
+.pulse-admin-pager {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin: var(--space-3) 0;
+}
+
+.pulse-admin-pager-place {
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+}
+
+/* ---- Forms and controls --------------------------------------------------- */
+
+.pulse-admin-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-end;
+  margin: var(--space-3) 0;
+}
+
+.pulse-admin-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.pulse-admin-field-inline {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.pulse-admin-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  margin: var(--space-3) 0;
+}
+
+.pulse-admin-label {
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pulse-admin-input {
+  padding: var(--space-2) var(--space-3);
+  background: var(--paper);
+  border: 1px solid var(--input-edge);
+  border-radius: var(--radius-input);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+}
+
+.pulse-admin-button {
+  padding: var(--space-2) var(--space-4);
+  background: var(--spruce);
+  border: 1px solid var(--spruce);
+  border-radius: var(--radius-input);
+  color: var(--chalk);
+  font-family: var(--font-body);
+  font-size: var(--text-2);
+}
+
+.pulse-admin-button-plain {
+  padding: var(--space-2) var(--space-3);
+  background: none;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+}
+
+.pulse-admin-button-plain[disabled] {
+  color: var(--spruce-60);
+}
+
+/* ---- The import's diff ---------------------------------------------------- */
+
+.pulse-admin-diff {
+  margin: var(--space-4) 0 0;
+}
+
+.pulse-admin-diff-heading {
+  margin: var(--space-4) 0 var(--space-2);
+  font-family: var(--font-display);
+  font-size: var(--text-2);
+  font-weight: 600;
+}
+
+.pulse-admin-diff-summary {
+  margin: 0 0 var(--space-3);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+}

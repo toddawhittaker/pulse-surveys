@@ -1,0 +1,134 @@
+import { useEffect, useState, type JSX } from 'react';
+
+import {
+  readMappings,
+  type MappingPageView,
+  type MappingSort,
+  type Order,
+} from '../../api/admin';
+import { copy, fillCopy } from '../../copy/adminPeople';
+import { AdminPage, type Gate } from './AdminPage';
+import { ImportPanel } from './ImportPanel';
+import { Pager, SortHeader, nextOrder } from './tableParts';
+
+/** The address of the Lead Faculty mapping table, under the admin area. */
+export const MAPPINGS_ROUTE = '/admin/lead-mappings';
+
+/** Where a spec finds the page, and its table. */
+export const MAPPINGS_TESTID = 'pulse-admin-mappings';
+export const MAPPINGS_TABLE_TESTID = 'pulse-admin-mappings-table';
+
+const HEADING_ID = 'pulse-admin-mappings-heading';
+
+type Load =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'error' }
+  | { readonly kind: 'page'; readonly page: MappingPageView };
+
+/**
+ * `/admin/lead-mappings` — which person leads each course (SPEC §6.3).
+ *
+ * The rows are the server's, in the server's order; a course with no lead has
+ * no row, and falls to its chair, which the intro says and the import's diff
+ * names course by course.
+ */
+export function MappingsRoute(): JSX.Element {
+  const [sort, setSort] = useState<MappingSort>('course');
+  const [order, setOrder] = useState<Order>('asc');
+  const [pageNumber, setPageNumber] = useState(1);
+  const [load, setLoad] = useState<Load>({ kind: 'loading' });
+  const [reloads, setReloads] = useState(0);
+  const [gate, setGate] = useState<Gate>(null);
+  const [announcement, setAnnouncement] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    void readMappings(sort, order, pageNumber).then((answer) => {
+      if (!live) return;
+      if (answer.kind === 'ok') {
+        setLoad({ kind: 'page', page: answer.value });
+      } else if (answer.kind === 'session-ended' || answer.kind === 'not-your-role') {
+        setGate(answer.kind);
+      } else {
+        setLoad({ kind: 'error' });
+        setAnnouncement(copy('admin_people.page.unavailable'));
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [sort, order, pageNumber, reloads]);
+
+  function sortBy(column: MappingSort): void {
+    setOrder(nextOrder(sort === column, order));
+    setSort(column);
+    setPageNumber(1);
+  }
+
+  return (
+    <AdminPage
+      testid={MAPPINGS_TESTID}
+      headingId={HEADING_ID}
+      heading={copy('admin_people.page.mappings_heading')}
+      intro={copy('admin_people.page.mappings_intro')}
+      announcement={load.kind === 'loading' ? copy('admin_people.page.loading') : announcement}
+      gate={gate}
+    >
+      {load.kind === 'page' ? (
+        <>
+          <p className="pulse-admin-help">
+            {fillCopy('admin_people.page.total_mappings', { total: String(load.page.total) })}
+          </p>
+          {load.page.mappings.length === 0 ? (
+            <p className="pulse-admin-help">{copy('admin_people.page.mappings_empty')}</p>
+          ) : (
+            <div className="pulse-admin-scroll">
+              <table className="pulse-admin-table" data-testid={MAPPINGS_TABLE_TESTID}>
+                <caption className="pulse-admin-caption">
+                  {copy('admin_people.page.mappings_table_label')}
+                </caption>
+                <thead>
+                  <tr>
+                    <SortHeader
+                      label={copy('admin_people.page.column_course')}
+                      active={sort === 'course'}
+                      order={order}
+                      onSort={() => sortBy('course')}
+                    />
+                    <SortHeader
+                      label={copy('admin_people.page.column_lead')}
+                      active={sort === 'name'}
+                      order={order}
+                      onSort={() => sortBy('name')}
+                    />
+                  </tr>
+                </thead>
+                <tbody>
+                  {load.page.mappings.map((line) => (
+                    <tr key={line.course_id}>
+                      <th scope="row">{line.course}</th>
+                      <td>{line.name}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <Pager
+            page={load.page.page}
+            pageSize={load.page.page_size}
+            total={load.page.total}
+            onPage={setPageNumber}
+          />
+        </>
+      ) : null}
+
+      <ImportPanel
+        table="mappings"
+        announce={setAnnouncement}
+        onGate={setGate}
+        onApplied={() => setReloads((count) => count + 1)}
+      />
+    </AdminPage>
+  );
+}
