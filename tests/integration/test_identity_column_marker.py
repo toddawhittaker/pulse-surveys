@@ -2747,9 +2747,20 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "one.",
     ),
     "audit_log": CarriesNothing(
-        ("action", "actor_person_id", "case_id", "id", "occurred_at", "subject_user_id"),
+        (
+            "action",
+            "actor_person_id",
+            "case_id",
+            "id",
+            "occurred_at",
+            "role",
+            "scope_node_id",
+            "subject_person_id",
+            "subject_user_id",
+        ),
         "References to people and no identity payload: an actor, a subject, a case, an action "
-        "token and a timestamp.",
+        "token and a timestamp; since E9-02, a subject person, and the role and scope node of an "
+        "admin write.",
     ),
     "enrollment": CarriesNothing(
         (

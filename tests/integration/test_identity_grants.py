@@ -507,10 +507,35 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     owner, `pulse_staff_name_definer`, holds nothing on it
 #     (`test_the_staff_name_definer_answers_names_and_never_other_people.py`).
 #     The count moves from ten to eleven.
+#   - The twelve people-graph definers, E9-02's (ADR 0200): nine writes —
+#     `admin_create_person`, `admin_edit_person`, `admin_grant_role`,
+#     `admin_revoke_role`, `admin_set_reports_to`, `admin_map_lead_course`,
+#     `admin_unmap_lead_course`, `admin_link_web_login` and
+#     `admin_unlink_web_login` — and three reads, `admin_read_people`,
+#     `admin_read_role_assignments` and `admin_read_lead_mappings`. SPEC §6.3 puts
+#     the People & reporting editor and the Lead Faculty mapping table in the
+#     admin console, and `pulse_app` holds no write on any of the four tables they
+#     touch (`person`, `role_assignment`, `lead_faculty_mapping`,
+#     `web_login_subject`) and must not: a grant cannot refuse an `INSTRUCTOR`
+#     row, cannot require the caller to be an admin, and cannot make a write and
+#     its `audit_log` row one transaction. So each is a function whose body checks
+#     that its first argument, the acting admin's person key, holds a live `ADMIN`
+#     assignment, refuses the LMS-owned `INSTRUCTOR` role, and writes its audit row
+#     with no handler around it. **What the database check is worth, said here
+#     because this connection supplies the key:** `pulse_app` asserts which admin
+#     is acting and the database cannot tell whether that is the session's own
+#     person, so the route (`require_admin`, the key from the verified session) is
+#     the real check, and these functions stop writes that bypass them and writes
+#     naming a non-admin key, nothing more. The reads answer staff records only:
+#     names, categories, the web-login issuer, assignments, edges and mappings,
+#     never `person.user_id`, `idp_subject`, a student or any `user_identity`
+#     column. Their owner is a NOLOGIN role of its own,
+#     `pulse_people_graph_definer`, which holds nothing on `user_identity`.
+#     The count moves from eleven to twenty-three.
 #
 # What is *not* here is the point of the list: the functions of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
-# **twelfth** entry appearing here is a new door into identity that some later
+# **twenty-fourth** entry appearing here is a new door into identity that some later
 # ticket opened without arguing for it. The number moves only in a change that
 # writes the sentence admitting the entry, as each of the eleven above did; an
 # entry arriving without one is the thing this inventory exists to make
@@ -532,6 +557,18 @@ SANCTIONED_APPLICATION_EXECUTE = (
     "end_teaching_instructor",
     "route_moderation_verdict",
     "section_staff_names",
+    "admin_create_person",
+    "admin_edit_person",
+    "admin_grant_role",
+    "admin_revoke_role",
+    "admin_set_reports_to",
+    "admin_map_lead_course",
+    "admin_unmap_lead_course",
+    "admin_link_web_login",
+    "admin_unlink_web_login",
+    "admin_read_people",
+    "admin_read_role_assignments",
+    "admin_read_lead_mappings",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
@@ -851,9 +888,19 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # a writer holds the role they state, and writes nothing. `pulse_app` holds no
 # `EXECUTE` on either function — a trigger fires without it — so neither is in
 # `SANCTIONED_APPLICATION_EXECUTE`, and a grant of one would be red there.
+#
+# **E9-02 adds a ninth, `pulse_people_graph_definer`**, the owner of the twelve
+# people-graph definers (ADR 0200). It is the first owner that writes the people
+# graph, and what it may reach is pinned in
+# `tests/integration/test_the_people_graph_definers_answer_only_an_admin.py::
+# test_the_people_graph_definers_owner_holds_exactly_what_its_writes_need`:
+# column-scoped reads and writes on `person`, the writes on `role_assignment`,
+# `lead_faculty_mapping` and `web_login_subject` its bodies make, an `INSERT` on
+# five `audit_log` columns, and nothing on `user_identity`.
 MODERATION_DEFINER_ROLE = "pulse_moderation_definer"
 STAFF_NAME_DEFINER_ROLE = "pulse_staff_name_definer"
 RESPONSE_GUARD_DEFINER_ROLE = "pulse_response_guard_definer"
+PEOPLE_GRAPH_DEFINER_ROLE = "pulse_people_graph_definer"
 IDENTITY_DEFINER_ROLES = (
     RESOLVE_DEFINER_ROLE,
     "pulse_roster_definer",
@@ -863,6 +910,7 @@ IDENTITY_DEFINER_ROLES = (
     MODERATION_DEFINER_ROLE,
     STAFF_NAME_DEFINER_ROLE,
     RESPONSE_GUARD_DEFINER_ROLE,
+    PEOPLE_GRAPH_DEFINER_ROLE,
 )
 
 # How the two halves are called. The record's third argument is a null case id:
