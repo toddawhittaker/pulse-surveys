@@ -24,8 +24,8 @@ could disagree with it. A policy records the role it was set under, which is how
 a person who both leads courses and chairs the department is keyed (ADR 0192).
 
 **The author and the setter are `person` keys, never names.** A name reaches a
-reader only through the staff-name definer (`views_sql/section_staff_names_v001.sql`,
-ADR 0191), whose reader check decides who may read it.
+reader only through the staff-name definer (`views_sql/section_staff_names_v001.sql`
+and `_v002.sql`, ADRs 0191 and 0201), whose reader check decides who may read it.
 
 **Who may write a row is checked when it is written** (ADR 0192,
 `views_sql/response_loop_guard_v001.sql`). A `BEFORE INSERT` trigger on each

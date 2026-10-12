@@ -30,8 +30,9 @@ whose row cannot be written is not committed. Neither runtime role holds
 (`subject_user_id`) and no person written about; an admin write names the person
 written about (`subject_person_id`) and, for an assignment or a mapping, the
 role and the scope node, and names no student. `subject_user_id` was `NOT NULL`
-while the reveal was the only action; it is nullable now, and the check
-`a_reveal_names_its_student` keeps a reveal from losing its student.
+while the reveal was the only action; it is nullable now, and two two-way checks
+hold each shape: a row names a student exactly when it is a reveal, and names a
+person exactly when it is not.
 
 **A row has to be committed before any name is handed over, and that is what
 makes it a record rather than a courtesy.**
@@ -116,15 +117,22 @@ class AuditLog(UuidPrimaryKey, Base):
     __tablename__ = "audit_log"
     __table_args__ = (
         # Relaxing `subject_user_id` for the admin's writes must not let a reveal
-        # lose its student (E9-02's known trap).
+        # lose its student (E9-02's known trap), and an admin write names no
+        # student. Two-way, so each row has exactly one shape.
         CheckConstraint(
-            "action <> 'IDENTITY_REVEAL' OR subject_user_id IS NOT NULL",
+            "(action = 'IDENTITY_REVEAL') = (subject_user_id IS NOT NULL)",
             name="a_reveal_names_its_student",
         ),
-        # Every admin write names the person it was about.
+        # Every admin write names the person it was about, and a reveal names
+        # none.
         CheckConstraint(
-            "action = 'IDENTITY_REVEAL' OR subject_person_id IS NOT NULL",
+            "(action = 'IDENTITY_REVEAL') = (subject_person_id IS NULL)",
             name="an_admin_write_names_its_person",
+        ),
+        # Only an edge write names a parent.
+        CheckConstraint(
+            "action = 'REPORTS_TO_SET' OR parent_assignment_id IS NULL",
+            name="only_an_edge_write_names_a_parent",
         ),
     )
 
@@ -153,14 +161,17 @@ class AuditLog(UuidPrimaryKey, Base):
     # The person an admin's people-graph write was about: the grantee, the
     # revoked or re-pointed assignment's holder, the lead mapped or unmapped, or
     # the person linked or unlinked (ADR 0200). NULL on a reveal. RESTRICT, as
-    # `actor_person_id` is and for the same reason.
+    # `actor_person_id` is and for the same reason. Not indexed: nothing reads by
+    # it yet, and an index arrives with the first read that needs one.
     subject_person_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("person.id", ondelete="RESTRICT"), nullable=True, index=True
+        ForeignKey("person.id", ondelete="RESTRICT"), nullable=True
     )
     # For an assignment write, the assignment's role and its scope node; for a
     # mapping write, `LEAD_FACULTY` and the course. A Care grant is told apart by
-    # this role, so E10's access log can show it. NULL on a reveal and on a
-    # web-login linkage.
+    # this role, so E10's access log can show it. On a web-login linkage, the
+    # privilege the linked person holds at the time: `CARE`, else `ADMIN`, else
+    # NULL, so a login linked to a Care holder reads as reaching Care. NULL on a
+    # reveal.
     role: Mapped[AssignmentRole | None] = mapped_column(
         Enum(AssignmentRole, name="assignment_role"), nullable=True
     )
@@ -168,6 +179,11 @@ class AuditLog(UuidPrimaryKey, Base):
     # level rule `SCOPE_GRAIN_RULE` in `app.models.identity` sets out. The row is a
     # record of what was written, and it must outlive a node deleted later.
     scope_node_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
+    # On a `REPORTS_TO_SET` row, the new parent assignment, or NULL for a clear.
+    # No foreign key: the parent may be revoked later, and the row records what
+    # was written. The `only_an_edge_write_names_a_parent` check keeps it NULL on
+    # every other action.
+    parent_assignment_id: Mapped[UUID | None] = mapped_column(Uuid, nullable=True)
     # §4 asks for "actor, timestamp, and case". The case is nullable and carries
     # no foreign key because `threat_case` does not exist until E10 — E0-10
     # ships the reveal as a proof of mechanism, before there is any case model

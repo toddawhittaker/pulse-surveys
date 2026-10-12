@@ -86,7 +86,8 @@ GRANT INSERT (person_id, course_id) ON public.lead_faculty_mapping TO pulse_peop
 GRANT SELECT, DELETE ON public.web_login_subject TO pulse_people_graph_definer;
 GRANT INSERT (idp_issuer, idp_subject, person_id)
     ON public.web_login_subject TO pulse_people_graph_definer;
-GRANT INSERT (action, actor_person_id, subject_person_id, role, scope_node_id)
+GRANT INSERT (action, actor_person_id, subject_person_id, role, scope_node_id,
+              parent_assignment_id)
     ON public.audit_log TO pulse_people_graph_definer;
 
 
@@ -346,18 +347,44 @@ BEGIN
     -- ADR 0044's trigger and the `care_reports_to_nobody` check both refuse with
     -- `check_violation`. So does the trigger's REPEATABLE READ refusal, which is
     -- therefore also reported as an edge that does not climb (see the header).
+    --
+    -- A parent revoked by another transaction after the check above surfaces as
+    -- the foreign key's `foreign_key_violation`. Today that fires first: the
+    -- foreign key's trigger and ADR 0044's are both AFTER ROW triggers on this
+    -- table, and PostgreSQL fires them in name order, so `RI_ConstraintTrigger_...`
+    -- runs before `role_assignment_supervision_edge_is_legal`. So the answer does
+    -- not hang on that order, the `check_violation` handler first asks again
+    -- whether the parent exists, at a fresh READ COMMITTED snapshot, and answers
+    -- `no_such_assignment` when it does not.
     BEGIN
         UPDATE public.role_assignment AS child
            SET reports_to = in_reports_to
          WHERE child.id = in_assignment_id;
     EXCEPTION
+        WHEN foreign_key_violation THEN
+            RAISE EXCEPTION 'admin_people.no_such_assignment' USING ERRCODE = 'raise_exception';
         WHEN check_violation THEN
+            IF in_reports_to IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM public.role_assignment AS parent WHERE parent.id = in_reports_to
+            ) THEN
+                RAISE EXCEPTION 'admin_people.no_such_assignment'
+                    USING ERRCODE = 'raise_exception';
+            END IF;
             RAISE EXCEPTION 'admin_people.edge_does_not_climb' USING ERRCODE = 'raise_exception';
     END;
 
-    INSERT INTO public.audit_log (action, actor_person_id, subject_person_id, role, scope_node_id)
+    -- The child was revoked by another transaction after the read above: the
+    -- UPDATE waited on its row lock and then matched nothing.
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'admin_people.no_such_assignment' USING ERRCODE = 'raise_exception';
+    END IF;
+
+    -- The new parent, or NULL for a clear. No foreign key on the audit column:
+    -- the parent may be revoked later, and the row records what was written.
+    INSERT INTO public.audit_log
+        (action, actor_person_id, subject_person_id, role, scope_node_id, parent_assignment_id)
     VALUES ('REPORTS_TO_SET', in_actor_person_id, child_person_id, child_role,
-            child_scope_node_id);
+            child_scope_node_id, in_reports_to);
 END;
 $$;
 
@@ -458,6 +485,7 @@ SET search_path = pg_catalog, public, pg_temp
 AS $$
 DECLARE
     refused_constraint text;
+    linked_privilege public.assignment_role;
 BEGIN
     IF NOT EXISTS (
         SELECT 1
@@ -488,8 +516,19 @@ BEGIN
             RAISE;
     END;
 
+    -- The privilege the linked person holds when the row is written, so a login
+    -- linked to a Care or Admin holder reads as reaching that privilege (fix round
+    -- F1). CARE wins over ADMIN; anything else is NULL.
+    SELECT CASE
+               WHEN bool_or(held.role = 'CARE') THEN 'CARE'::public.assignment_role
+               WHEN bool_or(held.role = 'ADMIN') THEN 'ADMIN'::public.assignment_role
+           END
+      INTO linked_privilege
+      FROM public.role_assignment AS held
+     WHERE held.person_id = in_person_id;
+
     INSERT INTO public.audit_log (action, actor_person_id, subject_person_id, role, scope_node_id)
-    VALUES ('WEB_LOGIN_LINKAGE_CHANGED', in_actor_person_id, in_person_id, NULL, NULL);
+    VALUES ('WEB_LOGIN_LINKAGE_CHANGED', in_actor_person_id, in_person_id, linked_privilege, NULL);
 END;
 $$;
 
@@ -504,6 +543,8 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = pg_catalog, public, pg_temp
 AS $$
+DECLARE
+    linked_privilege public.assignment_role;
 BEGIN
     IF NOT EXISTS (
         SELECT 1
@@ -524,8 +565,19 @@ BEGIN
         RAISE EXCEPTION 'admin_people.person_not_linked' USING ERRCODE = 'raise_exception';
     END IF;
 
+    -- The privilege the linked person holds when the row is written, so a login
+    -- linked to a Care or Admin holder reads as reaching that privilege (fix round
+    -- F1). CARE wins over ADMIN; anything else is NULL.
+    SELECT CASE
+               WHEN bool_or(held.role = 'CARE') THEN 'CARE'::public.assignment_role
+               WHEN bool_or(held.role = 'ADMIN') THEN 'ADMIN'::public.assignment_role
+           END
+      INTO linked_privilege
+      FROM public.role_assignment AS held
+     WHERE held.person_id = in_person_id;
+
     INSERT INTO public.audit_log (action, actor_person_id, subject_person_id, role, scope_node_id)
-    VALUES ('WEB_LOGIN_LINKAGE_CHANGED', in_actor_person_id, in_person_id, NULL, NULL);
+    VALUES ('WEB_LOGIN_LINKAGE_CHANGED', in_actor_person_id, in_person_id, linked_privilege, NULL);
 END;
 $$;
 

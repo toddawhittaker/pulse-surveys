@@ -111,6 +111,8 @@ AUDIT_COLUMNS = (
     "case_id",
     "role",
     "scope_node_id",
+    # Fix round 1, F2: the new parent of a `REPORTS_TO_SET` row, NULL on every other.
+    "parent_assignment_id",
 )
 
 

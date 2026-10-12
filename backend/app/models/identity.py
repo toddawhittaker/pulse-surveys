@@ -687,9 +687,10 @@ class RoleAssignment(UuidPrimaryKey, Base):
     # display label on a roll-up (§2.1) rather than a hot path, and five indexes
     # on five mostly-null columns would be paid for on every write. **One read
     # starts from a section on a student's path**: the staff-name definer
-    # (`views_sql/section_staff_names_v001.sql`) and
+    # (`views_sql/section_staff_names_v001.sql` and `_v002.sql`) and
     # `authz.teaching_instructors_of` look up a section's instructors by
-    # `section_id`. ADR 0191 records its `EXPLAIN` at twenty thousand rows (a
+    # `section_id`. v002 also reads a department's chair and a college's dean
+    # by `department_id` and `college_id`, the display labels named above. ADR 0191 records its `EXPLAIN` at twenty thousand rows (a
     # sequential scan of about a millisecond) and the partial index on
     # `section_id` for `INSTRUCTOR` rows to add if the table grows far past that.
     institution_id: Mapped[UUID | None] = mapped_column(

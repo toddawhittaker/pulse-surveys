@@ -42,9 +42,16 @@ one `audit_log` row in the same call, with no exception handler around the
 insert**, so a write whose row cannot be written is rolled back. The row names
 the action, the acting admin, the person written about (`subject_person_id`, new)
 and, for an assignment or a mapping, the role and scope node (`role` and
-`scope_node_id`, new). `subject_user_id` became nullable, and two named checks
-keep a reveal naming its student and an admin write naming its person. Creating
-and editing a person record is not audited.
+`scope_node_id`, new). An edge row also names the new parent
+(`parent_assignment_id`, new, no foreign key because the parent may be revoked
+later; NULL for a clear and on every other action, by a check). A linkage row
+carries, as `role`, the privilege the linked person holds when it is written:
+`CARE`, else `ADMIN`, else NULL. So a login linked to a Care holder reads as
+reaching Care. `subject_user_id` became nullable, and two two-way checks hold the
+two shapes: a row names a student exactly when it is a reveal, and names a person
+exactly when it is not. `subject_person_id` has a foreign key and no index; an
+index arrives with the first read that needs one. Creating and editing a person
+record is not audited.
 
 **Revoking deletes.** The existing `RESTRICT` on `reports_to` refuses to delete an
 assignment others report to, and the definer turns that refusal into a named one
@@ -54,6 +61,17 @@ carrying the children's count.
 REPEATABLE READ refusal.** That refusal is reported as `edge_does_not_climb`.
 The application sets no isolation level, so it runs at PostgreSQL's default,
 READ COMMITTED, and this is accepted rather than told apart.
+
+**An edge write that loses a race answers `no_such_assignment`.** If the child is
+revoked while the update waits on its row lock, the update matches nothing and an
+`IF NOT FOUND` refuses before any audit row. If the parent is revoked first, the
+foreign key raises `foreign_key_violation`, which is mapped to the same key.
+Today that fires before ADR 0044's trigger, because PostgreSQL fires a table's
+AFTER ROW triggers in name order and `RI_ConstraintTrigger_...` sorts before
+`role_assignment_supervision_edge_is_legal`. The answer does not rest on that
+order: the `check_violation` handler first asks again, at a fresh READ COMMITTED
+snapshot, whether the parent exists, and answers `no_such_assignment` when it does
+not.
 
 ## Alternatives rejected
 
@@ -71,9 +89,11 @@ READ COMMITTED, and this is accepted rather than told apart.
 - A `pulse_app` session holding any admin's person key can grant anybody Care or
   Admin. The audit row records it; nothing refuses it. The reveal definers are
   still `pulse_care`'s, not `pulse_app`'s.
-- One action covers each pair (set and clear, map and unmap, link and unlink),
-  and the edge row does not name the new parent. A parent column added later
-  cannot fill in earlier rows.
+- One action covers each pair (set and clear, map and unmap, link and unlink).
+- A linkage row records no login subject. `idp_subject` is marked
+  identity-bearing on its table and stays out of `audit_log`; the identity
+  provider's own logs answer whose login was linked. The row's `role` records
+  only the privilege the linked person held, not a later change to it.
 - The admin cannot read a linked person's `idp_subject`, only whether one is
   linked and by which issuer.
 - No refusal for a duplicate grant, revoking the last admin, a blank name or an
