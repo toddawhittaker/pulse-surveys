@@ -996,8 +996,8 @@ def _clamped_subtree(session: Session, root: _Assignment) -> list[_Assignment]:
     ]:
         if levels_walked == _DEEPEST_CHAIN:
             raise RuntimeError(
-                f"assignment {root.assignment_id} has assignments reporting to it more than "
-                f"{_DEEPEST_CHAIN} levels down. The supervision rank rule (ADR 0044) makes that "
+                f"assignment {root.assignment_id} heads a supervision chain longer than "
+                f"{_DEEPEST_CHAIN} assignments. The supervision rank rule (ADR 0044) makes that "
                 "impossible, so the rule is not holding, and the walk stops rather than run "
                 "without a bound."
             )
