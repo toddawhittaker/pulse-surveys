@@ -1149,6 +1149,29 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/sections/{section_id}/published-weeks": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The course weeks of a section in my purview with a report
+         * @description The published course weeks of one section, for the drill-down to open its latest.
+         *
+         *     Behind the same purview as the drill-down itself, with the same 404 and
+         *     sentence for a section outside it and a section that does not exist.
+         */
+        readonly get: operations["read_drill_down_weeks_leadership_sections__section_id__published_weeks_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/admin/people": {
         readonly parameters: {
             readonly query?: never;
@@ -4842,6 +4865,37 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["InstructorReport"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_drill_down_weeks_leadership_sections__section_id__published_weeks_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PublishedWeeks"];
                 };
             };
             /** @description Validation Error */

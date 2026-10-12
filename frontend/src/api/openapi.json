@@ -1825,6 +1825,50 @@
         }
       }
     },
+    "/leadership/sections/{section_id}/published-weeks": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "The course weeks of a section in my purview with a report",
+        "description": "The published course weeks of one section, for the drill-down to open its latest.\n\nBehind the same purview as the drill-down itself, with the same 404 and\nsentence for a section outside it and a section that does not exist.",
+        "operationId": "read_drill_down_weeks_leadership_sections__section_id__published_weeks_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedWeeks"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/admin/people": {
       "get": {
         "tags": [
