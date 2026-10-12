@@ -172,6 +172,8 @@ earlier weeks" list now offers Keep, Exclude and Undo, with a page test.
 
 ## Deans, vice presidents and the assistant dean have no review queue
 
+**Closed by E9-09** (#340, merged as eef1dcfc), by breakdown decision 12: the three roles read the exclusion log and the response policy over their purview, and the review queue stays the lead's and chair's (ADR 0206).
+
 ADR 0190 refuses those three roles the review queue and the exclusion log with a
 403 until E9's transitive purview exists, since a dean or vice president is not a
 reviewer SPEC §5.2 names and an assistant dean's own grant is empty until then.
@@ -205,6 +207,8 @@ keyboard focus finding E6-10 owns. These are the rest, each with an owner.
 
 ### The import cycle between moderation and the report services
 
+**Re-carried to E10** by E9-13 (`../e10/carried-from-e9.md`): E10's Care sweep restructures the module, so the split, the cycle and what is left of the redundancies go with it.
+
 `services/moderation.py` imports its report-service helpers inside functions,
 because `report_comments` imports `holds_no_verdict` from it and `reporting`
 imports `report_comments`. The deferred imports work but hide the dependency.
@@ -215,6 +219,8 @@ three modules is at module level.
 
 ### `services/moderation.py` does two jobs
 
+**Re-carried to E10** by E9-13 (`../e10/carried-from-e9.md`): E10's Care sweep restructures the module, so the split, the cycle and what is left of the redundancies go with it.
+
 The module writes verdicts and runs the sweep, and it also holds people's
 decisions, the review queue and the exclusion log. **Owner:** the next ticket
 that touches `services/moderation.py`. **Done when:** verdicts and the sweep stay
@@ -222,6 +228,8 @@ in `moderation.py`, decisions, the queue and the log move to
 `moderation_review.py`, and SPEC §13's module list has a line for the new file.
 
 ### Small redundancies in `services/moderation.py`
+
+**Re-carried to E10** by E9-13 (`../e10/carried-from-e9.md`): E10's Care sweep restructures the module, so the split, the cycle and what is left of the redundancies go with it.
 
 `review_queue`, `decide_as_leader` and `exclusion_log` check `person_id is None`
 and then call `_review_courses`, which checks it again; `decide_as_leader`'s

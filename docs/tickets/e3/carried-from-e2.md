@@ -136,6 +136,8 @@ forever; repair needs an operator surface and a rebind rule. Source:
 
 ## A web-login linkage can only be provisioned by the demo seed or by hand
 
+**Closed in E9.** E9-02 (#334, merged as 113f21b0) adds the admin-checked linkage definer; E9-06 (#338, 3dc0c087) and E9-10 (#343, 26f5537d) put it in the editor.
+
 `web_login_subject` is written by nobody the application role can reach, so a
 person who joins between seeds cannot use the web door until the psql in ADR
 0097 is run by hand. Source: `docs/tickets/e1/deferred.md`, E1-12 item 2.
@@ -143,6 +145,8 @@ person who joins between seeds cannot use the web door until the psql in ADR
 **Done when:** the deferred entry's.
 
 ## Logout and back-channel logout
+
+**Logout closed by E9-04** (#336, merged as f57019c5). Back-channel logout moves to E13 (ruled 2026-10-12, SPEC §14.3).
 
 No epic in SPEC §14.3 names logout; sessions are short-lived JWTs that expire
 rather than end.
@@ -236,6 +240,8 @@ either states that it uses only the judged write shapes or extends the judging
 to the ones it needs.
 
 ## The E1 generative purview coverage note
+
+**Closed by E9-01** (#335, merged as 0929ccd2): Hypothesis properties over generated supervision forests (ADR 0199).
 
 SPEC §4.1 item 2 is proven on hand-built fixtures only; there is no generative
 coverage of the purview union. That stands while the union computation is E9's,
