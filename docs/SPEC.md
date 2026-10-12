@@ -471,6 +471,7 @@ pulse-surveys/
 │       │   ├── comparison_sets.py  # the named-set management API, and a set's figures for one leader
 │       │   ├── response_loop.py    # a student's week state and the response published to it
 │       │   ├── moderation.py       # the Lead Faculty review queue, a leader's decision, the exclusion log
+│       │   ├── rollup.py           # the leadership roll-up tree and one node's figures and attention cards (§5.5)
 │       │   └── session.py          # the role switcher: the views a session holds, a switch, the new session
 │       │
 │       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
@@ -521,6 +522,7 @@ pulse-surveys/
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
 │       │   ├── response_loop.py    # the staff names of a set of sections for a reader of them, and a course page's lead; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)
 │       │   ├── student_results.py  # a student's week results (§5.4)
+│       │   ├── rollups.py          # the leadership roll-ups: the tree over a purview, a node's figures, the §5.6 attention cards (§5.5)
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration
