@@ -26,6 +26,18 @@ the old `jti`. A session holds one role, so a Care session is never also a
 leadership one, and a gate reads the role off the session, never off the
 person ([0196](0196-the-leadership-gate-answers-another-role-403-marked-insufficient-scope.md)).
 
+**A switch is not a refresh** (fix round, ruling G1). The switched token keeps
+the old token's `exp` exactly (`issue_session(..., expires_at=claims.exp)`;
+`iat` is the time of the switch), and a switch to the session's own role is
+refused like any role not held. So no sequence of switches keeps a session,
+or a stolen token, alive past the hour it was first issued for.
+
+**A token switches once** (ruling G2). The switch revokes the old `jti` before
+it issues, in one transaction, with `ON CONFLICT DO NOTHING RETURNING jti`. A
+second switch with the same token waits on the first one's row, gets no row
+back once the first commits, and answers the expired-token 401 with nothing
+issued.
+
 **Ending a session is a row in `revoked_session`**: the `jti` (primary key)
 until the token's own `exp`. Logout and the switch write it with an insert that
 does nothing on conflict, and the same transaction deletes rows past their
@@ -67,5 +79,10 @@ the cookie.
 - The first landing is unchanged: `LANDING_PRECEDENCE` still decides it, and
   the switcher offers the other views in the same order, the student view
   last and only at the launch door.
+- **Accepted residue (ruling G3): a switch racing a logout.** If the switch's
+  revocation lands first, logout still answers 204 while the switched session
+  lives. The person asked for both, and the switched session holds one role
+  they really have and keeps the old `exp`, so it ends no later than the
+  session they signed out of would have.
 - A session ended at the identity provider still lives until its token
   expires; back-channel logout is E13's.
