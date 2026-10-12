@@ -128,37 +128,13 @@ PLAN_SHAPES = {
 }
 
 
-@pytest.mark.parametrize(
-    "shape",
-    [
-        pytest.param(
-            "an instructor edge into a lead on another person's course",
-            marks=pytest.mark.invariant,
-            id="instructor-edge-into-a-lead",
-        ),
-        pytest.param("an assistant-dean insertion", id="assistant-dean-insertion"),
-        pytest.param("a two-hat person", id="two-hat-person"),
-        pytest.param("a cross-department led course", id="cross-department-lead"),
-    ],
-)
-def test_the_generated_worlds_draw_each_shape_the_ticket_names(shape: str) -> None:
-    """Done-when 4's last sentence, and the scope half of done-when 6's.
+INSTRUCTOR_EDGE = "an instructor edge into a lead on another person's course"
 
-    "The generator draws the instructor-edge-into-a-lead case, and a test asserts
-    that it does (MISTAKES entry 15)." The other three shapes are the ones the
-    ticket lists in the same parenthesis, asserted the same way, because a
-    property that names a shape in its docstring and never draws it is entry 15
-    exactly. The instructor-edge case is marked `invariant` because the
-    sibling-isolation properties below are only as strong as it.
 
-    **Green before E9-01 lands, and a red means the generator is broken**, not
-    the walk. **The mutation this kills:** a `world_plans` whose planted gadget
-    is dropped and whose mapping never gives the instructor's course to a second
-    person, which leaves every clamp assertion below vacuous.
-    """
-    predicate = PLAN_SHAPES[shape]
+def drawn(shape: str) -> WorldPlan:
+    """A plan `world_plans` draws holding `shape`, or a failure saying it never drew one."""
     try:
-        found: WorldPlan = find(world_plans(), predicate, settings=COVERAGE_BUDGET)
+        return find(world_plans(), PLAN_SHAPES[shape], settings=COVERAGE_BUDGET)
     except NoSuchExample:
         pytest.fail(
             f"`world_plans` never drew {shape} in {COVERAGE_BUDGET.max_examples} attempts. The "
@@ -166,7 +142,48 @@ def test_the_generated_worlds_draw_each_shape_the_ticket_names(shape: str) -> No
             "nothing about it (docs/MISTAKES.md entry 15). Widen the strategy in "
             "tests/fixtures/purview_walk.py."
         )
-    assert predicate(found), f"`find` returned a plan that does not hold {shape}: {found}."
+
+
+@pytest.mark.invariant
+def test_the_generated_worlds_draw_an_instructor_edge_into_a_lead_on_another_persons_course() -> (
+    None
+):
+    """Done-when 4's last sentence, and the scope half of done-when 6's.
+
+    "The generator draws the instructor-edge-into-a-lead case, and a test asserts
+    that it does (MISTAKES entry 15)." Marked `invariant` because the
+    sibling-isolation properties below are only as strong as it. It is its own
+    function, not a marked `pytest.param`, so the invariant gate's assertion scan
+    can see the mark and the `assert` (`docs/disputes/E9-01-02.md`).
+
+    **Green before E9-01 lands, and a red means the generator is broken**, not
+    the walk. **The mutation this kills:** a `world_plans` whose planted gadget
+    is dropped and whose mapping never gives the instructor's course to a second
+    person, which leaves every clamp assertion below vacuous.
+    """
+    found = drawn(INSTRUCTOR_EDGE)
+    assert PLAN_SHAPES[INSTRUCTOR_EDGE](
+        found
+    ), f"`find` returned a plan that does not hold {INSTRUCTOR_EDGE}: {found}."
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        pytest.param("an assistant-dean insertion", id="assistant-dean-insertion"),
+        pytest.param("a two-hat person", id="two-hat-person"),
+        pytest.param("a cross-department led course", id="cross-department-lead"),
+    ],
+)
+def test_the_generated_worlds_draw_each_other_shape_the_ticket_names(shape: str) -> None:
+    """The other three shapes the ticket lists in done-when 4's parenthesis.
+
+    Asserted the same way as the instructor edge, because a property that names a
+    shape in its docstring and never draws it is entry 15 exactly. Green before
+    E9-01 lands; a red means the generator is broken, not the walk.
+    """
+    found = drawn(shape)
+    assert PLAN_SHAPES[shape](found), f"`find` returned a plan that does not hold {shape}: {found}."
 
 
 # ---------------------------------------------------------------------------
@@ -322,8 +339,8 @@ def test_every_purview_and_every_leadership_scope_equals_the_independent_computa
     a refusal (see `leaders`).
 
     The generator's draw of an instructor edge into a lead is asserted by
-    `test_the_generated_worlds_draw_each_shape_the_ticket_names`, as done-when 6
-    asks.
+    `test_the_generated_worlds_draw_an_instructor_edge_into_a_lead_on_another_persons_course`,
+    as done-when 6 asks.
 
     **The mutations this kills, the ticket's own first:** a walk that clamps a
     lead's own result but passes the unclamped set up to the chair (the planted

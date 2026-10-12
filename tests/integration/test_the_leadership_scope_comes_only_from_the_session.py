@@ -76,14 +76,22 @@ def deps_symbol(name: str) -> Any:
 
 
 def request_inputs(call: Callable[..., Any]) -> set[tuple[str, str]]:
-    """Every request input a dependency's whole tree declares, as (kind, name)."""
-    from fastapi.dependencies.utils import get_dependant, get_flat_dependant
+    """Every request input a dependency's whole tree declares, as (kind, name).
 
-    flat = get_flat_dependant(get_dependant(path="/", call=call))
+    Walks `Dependant.dependencies` recursively rather than calling FastAPI's
+    flattening helper, which the pinned FastAPI does not export
+    (`docs/disputes/E9-01-01.md`).
+    """
+    from fastapi.dependencies.utils import get_dependant
+
     found: set[tuple[str, str]] = set()
-    for kind in INPUT_KINDS:
-        for field in getattr(flat, kind, ()):
-            found.add((kind, str(getattr(field, "alias", None) or field.name)))
+    pending = [get_dependant(path="/", call=call)]
+    while pending:
+        dependant = pending.pop()
+        for kind in INPUT_KINDS:
+            for field in getattr(dependant, kind, ()):
+                found.add((kind, str(getattr(field, "alias", None) or field.name)))
+        pending.extend(getattr(dependant, "dependencies", ()))
     return found
 
 
