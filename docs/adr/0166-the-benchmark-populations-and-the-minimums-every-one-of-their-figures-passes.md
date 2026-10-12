@@ -238,5 +238,6 @@ E9's named-set and roll-up figures read the two set functions over the
 reader's purview instead (E9 README, decision 10). A whole-cohort aggregate
 that no page shows is still a read surface the runtime role holds, so it was
 removed rather than kept in case. The two set functions and their definer
-stay. The downgrade recreates the views and their grant from their last
-versioned files.
+stay. Each drop ships as the view's next versioned `views_sql/` file, so the
+directory still records which views exist; the downgrade recreates the views
+and their grant from the versions before the drops.
