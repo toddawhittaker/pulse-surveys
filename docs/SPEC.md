@@ -458,6 +458,7 @@ pulse-surveys/
 │       │   ├── response_loop_guard_v001.sql  # who may write a response or a policy, checked at insert
 │       │   ├── response_loop_guard_v002.sql  # who may set a policy, checked for the one course a row covers
 │       │   ├── people_graph_v001.sql         # the admin's writes to the people graph and the admin's reads, each admin-checked and audited
+│       │   ├── org_node_label_v001.sql       # each org node's display name and containing node, for the roll-up tree
 │       │   ├── people_graph_v002.sql         # the record of an applied people or mapping import, with its dry-run diff, admin-checked
 │       │   ├── section_staff_names_v001.sql  # the one channel a staff name reaches a reader through
 │       │   ├── section_staff_names_v002.sql  # the same channel over a set of sections, with each name's role
@@ -473,6 +474,7 @@ pulse-surveys/
 │       │   ├── admin.py            # the people editor's tables, writes, and CSV import diffs
 │       │   ├── response_loop.py    # a student's week state and the response published to it
 │       │   ├── moderation.py       # the Lead Faculty review queue, a leader's decision, the exclusion log
+│       │   ├── rollup.py           # the leadership roll-up tree and one node's figures and attention cards (§5.5)
 │       │   └── session.py          # the role switcher: the views a session holds, a switch, the new session
 │       │
 │       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
@@ -524,6 +526,7 @@ pulse-surveys/
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
 │       │   ├── response_loop.py    # the staff names of a set of sections for a reader of them, and a course page's lead; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)
 │       │   ├── student_results.py  # a student's week results (§5.4)
+│       │   ├── rollups.py          # the leadership roll-ups: the tree over a purview, a node's figures, the §5.6 attention cards (§5.5)
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration

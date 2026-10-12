@@ -117,8 +117,10 @@ from app.config import Settings
 from app.models.identity import LEADERSHIP_ROLES, AssignmentRole
 from app.services import clock
 from app.views_sql.queries import (
+    OrgNodeLabel,
     SectionEnrollmentCount,
     SectionRosterRow,
+    org_node_labels_above,
     section_enrollment_counts,
     section_roster,
 )
@@ -136,6 +138,7 @@ __all__ = [
     "LeadershipGrant",
     "LmsOwnedWriteRefused",
     "NoReportingPurviewError",
+    "OrgNodeLabel",
     "OutOfPurviewError",
     "Purview",
     "ScopedReader",
@@ -549,9 +552,9 @@ _TEACHING_INSTRUCTOR_GRANTS_OF_A_SECTION = text(
 # at section grain by a later ticket is staff of that section on the day it is
 # added and nobody should have to remember to add it here.
 _SECTION_SCOPED_ASSIGNEES = text(
-    "SELECT DISTINCT granted.person_id"
+    "SELECT DISTINCT granted.section_id, granted.person_id"
     " FROM public.assignment_scope AS granted"
-    " WHERE granted.section_id = :section_id"
+    " WHERE granted.section_id = ANY(CAST(:section_ids AS uuid[]))"
 )
 
 # Which courses a person leads, out of the Lead Faculty mapping and not out of
@@ -1388,8 +1391,10 @@ def teaching_instructor_grants(session: Session, *, section_id: UUID) -> dict[UU
     }
 
 
-def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]:
-    """The people holding an assignment scoped to this section — its staff (EE-M1).
+def section_scoped_assignees(
+    session: Session, *, section_ids: Collection[UUID]
+) -> dict[UUID, set[UUID]]:
+    """The people holding an assignment scoped to each of these sections — their staff (EE-M1).
 
     Asked by SPEC §3.4's participation sweep before it delivers a score. A roster
     container carries everybody the platform lists, instructors included. Until
@@ -1403,7 +1408,7 @@ def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]
     **It answers people, not members.** The caller holds `user` ids and this
     answers `person` ids, because those are two different keys for two different
     things (ADR 0024) and the hop between them is a definer call the caller makes —
-    `app.services.identity.person_for_user`. Answering members would put that hop
+    `app.services.identity.persons_for_users`. Answering members would put that hop
     inside this module and give it a second thing to be about.
 
     **It lives here because the view does.** E0-41's rule is that
@@ -1417,8 +1422,18 @@ def section_scoped_assignees(session: Session, *, section_id: UUID) -> set[UUID]
     nothing and refuses nothing, and what a caller does with the answer is the
     caller's rule. A false *yes* withholds a grade from a student; a false *no*
     posts one to a member of staff. Neither widens anybody's purview.
+
+    **One statement for any number of sections** (ADR 0205): a section nobody
+    is assigned to is absent from the answer. The participation sweep asks for
+    one section and the roll-up figures for every section of a node.
     """
-    return set(session.execute(_SECTION_SCOPED_ASSIGNEES, {"section_id": section_id}).scalars())
+    asked = sorted(set(section_ids))
+    if not asked:
+        return {}
+    staff: dict[UUID, set[UUID]] = {}
+    for section_id, person_id in session.execute(_SECTION_SCOPED_ASSIGNEES, {"section_ids": asked}):
+        staff.setdefault(section_id, set()).add(person_id)
+    return staff
 
 
 def resolve_scope(
@@ -1555,6 +1570,27 @@ class ScopedReader:
                 "view precisely so that a peer's courses have nowhere to appear."
             )
         return section_enrollment_counts(self._session, course_id=course_id)
+
+    def org_node_labels(self, *, section_ids: Collection[UUID]) -> Sequence[OrgNodeLabel]:
+        """The names of the course, prefix, department, college and institution above sections.
+
+        Each named node once, however many of the sections sit under it. Every
+        section must be inside the purview, and one that is not refuses the
+        whole read: a node is named to a reader because a section they hold
+        sits under it (SPEC §2.1), so a department reached through one led
+        course is named and its other prefixes are not. The names come from
+        `public.org_node_label` (ADR 0205), because `pulse_app` holds nothing
+        on `institution`, `college` or `department`.
+        """
+        asked = set(section_ids)
+        outside = asked - self._scope.purview.section_ids
+        if outside:
+            raise OutOfPurviewError(
+                f"{len(outside)} of the sections asked about are not in the purview resolved for "
+                f"person {self._scope.person_id}, so no org node above them was named. SPEC 2.1: "
+                "a reader is shown the nodes above the sections they hold, and no others."
+            )
+        return org_node_labels_above(self._session, section_ids=sorted(asked))
 
 
 def scoped_reader(session: Session, scope: ActorScope) -> ScopedReader:

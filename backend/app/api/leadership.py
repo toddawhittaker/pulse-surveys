@@ -16,6 +16,11 @@ only one serving a figure (E9-11 draws it).
 **Three moderation review routes** (E6-05), after the sets: the
 reader's review queue, a decision on one queued comment, and the exclusion log.
 
+**The roll-up routes** (E9-07, ADR 0205), after the sets: the tree over the
+reader's purview in one term, and one node's figures and attention cards. Both
+take their scope from `leadership_scope` and nothing in the request, and both
+are §5.5's, so neither carries a comment.
+
 **The response loop's routes** (ADR 0194): the response policy (read and
 switch), the responses owed, and the five on-behalf doors. Like the review
 routes, each is scoped to the reader's own leadership grant
@@ -115,7 +120,7 @@ from app.copy.leadership_moderation import (
     REASON_BLANK,
     REASON_TOO_LONG,
 )
-from app.copy.leadership_rollup import TERM_UNAVAILABLE
+from app.copy.leadership_rollup import NODE_UNAVAILABLE, TERM_UNAVAILABLE
 from app.copy.leadership_sets import NOT_THE_SETS_DEFINER, SET_UNAVAILABLE
 from app.copy.response_loop import NO_POLICY_TO_SET, ON_BEHALF_UNAVAILABLE
 from app.db import get_session
@@ -142,6 +147,7 @@ from app.schemas.response_loop import (
     ResponseWrite,
     WeekResponseView,
 )
+from app.schemas.rollup import FiguresKind, RollupFigures, RollupTree
 from app.services.authz import ActorScope
 from app.services.comparison_sets import (
     NotTheSetsDefinerError,
@@ -188,6 +194,7 @@ from app.services.response_loop import (
     responses_owed,
     set_policy,
 )
+from app.services.rollups import NodeUnavailableError, rollup_figures, rollup_tree
 from app.services.session import SessionClaims
 
 router = APIRouter(tags=["leadership"])
@@ -412,6 +419,76 @@ def read_preview(
         return preview_of(session, set_id=set_id)
     except SetUnavailableError:
         raise _unavailable() from None
+
+
+# ---------------------------------------------------------------------------
+# The roll-ups (SPEC §5.5, ADR 0205).
+# ---------------------------------------------------------------------------
+
+ROLLUP_PATH = "/leadership/rollup"
+ROLLUP_NODE_PATH = f"{ROLLUP_PATH}/{{kind}}/{{node_id}}"
+
+NODE_UNAVAILABLE_STATUS = 404
+
+
+@router.get(ROLLUP_PATH, summary="The tree over my leadership purview, one term")
+def read_rollup_tree(
+    term_id: UUID,
+    request: Request,
+    response: Response,
+    scope: ActorScope = Depends(leadership_scope),
+    session: Session = Depends(get_session),
+) -> RollupTree:
+    """The whole tree in one payload: the hierarchy, and the by-lead pivot for chair and above.
+
+    The scope is the session's own (ADR 0199). A term id no term carries is the
+    404 the named-set series route answers for it.
+    """
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return rollup_tree(
+            session, scope=scope, term_id=term_id, settings=request.app.state.settings
+        )
+    except TermUnavailableError:
+        raise HTTPException(
+            status_code=TERM_UNAVAILABLE_STATUS, detail=TERM_UNAVAILABLE.text
+        ) from None
+
+
+@router.get(ROLLUP_NODE_PATH, summary="One node's figures and attention cards, one term")
+def read_rollup_figures(
+    kind: FiguresKind,
+    node_id: UUID,
+    term_id: UUID,
+    request: Request,
+    response: Response,
+    scope: ActorScope = Depends(leadership_scope),
+    session: Session = Depends(get_session),
+) -> RollupFigures:
+    """A node's line per start cohort, its participation, and §5.6's cards.
+
+    **A node outside the purview is answered exactly as a node that does not
+    exist**: one 404, one sentence. So is a by-lead group asked by a reader who
+    is not offered the pivot.
+    """
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return rollup_figures(
+            session,
+            scope=scope,
+            term_id=term_id,
+            kind=kind,
+            node_id=node_id,
+            settings=request.app.state.settings,
+        )
+    except TermUnavailableError:
+        raise HTTPException(
+            status_code=TERM_UNAVAILABLE_STATUS, detail=TERM_UNAVAILABLE.text
+        ) from None
+    except NodeUnavailableError:
+        raise HTTPException(
+            status_code=NODE_UNAVAILABLE_STATUS, detail=NODE_UNAVAILABLE.text
+        ) from None
 
 
 def _unavailable() -> HTTPException:

@@ -1149,6 +1149,121 @@
         }
       }
     },
+    "/leadership/rollup": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "The tree over my leadership purview, one term",
+        "description": "The whole tree in one payload: the hierarchy, and the by-lead pivot for chair and above.\n\nThe scope is the session's own (ADR 0199). A term id no term carries is the\n404 the named-set series route answers for it.",
+        "operationId": "read_rollup_tree_leadership_rollup_get",
+        "parameters": [
+          {
+            "name": "term_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Term Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollupTree"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/rollup/{kind}/{node_id}": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "One node's figures and attention cards, one term",
+        "description": "A node's line per start cohort, its participation, and \u00a75.6's cards.\n\n**A node outside the purview is answered exactly as a node that does not\nexist**: one 404, one sentence. So is a by-lead group asked by a reader who\nis not offered the pivot.",
+        "operationId": "read_rollup_figures_leadership_rollup__kind___node_id__get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "college",
+                "department",
+                "prefix",
+                "course",
+                "lead",
+                "no_lead"
+              ],
+              "type": "string",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Node Id"
+            }
+          },
+          {
+            "name": "term_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Term Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RollupFigures"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/leadership/moderation/queue": {
       "get": {
         "tags": [
@@ -2588,6 +2703,68 @@
         ],
         "title": "AssignmentRole",
         "description": "The roles SPEC \u00a72.1's table grants, as a Postgres enum type.\n\nEight of the nine rows in that table. **`STUDENT` is deliberately absent**: a\nstudent is attached to \"own responses\" rather than to a node in the org\nhierarchy, and nothing in the spec or in any ticket gives a student a\n`role_assignment` row. Adding one would need a scope grain for it, and the\nhonest answer to \"which node is a student scoped to\" is none of them \u2014 so the\nrow is left unwritable rather than given an invented answer.\n\n**`CARE` is in this enumeration and reachable from nowhere else.** SPEC \u00a76.2\nmakes Care the only role that can re-identify a student, and E0-09 keeps the\ngrant strictly here: no LTI claim, no OIDC claim and no LMS role may produce\nit, because the administrator of the platform controls what a claim says and\na claim-to-Care mapping would hand them identity access.\n`tests/unit/test_care_is_not_reachable_from_a_claim.py` sweeps the syntax tree\nof every module under `app/` for a module that both reads a claim and names\nthis role. That is why the name belongs to a shared enumeration in the model\nlayer: a door that needs to exclude Care can exclude *this* member, and the\nexclusion is then a fact about the role rather than a literal in the door.\n\nEach member's value is its name, as `CourseLevel`'s and `Modality`'s are:\none spelling in Python and in the database, rather than two to keep in step."
+      },
+      "AttentionCard": {
+        "properties": {
+          "rule": {
+            "type": "string",
+            "enum": [
+              "instructor_trend_down",
+              "course_trend_down",
+              "response_rate_low",
+              "response_owed"
+            ],
+            "title": "Rule"
+          },
+          "rule_name": {
+            "type": "string",
+            "title": "Rule Name"
+          },
+          "stream": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "INSTRUCTOR",
+                  "COURSE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stream"
+          },
+          "section_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Section Id"
+          },
+          "section_code": {
+            "type": "string",
+            "title": "Section Code"
+          },
+          "course_name": {
+            "type": "string",
+            "title": "Course Name"
+          },
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule",
+          "rule_name",
+          "stream",
+          "section_id",
+          "section_code",
+          "course_name",
+          "course_week"
+        ],
+        "title": "AttentionCard",
+        "description": "One \u00a75.6 rule met by one section: the rule, its stream, and where its report is."
       },
       "BenchmarkSeries": {
         "properties": {
@@ -4163,6 +4340,358 @@
         ],
         "title": "ReviewQueue",
         "description": "The reader's review queue, in an order drawn for this request."
+      },
+      "RollupCohort": {
+        "properties": {
+          "section_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Section Start Date"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/RollupWeek"
+            },
+            "type": "array",
+            "title": "Weeks"
+          },
+          "participation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RollupParticipation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "section_start_date",
+          "label",
+          "weeks",
+          "participation"
+        ],
+        "title": "RollupCohort",
+        "description": "One start cohort of a node's sections, its line on the term axis, and its participation."
+      },
+      "RollupFigures": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "college",
+              "department",
+              "prefix",
+              "course",
+              "lead",
+              "no_lead"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "term_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Term Id"
+          },
+          "cohorts": {
+            "items": {
+              "$ref": "#/components/schemas/RollupCohort"
+            },
+            "type": "array",
+            "title": "Cohorts"
+          },
+          "attention": {
+            "items": {
+              "$ref": "#/components/schemas/AttentionCard"
+            },
+            "type": "array",
+            "title": "Attention"
+          },
+          "attention_empty": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attention Empty"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "term_id",
+          "cohorts",
+          "attention",
+          "attention_empty"
+        ],
+        "title": "RollupFigures",
+        "description": "One node's figures in one term: a line per start cohort, and the attention cards.\n\n`attention_empty` is \u00a75.6's calm sentence when no card is due, and absent\nwhen one is."
+      },
+      "RollupNode": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "college",
+              "department",
+              "prefix",
+              "course",
+              "section",
+              "lead",
+              "no_lead"
+            ],
+            "title": "Kind"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "section_count": {
+            "type": "integer",
+            "title": "Section Count"
+          },
+          "course_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Count"
+          },
+          "prefix_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefix Count"
+          },
+          "department_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Count"
+          },
+          "staff_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Staff Name"
+          },
+          "instructor_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instructor Names",
+            "default": []
+          },
+          "children": {
+            "items": {
+              "$ref": "#/components/schemas/RollupNode"
+            },
+            "type": "array",
+            "title": "Children",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind",
+          "id",
+          "name",
+          "label",
+          "section_count"
+        ],
+        "title": "RollupNode",
+        "description": "One row of the tree, with its children.\n\nEvery count is over the sections the reader holds, in the viewed term, so a\ncontainer the reader holds part of counts that part only. `staff_name` is\nthe row's Dean, Chair or Lead (absent for a course in its own lead's view,\nand where nobody holds the post); `instructor_names` is a section row's\nteaching instructors. `label` is SPEC \u00a72.1's row label, joined from those."
+      },
+      "RollupParticipation": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "response_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Rate"
+          },
+          "validity_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validity Rate"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_week",
+          "response_rate",
+          "validity_rate"
+        ],
+        "title": "RollupParticipation",
+        "description": "A cohort's response rate and validity rate in its latest published week."
+      },
+      "RollupTree": {
+        "properties": {
+          "term_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Term Id"
+          },
+          "hierarchy": {
+            "items": {
+              "$ref": "#/components/schemas/RollupNode"
+            },
+            "type": "array",
+            "title": "Hierarchy"
+          },
+          "by_lead": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/RollupNode"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "By Lead"
+          }
+        },
+        "type": "object",
+        "required": [
+          "term_id",
+          "hierarchy",
+          "by_lead"
+        ],
+        "title": "RollupTree",
+        "description": "The whole tree over the reader's leadership purview in one term.\n\n`hierarchy` holds the roots (SPEC \u00a72.1: the highest useful nodes, several\nfor a union of assignments). `by_lead` is the by-lead pivot, offered only to\na reader holding a `CHAIR` or higher assignment, and absent otherwise."
+      },
+      "RollupWeek": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "term_week": {
+            "type": "integer",
+            "title": "Term Week"
+          },
+          "instructor_mean": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instructor Mean"
+          },
+          "course_mean": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Course Mean"
+          },
+          "workload_mean": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workload Mean"
+          },
+          "workload_median": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workload Median"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_week",
+          "term_week",
+          "instructor_mean",
+          "course_mean",
+          "workload_mean",
+          "workload_median"
+        ],
+        "title": "RollupWeek",
+        "description": "One course week of one cohort, on both week axes; `None` where nobody answered."
       },
       "SectionView": {
         "properties": {
