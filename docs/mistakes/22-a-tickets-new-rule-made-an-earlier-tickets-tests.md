@@ -1,10 +1,10 @@
 # Entry 22. A ticket's new rule made an earlier ticket's tests unrunnable, and the repair was on the other side of the test wall
 
-**Caught: 29**
+**Caught: 31**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*34 instances recorded; the 3 most recent are below (E5.1-11, E6, E7),
+*35 instances recorded; the 3 most recent are below (E6, E7, E9),
 each after the "What happened" section. The E4-06 paragraph sits with them and
 is not counted among the three: like the E0-18 note below, it carries a rule
 sentence of its own — that a closed set written earlier in the same branch is
@@ -150,12 +150,6 @@ is about who may edit a test, not about how old the test is, and a set written
 earlier in the same branch is as much on the other side of the wall as one written
 in E0.
 
-**Instance, 2026-10-03 (E5.1-11, PR #274, caught while building).** The new
-rule that no teaching grant is ended after a section's end date made E5.1-02's
-door test walk the roster on the day after its section ended, where the grant
-now stays. The repair was in the test, which now walks inside the term as the
-ruling requires; the code was not bent to keep the old test green.
-
 **Instance, 2026-10-10 (E6, one catch and three occurrences).** E6-03's new
 comment-card members reached the payload ceiling, which the suite holds in two
 places. The test author amended the pytest copy (`COMMENT_FIELDS_PERMITTED`) in
@@ -178,3 +172,5 @@ that expected the old 401. What it saved, three times: a heavy builder, who may
 not edit a test, facing reds in modules the ticket did not name. Two later E7
 tickets still met the shape (disputes E7-03-02 and E7-04-01), so it is not
 retired.
+
+**Instance, 2026-10-12 (E9, one catch across two tickets).** E9-02's test author carried the audit log's new columns into the identity-column inventory in the red commit (89e9018a), and E9-14's into the existing fixtures before its builder ran (87f8ba0d): mapped leads given the Lead Faculty role the new definer requires, planted grant rows given a scope, log rows found by section rather than by the reason the new rule blanks. What it saved: a heavy builder facing reds in modules the ticket did not name, twice.

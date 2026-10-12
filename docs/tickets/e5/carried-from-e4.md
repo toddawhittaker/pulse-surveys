@@ -124,6 +124,8 @@ are deleted.
 
 ## The landing views' sentences sit outside the inventory (`../e4/deferred.md`)
 
+**Closed in E9.** E9-04 (#336, merged as f57019c5) moved them into `frontend/src/copy/` under the `landing` surface; E9-11 (#344, b5f39706) replaced the leadership landing on those keys.
+
 Unchanged; owner: the next epic to touch the landings — E9 first candidate.
 
 ## The Monday summary walk is serial, and §10's budget does not fit it
@@ -153,6 +155,8 @@ self-harm, and `tests/integration/test_a_care_class_comment_reaches_no_reader.py
 asserts both sides with planted verdicts.
 
 ## Aggregate ordering has no code-level gate (§4.1 item 4's second half)
+
+**Closed in E9.** E9-07 (#341, merged as 2f00a65c) adds the property that card order never follows a figure; E9-12 (#345, 464f9773) and E9-14 (#349, b288a711) carry it in the invariant pass.
 
 "No ranking, no score-sorting anywhere" is asserted mechanically over
 strings only; E4's one ordered list sorts by label and is pinned, but

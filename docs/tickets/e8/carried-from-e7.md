@@ -226,6 +226,8 @@ the page once, with a test.
 
 ### For E9: the attention list, staff names, and three leadership roles
 
+**Closed in E9.** E9-07 (#341, merged as 2f00a65c) builds the attention list on one owed rule, `response_loop.owed_section_weeks`; E9-03 (#333, a5cbf440) makes staff names set-based, called once per set by E9-07, E9-09 and E9-11 (#344, b5f39706); E9-09 (#340, eef1dcfc) gives the assistant dean, dean and VP the exclusion log and policy over their purview.
+
 - The attention list calls `response_loop.is_owed` (SPEC §5.6 rule 4, ruling
   10), never a copy of the 48-hour rule.
 - Staff names on leadership pages: the owed list and the on-behalf page show
@@ -245,6 +247,8 @@ answer is recorded beside the up-chain report.
 
 ### For E9: purview-wide reads of the response tables
 
+**Closed by E9-07** (#341, merged as 2f00a65c): set-based owed and response reads; `EXPLAIN` showed the existing index serving them, so none was added (ADR 0205).
+
 From E7-02's data-model review (#310): the response loop's reads are one
 section-week at a time. **Owner:** E9, with the first purview-wide reader.
 **Done when:** that reader reads policies and responses set-based, and an index
@@ -252,6 +256,8 @@ on `instructor_response (section_id, week_id, sequence)` exists if `EXPLAIN`
 over a term-sized seed wants it.
 
 ### The on-behalf summary filter compares transaction-start times
+
+**Closed by E9-09** (#340, merged as eef1dcfc): the filter compares decision sequences (`weekly_summary.moderation_sequence_seen`, ADR 0206). The narrower race that remains, insert order against commit order, is carried in `../e10/carried-from-e9.md`.
 
 From E7-03's privacy review (#312), accepted as LOW. The filter compares
 `moderation_state.decided_at` with `weekly_summary.generated_at`, both stamped
@@ -309,6 +315,8 @@ definer refuses a person key that is not the roster's member for the section,
 with a test.
 
 ### The staff-name definer judges "today" by the database's UTC date
+
+**Closed by E9-03** (#333, merged as a5cbf440): the door passes the reader's date from the application clock in the institution's timezone (ADR 0201).
 
 From E7-01 (#308), recorded in ADRs 0191 and 0193. Near midnight in the
 institution's zone, the definer and the survey read can disagree about whether

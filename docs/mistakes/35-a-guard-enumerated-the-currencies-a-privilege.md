@@ -1,15 +1,15 @@
 # Entry 35. A guard enumerated the currencies a privilege can be held in, and missed the one the design deliberately uses
 
-**Caught: 11**
+**Caught: 12**
 
 *Part of [docs/MISTAKES.md](../MISTAKES.md). The number is this entry's name — citations point at it, so it never changes.*
 
-*16 occurrences recorded; ten of them are catches. This file keeps the three
+*17 occurrences recorded; eleven of them are catches. This file keeps the three
 most recent instances; the rest live in git history — plus the oldest catch and
 the addendum under it, which are one lesson, and trimming one without the other
 would leave a paragraph referring to nothing. The E2-16 and E3-04 paragraphs
 were trimmed on 2026-10-03 with the E5.1-03 catch, and the E3 exit cleanup
-paragraph with the E5.1-12 catch the same day.*
+paragraph with the E5.1-12 catch the same day, and the E4-04 paragraph on 2026-10-12 with the E9-01 catch.*
 
 *(**A catch**, E5.1-12, PR #273, 2026-10-03, twice over. The comment view's
 blank-text rule used one-argument `btrim`, which enumerates one whitespace
@@ -26,23 +26,6 @@ strings. Before its silence about any other module counts, it must *find* the
 references in `services/clock.py`, a module that certainly holds them, and it
 must name a planted offender written in each currency
 (`tests/unit/test_only_the_clock_service_touches_the_clock_override_row.py`).)*
-
-*(**A catch**, writing E4-04's grant tests, 2026-09-06. The ACL half of
-`tests/integration/test_the_comment_path_runs_over_the_connection_production_uses.py`
-asks `has_table_privilege` in both directions over four relations and two roles,
-and every one of those questions is answerable by a probe that has gone blind. So
-each probe passes a control first: a relation the role under test certainly reads,
-**one per role and that is the point rather than a detail** — `pulse_app` reads
-`classification`, and `pulse_care` does not read it at all, because the Care role's
-whole grant list is `SELECT` on `role_assignment` plus the reveal's definer path.
-A control pointed at the wrong role's relation reports absence, passes, and makes
-every assertion behind it vacuous, which is the failure a control exists to catch.
-The same reading covers the one place this ticket reaches identity: the
-respondent leg of the release gate walks `answer.response_id` to `response.user_id`,
-and the identity-table sweep polices relation names and model classes, neither of
-which a column called `user_id` is — so the module docstring names the three
-functions a reviewer has to read rather than letting a green sweep stand as the
-claim.)*
 
 *(**The catch**, writing E0-34's tests — the guard that reads
 `backend/app/views_sql/*.sql` looking for an identity column. It enumerates two
@@ -144,3 +127,5 @@ Two corollaries worth stating, because both were live here:
   implemented as `pg_class.relacl`. `public` also contains functions, and
   `pg_proc.proacl` is a different column. A guard's name should be no wider than
   the catalog it actually reads, or it should read them all.
+
+*(**A catch**, writing E9-01's caller sweep, 2026-10-12, PR #335. `test_only_the_leadership_scope_dependency_calls_resolve_scope.py` finds the one allowed caller as a control and reaches calls through an aliased module, so a sweep that read only direct `authz.resolve_scope` calls could not report clean over a caller that imports the function under another name. What would have shipped: a second scope resolver with the sweep green.)*

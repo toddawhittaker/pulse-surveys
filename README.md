@@ -482,7 +482,7 @@ domain RFC 2606 reserves.
 |---|---|---|
 | `mock-idp-user-vpaa` | `VP_ACADEMICS` | — |
 | `mock-idp-user-dean` | `DEAN` | — |
-| `mock-idp-user-assistant-dean` | `ASSISTANT_DEAN` | — |
+| `mock-idp-user-assistant-dean` | `ASSISTANT_DEAN` | in Pulse, the demo institution's assistant dean of SPEC §2.1's worked example, who also leads PSYC 110 and launches from the mock LMS as `mock-lms-user-assistant-dean` |
 | `mock-idp-user-chair` | `CHAIR` | — |
 | `mock-idp-user-lead-faculty` | `LEAD_FACULTY` | — |
 | `mock-idp-user-admin` | `ADMIN` | — |

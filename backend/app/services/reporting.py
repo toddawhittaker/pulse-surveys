@@ -1806,7 +1806,7 @@ def _payload(
             course_week=week.course_week,
             term_week=week.term_week,
             published_weeks=[other.course_week for other in published],
-            # The reported week's own window row, which `_section_weeks` already
+            # The reported week's own window row, which `published_weeks_of` already
             # read — never the latest published week's and never the one the clock
             # is standing in.
             closes_at=week.closes_at,

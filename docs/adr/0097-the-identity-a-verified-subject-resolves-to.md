@@ -227,3 +227,5 @@ unique column of its own, and six of the eight have no `user` row to key on.
 - **ADR 0068's "the mock registration carries no `user` rows at all" is amended
   here**, to exactly the two subjects named above. That ADR's own text now points
   at this one.
+
+**Amended by [0208](0208-the-worked-example-is-entered-as-the-demo-person-by-both-mock-doors.md)** (E9-13): one demo person, the assistant dean of SPEC §2.1's worked example, is now reached by both mock doors, and the launchable inventory holds three subjects.
