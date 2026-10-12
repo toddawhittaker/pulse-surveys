@@ -116,7 +116,7 @@ export function AppShell({
   return (
     <>
       {landings === null ? null : (
-        <div className="pulse-shell-bar" data-testid={SHELL_TESTID}>
+        <header className="pulse-shell-bar" data-testid={SHELL_TESTID}>
           {landings.landings.length > 1 ? (
             <Switcher landings={landings} busy={busy} onSwitch={switchTo} />
           ) : null}
@@ -133,7 +133,7 @@ export function AppShell({
           <p className="pulse-shell-status" role="status">
             {refusal}
           </p>
-        </div>
+        </header>
       )}
       {children}
     </>
