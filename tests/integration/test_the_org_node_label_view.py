@@ -298,6 +298,114 @@ def test_the_view_names_each_node_and_a_prefix_by_its_code(
     assert not wrong, f"`{VIEW}` does not place: {wrong}."
 
 
+# Fix round R2: two course titles a second spelling of the label could get wrong.
+EM_DASH_TITLE = "Linear Algebra — Proofs and Practice"
+SPACED_TITLE = "  Spaced Title  "
+PLANTED_COURSES = (("697", EM_DASH_TITLE), ("698", SPACED_TITLE))
+
+
+def plant_courses_under_math(demo: Any, tables: dict[str, Any]) -> None:
+    """Two courses under MATH whose titles hold an em dash and surrounding spaces."""
+    from fixtures.supervision import seed_row
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+
+    from app.config import DEVELOPMENT_ENVIRONMENT
+
+    engine = create_engine(demo.database.superuser_url)
+    try:
+        with Session(bind=engine, info={"environment": DEVELOPMENT_ENVIRONMENT}) as session:
+            prefix = dict(
+                session.execute(text("SELECT * FROM public.prefix WHERE code = 'MATH'"))
+                .mappings()
+                .one()
+            )
+            for number, title in PLANTED_COURSES:
+                seed_row(
+                    session,
+                    tables,
+                    "course",
+                    {"prefix": prefix},
+                    lms_number=number,
+                    lms_title=title,
+                )
+            session.commit()
+    finally:
+        engine.dispose()
+
+
+def test_every_course_is_named_exactly_as_section_codes_course_label_names_it(
+    seeded_demo: Any, demo_database: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """The view's course name equals `course_label(prefix_code=, lms_number=, lms_title=)` for every course.
+
+    Fix round R2: the view spells the label in SQL, a second copy of
+    `section_codes.course_label`, and nothing compared them. The world adds a
+    course whose title holds an em dash and one whose title has leading and
+    trailing spaces, the two inputs where a SQL concatenation and the Python
+    composer most plausibly part.
+
+    **The control:** both planted courses are among the view's course rows, so
+    the comparison reaches them. **The mutations it kills:** the view's
+    separator differing from the composer's; the view trimming (or not
+    trimming) a title where the composer does the opposite; a course named by
+    title alone. **The near miss it spares:** none; the two must agree on
+    every course.
+    """
+    from sqlalchemy import text
+
+    from app.services.section_codes import course_label
+
+    seeded(seeded_demo)
+    plant_courses_under_math(demo_database, metadata_tables)
+
+    with application_connection(demo_database) as connection:
+        sources = {
+            str(row["id"]): row
+            for row in connection.execute(
+                text(
+                    "SELECT c.id, c.lms_number, c.lms_title, p.code AS prefix_code "
+                    "FROM public.course c JOIN public.prefix p ON p.id = c.prefix_id"
+                )
+            ).mappings()
+        }
+    served = {
+        str(row["node_id"]): row["name"]
+        for row in label_rows(demo_database)
+        if row["level"] == "course"
+    }
+
+    planted = {
+        key for key, row in sources.items() if row["lms_title"] in (EM_DASH_TITLE, SPACED_TITLE)
+    }
+    assert len(planted) == len(PLANTED_COURSES) and planted <= set(served), (
+        f"The planted courses {sorted(planted)} are not all among the view's course rows "
+        f"({len(served)} of them). A broken world or a missing view, not this criterion."
+    )
+    differing = sorted(
+        (
+            key,
+            served.get(key),
+            course_label(
+                prefix_code=row["prefix_code"],
+                lms_number=row["lms_number"],
+                lms_title=row["lms_title"],
+            ),
+        )
+        for key, row in sources.items()
+        if served.get(key)
+        != course_label(
+            prefix_code=row["prefix_code"],
+            lms_number=row["lms_number"],
+            lms_title=row["lms_title"],
+        )
+    )
+    assert not differing, (
+        f"(course, view's name, `course_label`) where they differ: {differing}. The view's course "
+        "name is a second spelling of `section_codes.course_label` and must equal it."
+    )
+
+
 @pytest.mark.parametrize("table", UNGRANTED_ORG_TABLES)
 def test_pulse_app_reads_the_view_and_is_still_refused_the_org_table_beneath_it(
     seeded_demo: Any, demo_database: Any, table: str
