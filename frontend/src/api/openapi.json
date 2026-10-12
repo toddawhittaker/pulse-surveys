@@ -2587,13 +2587,26 @@
             "type": "integer",
             "title": "Length Weeks",
             "description": "How many weeks this section runs (SPEC \u00a72.2)."
+          },
+          "lead_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Name",
+            "description": "The Lead Faculty's name for the page header; null when nobody leads it."
           }
         },
         "type": "object",
         "required": [
           "code",
           "course_label",
-          "length_weeks"
+          "length_weeks",
+          "lead_name"
         ],
         "title": "SectionView",
         "description": "Which section this report is about, in the words its instructor knows it by."
@@ -3126,6 +3139,18 @@
             "title": "Course Label",
             "description": "The course's label, with its section code and term."
           },
+          "lead_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Name",
+            "description": "The Lead Faculty's name for the page header; null when nobody leads it."
+          },
           "state": {
             "type": "string",
             "enum": [
@@ -3214,6 +3239,7 @@
         "type": "object",
         "required": [
           "course_label",
+          "lead_name",
           "state",
           "response",
           "published_weeks",

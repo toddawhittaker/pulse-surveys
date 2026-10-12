@@ -30,6 +30,9 @@ export const STUDENT_RESULTS_COPY = {
   'student_results.heading': 'Your instructor’s reply',
   'student_results.loading': 'Loading your instructor’s reply.',
   'student_results.week_label': 'Week {week}',
+  // SPEC §2.1: the course's Lead Faculty, by name, under the course label, in
+  // every state. A course nobody leads shows no line at all.
+  'student_results.lead_faculty': 'Lead Faculty: {name}',
 
   // The four states. `awaiting` says one thing and no more: no date, no count,
   // no name and nothing about the response itself.

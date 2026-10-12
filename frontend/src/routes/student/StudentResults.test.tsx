@@ -42,6 +42,7 @@ function results(
   // The state tests below serve no figures; the data tests use `withFigures`.
   return {
     course_label: 'MATH 140',
+    lead_name: null,
     state,
     published_weeks: weeks,
     streams: null,
@@ -127,6 +128,48 @@ describe('the four states', () => {
     expect(text).not.toContain(AUTHOR);
     expect(text).not.toContain(REPLY);
     expect(page().querySelector('.pulse-response-card')).toBeNull();
+  });
+});
+
+describe('the Lead Faculty in the header (SPEC §2.1)', () => {
+  const LEAD = 'Grace Hopper';
+  const LEAD_LINE = `Lead Faculty: ${LEAD}`;
+  const led = (state: StudentWeekResults['state']): StudentWeekResults => ({
+    ...results(state, state === 'awaiting' || state === 'unanswered' ? null : 'INSTRUCTOR'),
+    lead_name: LEAD,
+  });
+
+  it('names the lead under the course label on a released week', async () => {
+    serving({ [LATEST]: () => json(200, led('published')), [SURVEY]: survey });
+    mountAt(`/app${LATEST}`);
+    await screen.findByText(REPLY);
+    expect(screen.getByTestId('pulse-results-lead').textContent).toBe(LEAD_LINE);
+    // The response's author is the instructor, and the byline does not borrow the lead.
+    expect(page().textContent).toContain(AUTHOR);
+  });
+
+  it('names the lead on the closed door too: a staff name is not a figure about the week', async () => {
+    serving({ [LATEST]: () => json(200, led('awaiting')), [SURVEY]: survey });
+    mountAt(`/app${LATEST}`);
+    await screen.findByText(AWAITING);
+    expect(screen.getByTestId('pulse-results-lead').textContent).toBe(LEAD_LINE);
+    expect(page().querySelector('.pulse-response-card')).toBeNull();
+  });
+
+  it('shows no Lead Faculty line on a released week of a course nobody leads', async () => {
+    serving({ [LATEST]: () => json(200, results('published', 'INSTRUCTOR')), [SURVEY]: survey });
+    mountAt(`/app${LATEST}`);
+    await screen.findByText(REPLY);
+    expect(screen.queryByTestId('pulse-results-lead')).toBeNull();
+    expect(page().textContent).not.toContain('Lead Faculty');
+  });
+
+  it('shows no Lead Faculty line on the closed door of a course nobody leads', async () => {
+    serving({ [LATEST]: () => json(200, results('awaiting', null)), [SURVEY]: survey });
+    mountAt(`/app${LATEST}`);
+    await screen.findByText(AWAITING);
+    expect(screen.queryByTestId('pulse-results-lead')).toBeNull();
+    expect(page().textContent).not.toContain('Lead Faculty');
   });
 });
 

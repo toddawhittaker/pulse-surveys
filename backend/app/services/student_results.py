@@ -107,6 +107,11 @@ def student_week_results(
     published_weeks = [opened.course_week for opened in published]
 
     label = reporting._course_label(session, section)
+    # A staff name, not a figure about the week, so it is read before the hold
+    # decides anything and carried in every state.
+    lead_name = response_loop.section_lead_name(
+        session, section_id=section.id, reader_user_id=user_id, settings=settings
+    )
 
     state, response = response_loop._state_and_response(
         session,
@@ -122,6 +127,7 @@ def student_week_results(
         # response releases it. Decided before any figure or comment is read.
         return StudentWeekResults(
             course_label=label,
+            lead_name=lead_name,
             state=state,
             response=response,
             published_weeks=published_weeks,
@@ -177,6 +183,7 @@ def student_week_results(
         ]
     return StudentWeekResults(
         course_label=label,
+        lead_name=lead_name,
         state=state,
         response=response,
         published_weeks=published_weeks,

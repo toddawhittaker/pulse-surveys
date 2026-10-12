@@ -1754,6 +1754,11 @@ export interface components {
              * @description How many weeks this section runs (SPEC §2.2).
              */
             readonly length_weeks: number;
+            /**
+             * Lead Name
+             * @description The Lead Faculty's name for the page header; null when nobody leads it.
+             */
+            readonly lead_name: string | null;
         };
         /**
          * SetDetail
@@ -2111,6 +2116,11 @@ export interface components {
              * @description The course's label, with its section code and term.
              */
             readonly course_label: string;
+            /**
+             * Lead Name
+             * @description The Lead Faculty's name for the page header; null when nobody leads it.
+             */
+            readonly lead_name: string | null;
             /**
              * State
              * @description Whether the week is held, answered, or neither.

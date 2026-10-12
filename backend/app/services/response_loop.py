@@ -130,6 +130,7 @@ __all__ = [
     "policy_of_record",
     "publish_response",
     "record_policy",
+    "section_lead_name",
     "section_staff_names",
     "week_state",
 ]
@@ -239,6 +240,45 @@ def section_staff_names(
         )
         for row in rows
     ]
+
+
+def section_lead_name(
+    session: Session,
+    *,
+    section_id: UUID,
+    reader_user_id: UUID | None = None,
+    reader_person_id: UUID | None = None,
+    settings: Settings | None = None,
+) -> str | None:
+    """The name of the section's course's Lead Faculty, for the header of a course page (§2.1).
+
+    Asked through `section_staff_names` with the reader's own key and no scope:
+    the two callers are the student's results page and the teaching
+    instructor's report, readers the definer checks per section. Passing
+    neither key or both raises `ValueError`, from that door.
+
+    `None` when the reader may not read the section or the course has no lead.
+    A course with no lead falls to its chair (SPEC §2.1), but the header names
+    the Lead Faculty, so the chair's row is never read in its place.
+
+    A course has at most one lead (`uq_lead_faculty_mapping_course_id`), so a
+    second lead row is a broken invariant and raises rather than picking one.
+    """
+    leads = [
+        staff.display_name
+        for staff in section_staff_names(
+            session,
+            section_ids=[section_id],
+            reader_user_id=reader_user_id,
+            reader_person_id=reader_person_id,
+            scope=None,
+            settings=settings,
+        )
+        if staff.section_id == section_id and staff.role is StaffNameRole.LEAD_FACULTY
+    ]
+    if len(leads) > 1:
+        raise RuntimeError("section_staff_names answered more than one lead for one section.")
+    return leads[0] if leads else None
 
 
 # ---------------------------------------------------------------------------
