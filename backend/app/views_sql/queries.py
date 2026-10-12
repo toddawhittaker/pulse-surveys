@@ -18,11 +18,11 @@ permitted. So a hand-rolled join is refused by Postgres rather than quietly
 working, and identity is not the only thing it is refused. `CONTRIBUTING.md`'s
 "Read paths go through `views_sql/`" states the same rule the right way round.
 
-**`services/authz.py` is the only caller.** It imports both helpers, and
-`ScopedReader.section_roster` and `ScopedReader.section_enrollment_counts`
-check the purview and then pass the session and key straight through to
-them — the chokepoint is the one door these two are reached from, not a
-second way in beside it.
+**`services/authz.py` is the only caller.** It imports every helper here, and
+`ScopedReader.section_roster`, `ScopedReader.section_enrollment_counts` and
+`ScopedReader.org_node_labels` check the purview and then pass the session
+and keys straight through to them — the chokepoint is the one door these are
+reached from, not a second way in beside it.
 
 **These return plain frozen rows, not ORM entities, and deliberately.** A view is
 not on `Base.metadata` (E0-10: views ship "as Alembic migrations under
@@ -45,8 +45,10 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 __all__ = [
+    "OrgNodeLabel",
     "SectionEnrollmentCount",
     "SectionRosterRow",
+    "org_node_labels_above",
     "section_enrollment_counts",
     "section_roster",
 ]
@@ -68,6 +70,23 @@ _SECTION_ENROLLMENT_COUNTS = text(
     " FROM public.section_enrollment_count"
     " WHERE course_id = :course_id"
     " ORDER BY lms_section_code"
+)
+
+# Every org node above a set of sections, read upward from each section's course
+# through `parent_id`. `UNION` rather than `UNION ALL`, so a node above several
+# of the sections is answered once and the walk stops at the institution.
+_ORG_NODE_LABELS_ABOVE = text(
+    "WITH RECURSIVE above AS ("
+    " SELECT label.level, label.node_id, label.name, label.parent_id"
+    " FROM public.org_node_label AS label"
+    " JOIN public.section AS held ON held.course_id = label.node_id"
+    " WHERE label.level = 'course' AND held.id = ANY(CAST(:section_ids AS uuid[]))"
+    " UNION"
+    " SELECT label.level, label.node_id, label.name, label.parent_id"
+    " FROM public.org_node_label AS label"
+    " JOIN above ON label.node_id = above.parent_id"
+    ")"
+    " SELECT level, node_id, name, parent_id FROM above"
 )
 
 
@@ -106,6 +125,28 @@ class SectionEnrollmentCount:
     term_id: UUID
     lms_section_code: str
     enrolled_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class OrgNodeLabel:
+    """One org node's display name and the node it sits in (`org_node_label_v001.sql`).
+
+    `level` is one of institution, college, department, prefix and course;
+    `parent_id` is None for the institution and only for it.
+    """
+
+    level: str
+    node_id: UUID
+    name: str
+    parent_id: UUID | None
+
+
+def org_node_labels_above(
+    session: Session, *, section_ids: Sequence[UUID]
+) -> Sequence[OrgNodeLabel]:
+    """The course, prefix, department, college and institution above each section, once each."""
+    rows = session.execute(_ORG_NODE_LABELS_ABOVE, {"section_ids": list(section_ids)}).mappings()
+    return [OrgNodeLabel(**row) for row in rows]
 
 
 def section_roster(session: Session, *, section_id: UUID) -> Sequence[SectionRosterRow]:

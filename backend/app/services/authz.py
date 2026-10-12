@@ -117,8 +117,10 @@ from app.config import Settings
 from app.models.identity import LEADERSHIP_ROLES, AssignmentRole
 from app.services import clock
 from app.views_sql.queries import (
+    OrgNodeLabel,
     SectionEnrollmentCount,
     SectionRosterRow,
+    org_node_labels_above,
     section_enrollment_counts,
     section_roster,
 )
@@ -136,6 +138,7 @@ __all__ = [
     "LeadershipGrant",
     "LmsOwnedWriteRefused",
     "NoReportingPurviewError",
+    "OrgNodeLabel",
     "OutOfPurviewError",
     "Purview",
     "ScopedReader",
@@ -1555,6 +1558,27 @@ class ScopedReader:
                 "view precisely so that a peer's courses have nowhere to appear."
             )
         return section_enrollment_counts(self._session, course_id=course_id)
+
+    def org_node_labels(self, *, section_ids: Collection[UUID]) -> Sequence[OrgNodeLabel]:
+        """The names of the course, prefix, department, college and institution above sections.
+
+        Each named node once, however many of the sections sit under it. Every
+        section must be inside the purview, and one that is not refuses the
+        whole read: a node is named to a reader because a section they hold
+        sits under it (SPEC §2.1), so a department reached through one led
+        course is named and its other prefixes are not. The names come from
+        `public.org_node_label` (ADR 0205), because `pulse_app` holds nothing
+        on `institution`, `college` or `department`.
+        """
+        asked = set(section_ids)
+        outside = asked - self._scope.purview.section_ids
+        if outside:
+            raise OutOfPurviewError(
+                f"{len(outside)} of the sections asked about are not in the purview resolved for "
+                f"person {self._scope.person_id}, so no org node above them was named. SPEC 2.1: "
+                "a reader is shown the nodes above the sections they hold, and no others."
+            )
+        return org_node_labels_above(self._session, section_ids=sorted(asked))
 
 
 def scoped_reader(session: Session, scope: ActorScope) -> ScopedReader:

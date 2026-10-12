@@ -44,7 +44,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.copy import leadership_rollup as words
 from app.models.identity import AssignmentRole
-from app.models.org import College, Course, Department, Prefix, Section
+from app.models.org import Section
 from app.models.survey import REPORT_STREAMS
 from app.models.term import SurveyWindow, Term, Week
 from app.schemas.rollup import (
@@ -60,7 +60,7 @@ from app.schemas.rollup import (
     RollupWeek,
 )
 from app.services import clock, reporting
-from app.services.authz import ActorScope, LeadershipGrant
+from app.services.authz import ActorScope, LeadershipGrant, OrgNodeLabel, scoped_reader
 from app.services.benchmarks import node_series
 from app.services.comparison_sets import TermUnavailableError
 from app.services.response_loop import (
@@ -69,7 +69,7 @@ from app.services.response_loop import (
     owed_section_weeks,
     section_staff_names,
 )
-from app.services.section_codes import course_label, course_week_of, parse_section_code
+from app.services.section_codes import course_week_of, parse_section_code
 
 __all__ = [
     "NodeUnavailableError",
@@ -165,47 +165,57 @@ class SectionStaff:
 
 
 def _held_sections(session: Session, *, scope: ActorScope, term_id: UUID) -> list[HeldSection]:
-    """The purview's sections in the term, each with its path, in one statement."""
+    """The purview's sections in the term, each with its path and its nodes' names.
+
+    Two reads: the sections themselves, then every node above them through the
+    org-node label view (ADR 0205), reached through `ScopedReader` because
+    `pulse_app` holds nothing on `college` or `department`. Every name on the
+    tree comes from that view, so a course is named the way the view names it.
+    """
     held = scope.purview.section_ids
     if not held:
         return []
     rows = session.execute(
-        select(
-            Section.id,
-            Section.lms_section_code,
-            Section.start_date,
-            Course.id,
-            Course.lms_number,
-            Course.lms_title,
-            Prefix.id,
-            Prefix.code,
-            Department.id,
-            Department.name,
-            College.id,
-            College.name,
+        select(Section.id, Section.lms_section_code, Section.start_date, Section.course_id).where(
+            Section.id.in_(sorted(held)), Section.term_id == term_id
         )
-        .join(Course, Course.id == Section.course_id)
-        .join(Prefix, Prefix.id == Course.prefix_id)
-        .join(Department, Department.id == Prefix.department_id)
-        .join(College, College.id == Department.college_id)
-        .where(Section.id.in_(sorted(held)), Section.term_id == term_id)
     ).all()
-    return [
-        HeldSection(
-            section_id=row[0],
-            code=row[1],
-            start_date=row[2],
-            course_id=row[3],
-            course_name=course_label(prefix_code=row[7], lms_number=row[4], lms_title=row[5]),
-            prefix_id=row[6],
-            prefix_code=row[7],
-            department_id=row[8],
-            department_name=row[9],
-            college_id=row[10],
-            college_name=row[11],
+    if not rows:
+        return []
+    labels = {
+        label.node_id: label
+        for label in scoped_reader(session, scope).org_node_labels(
+            section_ids=[row[0] for row in rows]
         )
-        for row in rows
-    ]
+    }
+
+    def above(node: OrgNodeLabel) -> OrgNodeLabel:
+        if node.parent_id is None:
+            raise LookupError(f"The {node.level} {node.node_id} sits in no org node.")
+        return labels[node.parent_id]
+
+    sections = []
+    for section_id, code, start_date, course_id in rows:
+        course = labels[course_id]
+        prefix = above(course)
+        department = above(prefix)
+        college = above(department)
+        sections.append(
+            HeldSection(
+                section_id=section_id,
+                code=code,
+                start_date=start_date,
+                course_id=course.node_id,
+                course_name=course.name,
+                prefix_id=prefix.node_id,
+                prefix_code=prefix.name,
+                department_id=department.node_id,
+                department_name=department.name,
+                college_id=college.node_id,
+                college_name=college.name,
+            )
+        )
+    return sections
 
 
 def _staff_of(
