@@ -31,39 +31,42 @@
 -- above sections already inside the reader's purview.
 --
 -- Every relation is schema-qualified (ADR 0027), and every NULL carries its
--- cast so reordering the branches cannot change the column types.
+-- cast so reordering the branches cannot change the column types. The level
+-- names are dollar-quoted because each is also a table's name, and a table's
+-- name inside single quotes is the `'name'::regclass` lookup that
+-- tests/integration/test_identity_separated_views.py refuses unqualified.
 
 CREATE VIEW public.org_node_label AS
 SELECT
-    'institution'::text AS level,
+    $$institution$$::text AS level,
     held.id             AS node_id,
     held.name::text     AS name,
     NULL::uuid          AS parent_id
 FROM public.institution AS held
 UNION ALL
 SELECT
-    'college'::text,
+    $$college$$::text,
     held.id,
     held.name::text,
     held.institution_id
 FROM public.college AS held
 UNION ALL
 SELECT
-    'department'::text,
+    $$department$$::text,
     held.id,
     held.name::text,
     held.college_id
 FROM public.department AS held
 UNION ALL
 SELECT
-    'prefix'::text,
+    $$prefix$$::text,
     held.id,
     held.code::text,
     held.department_id
 FROM public.prefix AS held
 UNION ALL
 SELECT
-    'course'::text,
+    $$course$$::text,
     held.id,
     (above.code || ' ' || held.lms_number || ' — ' || held.lms_title)::text,
     held.prefix_id
