@@ -210,10 +210,7 @@ def _row(found: Any, what: str) -> Row:
     """A `Row` out of a mapping or an object, or a failure naming the settled members."""
     values: dict[str, Any] = {}
     for member in V2_COLUMNS:
-        if isinstance(found, dict):
-            value = found.get(member)
-        else:
-            value = getattr(found, member, None)
+        value = found.get(member) if isinstance(found, dict) else getattr(found, member, None)
         if value is None:
             pytest.fail(f"{what} answered {found!r}, which carries no `{member}`.\n\n{SETTLEMENT}")
         values[member] = str(getattr(value, "value", value))
