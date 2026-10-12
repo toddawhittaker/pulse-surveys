@@ -470,9 +470,9 @@ def revoke_session(db: Session, claims: SessionClaims) -> None:
 def claim_key(value: str | None) -> UUID | None:
     """A row key carried in a session claim, or `None` for an absent or malformed one.
 
-    The same reading `app.api.deps.person_of` makes of `person_id`, for the
-    reason it gives: a value that is not a UUID is a token this deployment did
-    not issue in that shape, and it resolves to nobody rather than to a 500.
+    `app.api.deps.person_of` and `user_of` read their claims through this, as
+    does `switch_session`: a value that is not a UUID is a token this deployment
+    did not issue in that shape, and it resolves to nobody rather than to a 500.
     """
     if value is None:
         return None

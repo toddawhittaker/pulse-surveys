@@ -443,12 +443,7 @@ def person_of(claims: SessionClaims) -> UUID | None:
     Here because it is what a router needs from the request: `app.api.instructor`
     and `app.api.leadership` each held a copy of these four lines until E5.1-03.
     """
-    if claims.person_id is None:
-        return None
-    try:
-        return UUID(claims.person_id)
-    except ValueError:
-        return None
+    return claim_key(claims.person_id)
 
 
 def user_of(claims: SessionClaims) -> UUID | None:

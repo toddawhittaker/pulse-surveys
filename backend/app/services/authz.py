@@ -1815,13 +1815,8 @@ def chosen_landing(
     whose only claim on a view is an enrollment has none at the web login, and the
     honest answer there is the calm page rather than their results.
     """
-    landings = {LANDING_FOR_ROLE[role] for role in roles if role in LANDING_FOR_ROLE}
-    for landing in LANDING_PRECEDENCE:
-        if landing in landings:
-            return landing
-    if door is Door.LAUNCH and enrolled_today:
-        return LandingRole.STUDENT
-    return None
+    held = held_landings(roles, enrolled_today=enrolled_today, door=door)
+    return held[0] if held else None
 
 
 def held_landings(
