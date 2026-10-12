@@ -66,12 +66,16 @@ def as_row(row: dict[str, Any]) -> dict[str, Any]:
         "case_id": row["case_id"],
         "role": token(row["role"]),
         "scope_node_id": None if row["scope_node_id"] is None else str(row["scope_node_id"]),
+        "parent_assignment_id": (
+            None if row["parent_assignment_id"] is None else str(row["parent_assignment_id"])
+        ),
     }
 
 
 def expected_row(
-    action: str, actor: Any, subject: Any, role: str | None, scope: Any
+    action: str, actor: Any, subject: Any, role: str | None, scope: Any, parent: Any = None
 ) -> dict[str, Any]:
+    """The settled row (interface §4, with fix round 1's F2): `parent` is a `REPORTS_TO_SET`'s alone."""
     return {
         "action": action,
         "actor_person_id": str(actor),
@@ -80,6 +84,7 @@ def expected_row(
         "case_id": None,
         "role": role,
         "scope_node_id": None if scope is None else str(scope),
+        "parent_assignment_id": None if parent is None else str(parent),
     }
 
 
@@ -156,11 +161,15 @@ def test_a_revoke_leaves_one_row_naming_the_deleted_rows_person_role_and_scope(
 def test_an_edge_change_leaves_one_row_naming_the_childs_person_role_and_scope(
     people_graph: PeopleGraphWorld, change: str
 ) -> None:
-    """`REPORTS_TO_SET`, for a set and for a clear: the child assignment's person, role and scope.
+    """`REPORTS_TO_SET`, for a set and for a clear: the child's person, role and scope, and the new parent.
+
+    Fix round 1, F2: the row names the new parent in `parent_assignment_id`, or
+    NULL when the edge is cleared.
 
     **The mutations it kills:** the parent's person written as the subject; a
     clear left unaudited (an edge removed with no record); the row's role or
-    scope left null.
+    scope left null; the new parent left off a set (F2), or the old parent
+    written on a clear.
     """
     world = people_graph
     child_person = world.a_person()
@@ -183,7 +192,12 @@ def test_an_edge_change_leaves_one_row_naming_the_childs_person_role_and_scope(
     assert changed.failure is None, f"The edge {change} {changed.describe()}."
     row = the_one_new_row(world, before, f"The edge {change}")
     assert row == expected_row(
-        REPORTS_TO_SET, world.admin, child_person, "CHAIR", scope
+        REPORTS_TO_SET,
+        world.admin,
+        child_person,
+        "CHAIR",
+        scope,
+        parent=dean if change == "set" else None,
     ), f"The edge {change}'s audit row is {row}."
 
 
@@ -215,18 +229,41 @@ def test_a_mapping_change_leaves_one_row_naming_the_lead_and_the_course(
     ), f"The {change}'s audit row is {row}."
 
 
-@pytest.mark.parametrize("change", ["link", "unlink"])
-def test_a_linkage_change_leaves_one_row_naming_the_person_and_no_role_or_scope(
-    people_graph: PeopleGraphWorld, change: str
-) -> None:
-    """`WEB_LOGIN_LINKAGE_CHANGED`, for a link and an unlink: the person, no role, no scope.
+# Fix round 1, F1: the linkage row's role is the privilege the linked person
+# holds at the time of the write — `CARE` if they hold it, else `ADMIN` if they
+# hold it, else NULL. (holds, expected role on the row.)
+LINKAGE_HOLDERS = {
+    "a Care holder": (("CARE",), "CARE"),
+    "an Admin holder": (("ADMIN",), "ADMIN"),
+    "a holder of both": (("CARE", "ADMIN"), "CARE"),
+    "a person holding neither": (("DEAN",), None),
+}
 
-    **The mutations it kills:** a linkage change unaudited — the ticket names
-    "links someone else's web login to a privileged person" as this ticket's
-    harm, and the row is how it is seen; the subject written as the actor.
+
+@pytest.mark.parametrize("holder", list(LINKAGE_HOLDERS))
+@pytest.mark.parametrize("change", ["link", "unlink"])
+def test_a_linkage_change_leaves_one_row_naming_the_person_and_the_privilege_they_hold(
+    people_graph: PeopleGraphWorld, change: str, holder: str
+) -> None:
+    """`WEB_LOGIN_LINKAGE_CHANGED`: the person, the Care or Admin role they hold (F1), no scope.
+
+    Fix round 1, F1: linking an admin's own login to a Care holder is a Care
+    grant by another road, so the row carries `CARE` when the person holds it,
+    `ADMIN` when they hold that and not Care, and NULL otherwise; `CARE` wins
+    for a holder of both. "Neither" is a dean, so a role is present and the NULL
+    is a decision, not an absence of rows to read.
+
+    **The mutations it kills:** a linkage change unaudited; the subject written
+    as the actor; the role left NULL for a Care holder (F1's finding: the trail
+    shows no Care grant); `ADMIN` preferred over `CARE` for a holder of both;
+    any held role written (the dean's `DEAN` on the row); the role read from the
+    actor rather than the linked person; a scope node written.
     """
     world = people_graph
+    holds, role = LINKAGE_HOLDERS[holder]
     person = world.a_person()
+    for held in holds:
+        world.assignment(held, person=person)
     if change == "unlink":
         world.a_linkage(person=person)
     before = world.audit_rows(world.admin)
@@ -245,8 +282,8 @@ def test_a_linkage_change_leaves_one_row_naming_the_person_and_no_role_or_scope(
     assert called.failure is None, f"The {change} {called.describe()}."
     row = the_one_new_row(world, before, f"The {change}")
     assert row == expected_row(
-        WEB_LOGIN_LINKAGE_CHANGED, world.admin, person, None, None
-    ), f"The {change}'s audit row is {row}."
+        WEB_LOGIN_LINKAGE_CHANGED, world.admin, person, role, None
+    ), f"The {change} for {holder}'s audit row is {row}."
 
 
 def test_creating_and_editing_a_person_leave_no_audit_row(people_graph: PeopleGraphWorld) -> None:

@@ -2753,14 +2753,15 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
             "case_id",
             "id",
             "occurred_at",
+            "parent_assignment_id",
             "role",
             "scope_node_id",
             "subject_person_id",
             "subject_user_id",
         ),
         "References to people and no identity payload: an actor, a subject, a case, an action "
-        "token and a timestamp; since E9-02, a subject person, and the role and scope node of an "
-        "admin write.",
+        "token and a timestamp; since E9-02, a subject person, the role and scope node of an "
+        "admin write, and the new parent assignment of an edge change.",
     ),
     "enrollment": CarriesNothing(
         (

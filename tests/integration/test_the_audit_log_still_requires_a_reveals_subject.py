@@ -19,6 +19,13 @@ The settled interface (`e9-02-interface.md`, §4) spells the mechanism:
 `ck_audit_log_an_admin_write_names_its_person` (`action = 'IDENTITY_REVEAL' OR
 subject_person_id IS NOT NULL`) are added.
 
+**Fix round 1** (`e9-02-fix-round.md`) makes both checks two-way (F6):
+`(action = 'IDENTITY_REVEAL') = (subject_user_id IS NOT NULL)` and
+`(action = 'IDENTITY_REVEAL') = (subject_person_id IS NULL)`, so an admin row
+carrying a student and a reveal row naming a person are refused too. It also adds
+`parent_assignment_id` with the check `action = 'REPORTS_TO_SET' OR
+parent_assignment_id IS NULL` (F2). The tests for both are at the foot.
+
 **Rows are written as the bootstrap identity inside `db_session`'s rolled-back
 transaction**, through the declared model table, because the question is what
 the *table* allows; who may write it is `test_identity_grants.py`'s question,
@@ -281,4 +288,130 @@ def test_an_admin_write_row_naming_no_person_is_refused_by_the_named_admin_write
     assert (sqlstate(failure), constraint(failure)) == (CHECK_VIOLATION, ADMIN_WRITE_CHECK), (
         f"The person-less `{GRANT_MEMBER}` row was refused with SQLSTATE {sqlstate(failure)!r} by "
         f"{constraint(failure)!r}, not by `{ADMIN_WRITE_CHECK}` (23514)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1, F6: each check holds both halves of its row shape.
+# ---------------------------------------------------------------------------
+
+
+def test_an_admin_write_row_carrying_a_student_is_refused_by_the_two_way_reveal_check(
+    db_session: Any, seed_rows: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """F6: `(action = 'IDENTITY_REVEAL') = (subject_user_id IS NOT NULL)` refuses a student on a grant row.
+
+    A people-graph row is about a member of staff; a student key on one would
+    put a student into E10's admin access log, and the one-way check let it
+    through. **The mutation it kills:** the reveal check left one-way
+    (`action <> 'IDENTITY_REVEAL' OR subject_user_id IS NOT NULL`). **The near
+    miss:** the same row with no student, accepted (above). **Expected red at
+    cae46288:** the row is written.
+    """
+    action = an_action(GRANT_MEMBER)
+    table = require_columns(metadata_tables, SUBJECT_PERSON_COLUMN, ROLE_COLUMN, SCOPE_COLUMN)
+    values = {
+        ACTION_COLUMN: action,
+        ACTOR_COLUMN: a_key(seed_rows, metadata_tables, "person"),
+        SUBJECT_PERSON_COLUMN: a_key(seed_rows, metadata_tables, "person"),
+        SUBJECT_COLUMN: a_key(seed_rows, metadata_tables, "user"),
+        CASE_COLUMN: None,
+        ROLE_COLUMN: "CARE",
+        SCOPE_COLUMN: uuid4(),
+    }
+    failure = insert(db_session, table, values)
+
+    assert failure is not None, f"A `{GRANT_MEMBER}` row carrying a student key was written."
+    assert (sqlstate(failure), constraint(failure)) == (CHECK_VIOLATION, REVEAL_CHECK), (
+        f"The `{GRANT_MEMBER}` row carrying a student was refused with SQLSTATE "
+        f"{sqlstate(failure)!r} by {constraint(failure)!r}, not by `{REVEAL_CHECK}` (23514)."
+    )
+
+
+def test_a_reveal_row_naming_a_person_is_refused_by_the_two_way_admin_write_check(
+    db_session: Any, seed_rows: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """F6: `(action = 'IDENTITY_REVEAL') = (subject_person_id IS NULL)` refuses a subject person on a reveal.
+
+    A reveal row names the student revealed, and only that. **The mutation it
+    kills:** the admin-write check left one-way (`action = 'IDENTITY_REVEAL' OR
+    subject_person_id IS NOT NULL`), which accepts a reveal row naming a person
+    as well. **The near miss:** a reveal row naming its student alone, accepted
+    (the control at the top). **Expected red at cae46288:** the row is written.
+    """
+    table = require_columns(metadata_tables, SUBJECT_PERSON_COLUMN)
+    values = {
+        **a_reveal_row(
+            seed_rows, metadata_tables, subject=a_key(seed_rows, metadata_tables, "user")
+        ),
+        SUBJECT_PERSON_COLUMN: a_key(seed_rows, metadata_tables, "person"),
+    }
+    failure = insert(db_session, table, values)
+
+    assert failure is not None, f"A `{REVEAL_MEMBER}` row naming a subject person was written."
+    assert (sqlstate(failure), constraint(failure)) == (CHECK_VIOLATION, ADMIN_WRITE_CHECK), (
+        f"The `{REVEAL_MEMBER}` row naming a person was refused with SQLSTATE "
+        f"{sqlstate(failure)!r} by {constraint(failure)!r}, not by `{ADMIN_WRITE_CHECK}` (23514)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Fix round 1, F2: only an edge row names a parent.
+# ---------------------------------------------------------------------------
+
+PARENT_COLUMN = "parent_assignment_id"
+EDGE_MEMBER = "REPORTS_TO_SET"
+
+
+def an_admin_row(
+    seed_rows: Any, metadata_tables: dict[str, Any], *, member: str, parent: Any
+) -> dict[str, Any]:
+    return {
+        ACTION_COLUMN: an_action(member),
+        ACTOR_COLUMN: a_key(seed_rows, metadata_tables, "person"),
+        SUBJECT_PERSON_COLUMN: a_key(seed_rows, metadata_tables, "person"),
+        SUBJECT_COLUMN: None,
+        CASE_COLUMN: None,
+        ROLE_COLUMN: "CHAIR",
+        SCOPE_COLUMN: uuid4(),
+        PARENT_COLUMN: parent,
+    }
+
+
+def test_an_edge_row_naming_its_new_parent_is_accepted(
+    db_session: Any, seed_rows: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """F2's admitted half: a `REPORTS_TO_SET` row with a parent assignment id, no foreign key needed.
+
+    The parent id is a fresh uuid naming no row, because the ruling gives the
+    column no foreign key (a parent may be revoked later and its edge rows must
+    survive). **The mutations it kills:** the column missing; a foreign key on
+    it, which refuses this row and would make a parent unrevocable once an edge
+    to it was audited. **Expected red at cae46288:** a FAILED naming the missing
+    model column.
+    """
+    table = require_columns(metadata_tables, SUBJECT_PERSON_COLUMN, PARENT_COLUMN)
+    values = an_admin_row(seed_rows, metadata_tables, member=EDGE_MEMBER, parent=uuid4())
+    failure = insert(db_session, table, values)
+    assert failure is None, f"A `{EDGE_MEMBER}` row naming a parent was refused: {failure!r}."
+
+
+def test_a_row_of_another_action_naming_a_parent_is_refused(
+    db_session: Any, seed_rows: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """F2's refused half: `action = 'REPORTS_TO_SET' OR parent_assignment_id IS NULL`.
+
+    **The mutation it kills:** the column added without its check, so a grant
+    row could carry a parent the grant never set — a row E10's log would read
+    as an edge. **The near miss:** the edge row above, accepted. **Expected red
+    at cae46288:** a FAILED naming the missing model column.
+    """
+    table = require_columns(metadata_tables, SUBJECT_PERSON_COLUMN, PARENT_COLUMN)
+    values = an_admin_row(seed_rows, metadata_tables, member=GRANT_MEMBER, parent=uuid4())
+    failure = insert(db_session, table, values)
+
+    assert failure is not None, f"A `{GRANT_MEMBER}` row naming a parent assignment was written."
+    assert sqlstate(failure) == CHECK_VIOLATION, (
+        f"The `{GRANT_MEMBER}` row naming a parent was refused with SQLSTATE "
+        f"{sqlstate(failure)!r}: {failure.orig!r}. F2's check refuses it (23514)."
     )
