@@ -27,7 +27,9 @@ builds the service, routes and CSV on top.
 `CHAIR`, `ASSISTANT_DEAN`, `DEAN`, `VP_ACADEMICS`, `CARE`, `ADMIN`) to any
 person, the acting admin included. There is no refusal of Care, Admin or
 self-targeted grants. The control is the audit: every grant and every
-revocation writes one `audit_log` row in the same transaction, and a write
+revocation made through these definers (the People editor's path; the roster
+sync's teaching grants are not audited here) writes one `audit_log` row in the
+same transaction, and a write
 whose audit row cannot be written is not committed. SPEC §6.2 now says so.
 
 **Decision 11.** `INSTRUCTOR` assignments are LMS-owned (§2.1, §6.3) and are

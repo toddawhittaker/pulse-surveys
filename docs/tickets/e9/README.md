@@ -59,7 +59,8 @@ writes rulings 1, 2, 4, 5, 6, 7, 8 and 9 into SPEC §5.1, §5.4, §5.5, §6.2,
    policy and audit on the assignment path, not on code. What code still
    enforces: an Admin session never reads a flagged comment's content or
    reveals an identity, a Care session has no reporting access, and every
-   grant and revocation is written to the audit log. E10's Admin access log
+   grant and revocation made in the People editor is written to the audit
+   log (roster-sync teaching grants are not). E10's Admin access log
    shows each Care grant beside the reveals for the outside review (§6.2).
    Teaching instructors stay LMS-owned, so the editor writes no `INSTRUCTOR`
    assignment (decision 11).
@@ -82,8 +83,10 @@ writes rulings 1, 2, 4, 5, 6, 7, 8 and 9 into SPEC §5.1, §5.4, §5.5, §6.2,
 5. **Named-set figures are shown on roll-ups,** in preference to retiring
    the named-set reads. A reader sees a named set's figures only over the set's
    sections inside their purview; the figures meet both benchmark minimums;
-   the benchmark seal counts the reader, with their whole purview as what they
-   already know (§5.1); and generated properties prove no figure reaches a
+   the benchmark seal counts the reader, with every section in their
+   leadership purview and every section they teach as what they already
+   know, and an instructor's seal likewise counts any leadership purview they
+   hold (§5.1); and generated properties prove no figure reaches a
    reader from outside their purview. The carried entry on set names that
    differ only in case is resolved in this epic, not carried again (ticket 05).
    Only cohort views and reads that stay unread are retired (decision 10).
