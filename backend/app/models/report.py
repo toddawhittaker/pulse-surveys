@@ -225,6 +225,12 @@ class WeeklySummary(UuidPrimaryKey, Base):
     generated_at: Mapped[datetime] = mapped_column(
         AwareDateTime, nullable=False, server_default=text("now()")
     )
+    # The highest `moderation_state.sequence` about the section-week that the walk
+    # could read before it gathered the comments, 0 when it read none (ADR 0206).
+    # A removal above it is one the summary may not reflect, so the leadership and
+    # draft reads withhold the row. Null on a row written before the column
+    # existed, which those reads judge by `generated_at` as they did then.
+    moderation_sequence_seen: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class ModerationState(UuidPrimaryKey, Base):
