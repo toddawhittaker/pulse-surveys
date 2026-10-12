@@ -89,3 +89,5 @@ included when the instructor answered, still gets the one 404.
 `WeekResponseView` carries `can_edit`, true exactly when the reader first
 published the week's response, on the instructor's routes and the on-behalf
 ones alike; the composer offers Edit only then.
+
+*Amended by [0206](0206-the-drill-down-reuses-the-report-read-only-and-the-wider-roles-read-the-log-and-policy.md):* the policy read lists every course of an assistant dean's, dean's or vice president's purview, which they read and do not set; the on-behalf doors keep their one 404 for them, and the summary filter compares decision sequences rather than instants.

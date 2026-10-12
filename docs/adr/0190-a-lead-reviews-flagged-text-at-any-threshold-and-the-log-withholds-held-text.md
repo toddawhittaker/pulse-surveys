@@ -120,3 +120,4 @@ stated reason is free text shown beside a date, and could quote a held comment.
   governed, the log row gained `decision` (seven members, not the work order's
   six), and the two route inventories now expect a CSRF member per decision
   door and the moderation routes beside the named sets.
+- *Amended by [0206](0206-the-drill-down-reuses-the-report-read-only-and-the-wider-roles-read-the-log-and-policy.md):* the assistant dean, the dean and the vice president read the log over their purview, under the same taught-section rule; they still read no queue, with the same 403.

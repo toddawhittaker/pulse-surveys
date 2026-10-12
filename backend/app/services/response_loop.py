@@ -102,6 +102,7 @@ from app.services.authz import (
     lead_review_courses,
     taught_or_once_taught_section_ids,
 )
+from app.services.moderation import purview_read
 from app.services.reporting import SectionUnavailableError
 from app.services.section_codes import course_label, course_week_of, week_of_the_term
 
@@ -248,14 +249,17 @@ def section_lead_name(
     section_id: UUID,
     reader_user_id: UUID | None = None,
     reader_person_id: UUID | None = None,
+    scope: ActorScope | None = None,
     settings: Settings | None = None,
 ) -> str | None:
     """The name of the section's course's Lead Faculty, for the header of a course page (§2.1).
 
-    Asked through `section_staff_names` with the reader's own key and no scope:
-    the two callers are the student's results page and the teaching
-    instructor's report, readers the definer checks per section. Passing
-    neither key or both raises `ValueError`, from that door.
+    Asked through `section_staff_names` with the reader's own key. `scope` is
+    that door's, and every caller writes it: `None` for the student's results page and the teaching
+    instructor's report, readers the definer checks per section, and the
+    leader's own `ActorScope` on the drill-down, so the name is read only for a
+    section inside her purview. Passing neither key or both raises
+    `ValueError`, from that door.
 
     `None` when the reader may not read the section or the course has no lead.
     A course with no lead falls to its chair (SPEC §2.1), but the header names
@@ -271,7 +275,7 @@ def section_lead_name(
             section_ids=[section_id],
             reader_user_id=reader_user_id,
             reader_person_id=reader_person_id,
-            scope=None,
+            scope=scope,
             settings=settings,
         )
         if staff.section_id == section_id and staff.role is StaffNameRole.LEAD_FACULTY
@@ -727,24 +731,28 @@ def _view(
 # -- the policy (rulings 1 and 5) ----------------------------------------------
 
 
-def policy_overview(session: Session, *, person_id: UUID | None) -> PolicyOverview:
-    """Every course whose policy this reader sets or reads, by prefix (ADR 0194).
+def policy_overview(session: Session, *, scope: ActorScope) -> PolicyOverview:
+    """Every course whose policy this reader sets or reads, by prefix (ADR 0194, ADR 0206).
 
-    The courses `lead_review_courses` gives the reader, which they set, and for a
+    The courses `lead_review_courses` gives the reader, which they set; for a
     chair the department's courses that have a lead, which they read and cannot
-    set. Nothing else: a sibling lead's course is in neither set. A reader with
-    neither reads an empty list, as an assistant dean, a dean and a vice
-    president do until E9.
+    set; and for an assistant dean, a dean or a vice president every course of
+    their purview (`moderation.purview_read`), which they read and cannot set.
+    Nothing else: a sibling lead's course is in none of these. A reader with
+    none reads an empty list.
 
     `mode` is each course's latest row now, by `sequence`; the policy of record
     for a week is a different question (`policy_of_record`). `set_by_role` is
     carried only on a course the reader cannot set, so nothing on a course the
     reader sets moves with anybody else's change (done-when 4).
     """
-    if person_id is None:
-        return PolicyOverview(prefixes=[])
+    person_id = scope.person_id
     settable = lead_review_courses(session, person_id=person_id)
-    readable = set(settable) | chaired_courses_with_a_lead(session, person_id=person_id)
+    readable = (
+        set(settable)
+        | chaired_courses_with_a_lead(session, person_id=person_id)
+        | purview_read(scope).course_ids
+    )
     if not readable:
         return PolicyOverview(prefixes=[])
     latest: dict[UUID, ResponsePolicy] = {}
@@ -787,7 +795,7 @@ def policy_overview(session: Session, *, person_id: UUID | None) -> PolicyOvervi
 
 
 def set_policy(
-    session: Session, *, person_id: UUID | None, prefix_id: UUID, mode: PolicyMode
+    session: Session, *, scope: ActorScope, prefix_id: UUID, mode: PolicyMode
 ) -> PolicyOverview:
     """Switch the policy of every course in the prefix this reader sets it for, and commit.
 
@@ -796,10 +804,10 @@ def set_policy(
     they lead and a `CHAIR` row for the department's unled course, each the role
     `lead_review_courses` gives for it. A reader who sets no course of the
     prefix, and a prefix that does not exist, raise `NoPolicyToSetError` before
-    anything is written.
+    anything is written. An assistant dean, a dean or a vice president sets
+    nothing (ADR 0206), so their every prefix is refused.
     """
-    if person_id is None:
-        raise NoPolicyToSetError
+    person_id = scope.person_id
     settable = lead_review_courses(session, person_id=person_id)
     in_prefix = session.scalars(
         select(Course.id).where(Course.prefix_id == prefix_id, Course.id.in_(list(settable)))
@@ -815,7 +823,7 @@ def set_policy(
             mode=mode,
         )
     session.commit()
-    return policy_overview(session, person_id=person_id)
+    return policy_overview(session, scope=scope)
 
 
 # -- the clocks (ruling 2) ------------------------------------------------------

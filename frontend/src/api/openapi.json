@@ -1223,8 +1223,8 @@
         "tags": [
           "leadership"
         ],
-        "summary": "The exclusion log inside my own grant",
-        "description": "Every exclusion, keep and undo a person made inside the reader's own grant, newest first.",
+        "summary": "The exclusion log inside my own grant or purview",
+        "description": "Every exclusion, keep and undo a person made inside the reader's reach, newest first.\n\nA lead's or chair's own grant, and an assistant dean's, dean's or vice\npresident's purview (ADR 0206); the scope is the session's own.",
         "operationId": "read_exclusion_log_leadership_moderation_log_get",
         "responses": {
           "200": {
@@ -1246,7 +1246,7 @@
           "leadership"
         ],
         "summary": "The response policy of every course I set or read it for",
-        "description": "The courses the reader sets the policy for, and a chair's led courses, which they read.",
+        "description": "The courses the reader sets the policy for, and those they read: a chair's led\ncourses, and every course of an assistant dean's, dean's or vice president's purview.",
         "operationId": "read_response_policy_leadership_response_policy_get",
         "responses": {
           "200": {
@@ -1268,7 +1268,7 @@
           "leadership"
         ],
         "summary": "Switch the response policy for my courses in one prefix",
-        "description": "One row per course of the prefix the reader sets the policy for; answered with the new read.",
+        "description": "One row per course of the prefix the reader sets the policy for; answered with the new read.\n\n`claims` is the CSRF-checked gate; the reader is the same session's `scope`.",
         "operationId": "switch_response_policy_leadership_response_policy__prefix_id__put",
         "parameters": [
           {
@@ -1618,6 +1618,59 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/WeekResponseView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/sections/{section_id}/weeks/{course_week}/report": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "One section's Monday report, read-only, inside my purview",
+        "description": "The instructor's report of one section-week, as a leader reads it (SPEC \u00a75.5).\n\nThe scope comes from `leadership_scope` and from nothing in the request\n(ADR 0199). Comments show under the section's own per-stream threshold and\nrelease batches, exactly as its instructor reads them; no comment is marked\nas the reader's decision, and the benchmark lines are sealed against the\nreader (SPEC \u00a75.1).",
+        "operationId": "read_drill_down_leadership_sections__section_id__weeks__course_week__report_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          },
+          {
+            "name": "course_week",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Course Week"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstructorReport"
                 }
               }
             }

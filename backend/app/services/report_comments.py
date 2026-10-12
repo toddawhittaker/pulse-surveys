@@ -208,6 +208,7 @@ from sqlalchemy import (
     distinct,
     func,
     insert,
+    or_,
     select,
     table,
     true,
@@ -884,17 +885,30 @@ def reported_status_of(answer_id: SQLColumnExpression[Any]) -> ColumnElement[str
     return resolved
 
 
-def latest_decision_into(
-    session: Session, *, section_id: UUID, week_id: UUID, states: Collection[str]
-) -> datetime | None:
-    """When a person last moved a comment of this section-week into one of `states`, or `None`.
+@dataclass(frozen=True, slots=True)
+class LatestRemoval:
+    """The latest decision that took a comment of one section-week out of a summary's set.
 
-    E7-03's summary filter asks it (`app.services.reporting`, ruling 9): a stored
-    summary written at or before the latest decision that took a comment out of
-    the set a summary may carry might carry that comment. `states` is the
-    caller's own set of states a summary leaves out
-    (`reporting.HELD_MODERATION_STATES`), passed rather than spelled here, so
-    there is one answer to which states those are.
+    `sequence` is the highest `moderation_state.sequence` among those decisions
+    and `decided_at` the latest instant. The summary filter compares a stored
+    summary's `moderation_sequence_seen` with the first, and a summary written
+    before that column existed with the second (ADR 0206).
+    """
+
+    sequence: int
+    decided_at: datetime
+
+
+def latest_removal_into(
+    session: Session, *, section_id: UUID, week_id: UUID, states: Collection[str]
+) -> LatestRemoval | None:
+    """The latest decision moving a comment of this section-week into one of `states`, or `None`.
+
+    The summary filter asks it (`app.services.reporting`): a stored summary that
+    did not see the latest decision taking a comment out of the set a summary
+    may carry might carry that comment. `states` is the caller's own set of
+    states a summary leaves out (`reporting.HELD_MODERATION_STATES`), passed
+    rather than spelled here, so there is one answer to which states those are.
 
     **Decisions only**: rows a person wrote, an exclusion, a keep, or an undo,
     whose stored state is one of `states`. An undo of a keep stores the state it
@@ -905,8 +919,8 @@ def latest_decision_into(
     Every comment of the section-week is read, Care-class ones included, so the
     answer can only be later than the report's view of the week, never earlier.
     """
-    return session.execute(
-        select(func.max(ModerationState.decided_at))
+    found = session.execute(
+        select(func.max(ModerationState.sequence), func.max(ModerationState.decided_at))
         .join(Answer, Answer.id == ModerationState.answer_id)
         .join(Response, Response.id == Answer.response_id)
         .where(
@@ -915,7 +929,29 @@ def latest_decision_into(
             ModerationState.decided_by_person_id.is_not(None),
             ModerationState.state.in_(list(states)),
         )
-    ).scalar_one_or_none()
+    ).one()
+    if found[0] is None:
+        return None
+    return LatestRemoval(sequence=found[0], decided_at=found[1])
+
+
+def latest_sequence_of(session: Session, *, section_id: UUID, week_id: UUID) -> int:
+    """The highest `moderation_state.sequence` about any answer of this section-week, or 0.
+
+    What the summary walk records as the decisions it saw (ADR 0206). The
+    identity starts at 1, so 0 says the walk saw no row at all. Every row
+    counts, the routing definer's flags included: the value is a horizon, and a
+    removal at or below it is one the walk's read could see. The walk reads it
+    *before* it gathers the comments, so a decision committed between the two
+    reads is above the horizon and withholds the summary, never the reverse.
+    """
+    seen: int = session.execute(
+        select(func.coalesce(func.max(ModerationState.sequence), 0))
+        .join(Answer, Answer.id == ModerationState.answer_id)
+        .join(Response, Response.id == Answer.response_id)
+        .where(Response.section_id == section_id, Response.week_id == week_id)
+    ).scalar_one()
+    return seen
 
 
 def latest_decision(session: Session, answer_id: UUID) -> LatestDecision | None:
@@ -951,16 +987,16 @@ def latest_decision(session: Session, answer_id: UUID) -> LatestDecision | None:
 
 
 def logged_decisions(
-    session: Session, *, course_ids: Collection[UUID]
+    session: Session, *, course_ids: Collection[UUID], section_ids: Collection[UUID] = ()
 ) -> tuple[LoggedDecision, ...]:
-    """Every decision and undo a person made about a comment in these courses, newest first.
+    """Every decision and undo a person made about a comment in these courses or sections, newest first.
 
-    E6-05's exclusion log (decision 1): every `moderation_state` row with a
+    The exclusion log (SPEC §5.2, ADR 0190): every `moderation_state` row with a
     decider. A decision leaves `EXCLUDED` or `KEPT`; an undo restores whatever
     the comment held before, which may also be the router's flag or the
     published state, and is marked `is_undo` (SPEC §8: "whether it undoes an
     earlier decision"), so the log shows it as a reversal rather than as a fresh
-    decision or not at all (E6-09). The router's flag has no decider and is not
+    decision or not at all. The router's flag has no decider and is not
     here.
 
     **The comments come through `report_comment` v004**, so a decision row about
@@ -970,7 +1006,7 @@ def logged_decisions(
 
     **Newest is the order of insert**, `moderation_state.sequence`, the order
     every reader of this relation uses; it is here because this module is the
-    one home of that ordering (E4-07's deferral).
+    one home of that ordering.
     """
     answer_id = COMMENT_VIEW.c.answer_id
     asked = (
@@ -990,7 +1026,7 @@ def logged_decisions(
         .join(ModerationState, ModerationState.answer_id == answer_id)
         .join(Section, Section.id == COMMENT_VIEW.c.section_id)
         .where(
-            Section.course_id.in_(list(course_ids)),
+            or_(Section.course_id.in_(list(course_ids)), Section.id.in_(list(section_ids))),
             ModerationState.decided_by_person_id.is_not(None),
         )
         .order_by(ModerationState.sequence.desc())
