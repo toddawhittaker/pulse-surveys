@@ -303,9 +303,12 @@ describe('/leadership, the roll-up', () => {
     const choice = await screen.findByRole('combobox', { name: 'Compare with a named set' });
     await screen.findByRole('option', { name: A_SET_SUMMARY.name });
     fireEvent.change(choice, { target: { value: A_SET_SUMMARY.id } });
-    expect(
-      await screen.findByText(`Choose one start cohort to see the ${A_SET_SUMMARY.name} line beside it.`),
-    ).toBeTruthy();
+    const asked = `Choose one start cohort to see the ${A_SET_SUMMARY.name} line beside it.`;
+    // The live status carries the sentence; a second copy beside it reads twice.
+    await waitFor(() => {
+      expect(screen.getAllByRole('status').some((status) => status.textContent === asked)).toBe(true);
+    });
+    expect(screen.getAllByText(asked)).toHaveLength(1);
     expect(screen.queryByTestId('trend-line-comparison')).toBeNull();
   });
 

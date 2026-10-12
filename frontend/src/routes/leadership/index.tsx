@@ -607,11 +607,6 @@ function CohortFigures({
           </select>
         </label>
       </div>
-      {chosenSet !== null && single === null ? (
-        <p className="pulse-rollup-note">
-          {fillCopy('leadership_rollup.set.choose_one', { name: chosenSet.name })}
-        </p>
-      ) : null}
       <LiveStatus
         className="pulse-rollup-status"
         text={

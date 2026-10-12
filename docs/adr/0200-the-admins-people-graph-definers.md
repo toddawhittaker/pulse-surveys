@@ -100,3 +100,9 @@ not.
   over-long category; E9-06's request schema bounds the inputs.
 - The downgrade refuses while any admin write is recorded, and the five enum
   values stay.
+- **Amendment (staff names).** The admin console is a second way a staff name
+  reaches a reader, beside ADR 0191's channel: the three people-graph reads and
+  their CSV export name people to an admin, and an import's `IMPORT_APPLIED`
+  row holds the names it wrote in `audit_log.detail` (`people_graph_v002.sql`).
+  Each is admin-checked; a screen that later reads `audit_log.detail` must scope
+  it as a staff-name read. SPEC §8 states the exception.

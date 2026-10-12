@@ -14,7 +14,7 @@ The default set and the university line are past-referencing: week N of a
 section is compared against week N of matching sections in the current term
 *and* every term §4's retention rule still keeps. Nothing in those two filters
 on a term, and that absence is the feature. **A named set is read differently**
-(E9-05, SPEC §5.5): a leadership reader sees its figures over the set's sections
+(ADR 0203, SPEC §5.5): a leadership reader sees its figures over the set's sections
 inside her purview, in the term she is viewing, one series per start cohort on
 the term axis (`named_set_series`).
 
@@ -44,7 +44,7 @@ population and so both of which show figures §4.1 item 7 means to withhold
 off the same row as the number it describes so that no caller can hand over a
 count it merely had to hand. ADR 0166's consequences carry the rule. E5's
 term-axis read was the third place it was broken (`docs/disputes/E5-04-01.md`);
-E9-05 deleted that read, because it answered a declared length and level
+ADR 0203 deleted that read, because it answered a declared length and level
 institution-wide and could not be narrowed to a reader's purview.
 
 **A benchmark figure counts every stored response, exactly as the section's own
@@ -65,7 +65,7 @@ and week shares one snapshot, so the within-term class — two reports of one
 population frozen at two instants, whose difference is whatever closed between
 — is gone. So new or revised answers cannot move a figure already shown. A
 named set's cutoff for course week *w* is its start cohort's own week-*w* close in
-the viewed term (E9 decision 14): every section of one start cohort shares its
+the viewed term (ADR 0203): every section of one start cohort shares its
 window closes, so this is the same earliest-close rule narrowed to the cohort,
 and it too depends on no reader.
 Three residuals are carried rather than closed: snapshots compared across terms
@@ -79,8 +79,8 @@ when the report is read. A change to any of those after publication moves the
 figure; freezing membership is carried to a later epic for the owner's ruling.
 
 **A figure is sealed on what each of its readers would have left** (E5-14,
-round 4; E9-05). A section's report is read by each person holding its teaching
-grant, and by a leadership reader whose purview holds it (E9-09's drill-down).
+round 4; ADR 0203). A section's report is read by each person holding its teaching
+grant, and by a leadership reader whose purview holds it (the drill-down, ADR 0206).
 Each knows the counts and sums of **her sections** — every section she teaches,
 in any term, together with every section in her leadership purview if she holds
 a leadership assignment — so she can subtract them, across every hat she wears.
@@ -108,9 +108,9 @@ of a benchmark figure to keep in step with the first — ADR 0166 records why th
 per-term cohort views cannot be aggregated in their place.
 
 **How the relations are reached, and by whom.** This module is the only one
-under `backend/app/` that names the two set functions, and since E9-05 deleted
-the last reader of the four cohort views nothing here names them (E9-12 drops
-them). `tests/unit/test_only_the_benchmark_service_names_the_benchmark_relations.py`
+under `backend/app/` that names the two set functions, and since ADR 0203
+retired the last reader of the four cohort views nothing here names them
+(migration `e9e5b7d9f605` dropped them). `tests/unit/test_only_the_benchmark_service_names_the_benchmark_relations.py`
 holds both: the functions answer for any section ids they are handed, and
 this is where a population is resolved, the hero is excluded from its own set,
 and each week's cutoff is applied. E5-14 deleted the two wrappers
@@ -149,6 +149,7 @@ from app.services.authz import (
 from app.services.reporting import (
     ComparisonFigure,
     comparison_after_suppression,
+    published_weeks_of,
     week_is_published,
 )
 from app.services.section_codes import course_week_of, week_of_the_term
@@ -309,7 +310,7 @@ def resolve_default_set(session: Session, *, section_id: UUID) -> list[UUID]:
 
 
 def _default_sets_of(session: Session, section_ids: Collection[UUID]) -> dict[UUID, list[UUID]]:
-    """`resolve_default_set` for every section asked about, in one statement (E9-05 fix round).
+    """`resolve_default_set` for every section asked about, in one statement (ADR 0203).
 
     One row per (asked section, member of its default set): the asked section's
     course's lead, every course that same person leads, and those courses'
@@ -573,24 +574,15 @@ def _answered(
 class _Population:
     """One comparison line's figures, and the contributors each figure is sealed against.
 
-    For a named set the two are the same rows: every figure is sealed against
-    its own contributors. A section-keyed population — the default set or the
-    university — is sealed against the tightest of its own contributors and its
-    non-empty remainders; see `_tightest`.
+    A section-keyed population — the default set or the university — is sealed
+    against the tightest of its own contributors and its non-empty remainders;
+    see `_tightest`. A named set's series is not a population: it is sealed
+    by `named_set_series` through `_sealed_through`.
     """
 
     figures: _Answered
     workload_seal: Mapping[int, _Contributors]
     rating_seal: Mapping[tuple[int, str], _Contributors]
-
-
-def _sealed_by_its_own(answered: _Answered) -> _Population:
-    """A population whose every figure is sealed against the contributors on its own row."""
-    return _Population(
-        figures=answered,
-        workload_seal={week: row.contributors for week, row in answered.workload.items()},
-        rating_seal={key: row.contributors for key, row in answered.ratings.items()},
-    )
 
 
 def _tightest(
@@ -708,7 +700,7 @@ def _university_population(
     6), for every person p who reads the report — each holder of the teaching
     grant on the reported section, and the leadership reader if one is named —
     with p's sections `known[p]` being every section p teaches together with
-    every section in p's leadership purview (SPEC §5.1, E9-05):
+    every section in p's leadership purview (SPEC §5.1, ADR 0203):
 
       (a) its population clears both minimums;
       (b_p) the university less p's sections is empty or clears them;
@@ -847,7 +839,7 @@ def _known_by_reader(
     teaches, and every section in her leadership purview. So an instructor who
     also chairs a department is sealed against that department's sections even
     on her own report, and an instructor with no leadership assignment is sealed
-    exactly as before E9 (her purview is empty).
+    exactly as she was before leadership purviews existed (her purview is empty).
 
     One set per **person**, never per hat: a chair reading a report of a section
     she also teaches is one reader whose sections are both. Every set is read
@@ -884,7 +876,7 @@ def _section_populations(
     says why the university needs them. Each reader's lead sets are kept once
     per distinct set, and `_Reads` asks the set functions once per distinct
     section set, so the number of statements does not grow with the number of
-    sections in a reader's purview (E9-05 fix round). It grows only with the
+    sections in a reader's purview (ADR 0203). It grows only with the
     number of distinct lead sets among them, and the one default-set statement
     answers more rows.
     """
@@ -958,8 +950,8 @@ def section_benchmarks(
     answer given or revised later moves a figure already shown. Membership is
     still resolved at read time; see the module docstring.
 
-    `scope` is the leadership reader, when one reads the report (E9-09's
-    drill-down). She enters the seal exactly as an instructor of the section
+    `scope` is the leadership reader, when one reads the report (the
+    drill-down, ADR 0206). She enters the seal exactly as an instructor of the section
     does, with every section in her purview and every section she teaches as
     what she already knows (SPEC §5.1). An instructor's own report passes
     `scope=None`. **Required, with no default:** a leadership caller that
@@ -1037,7 +1029,7 @@ def benchmark_workload(
 
 
 # ---------------------------------------------------------------------------
-# A named set's figures, for one leadership reader (E9-05, SPEC §5.1 and §5.5).
+# A named set's figures, for one leadership reader (ADR 0203, SPEC §5.1 and §5.5).
 # ---------------------------------------------------------------------------
 
 
@@ -1075,7 +1067,7 @@ def _purview_cohorts(
     **The cohorts come from the purview and never from the set.** So a set
     wholly outside the purview answers the same cohorts as a thin set inside it,
     each week suppressed, and a reader cannot tell "outside my purview" from
-    "too few" (E9-05 done-when 9).
+    "too few" (ADR 0203).
 
     The statement selects the term's sections at that length and level, and the
     purview is applied here in Python, so the statement carries no parameter per
@@ -1107,7 +1099,7 @@ def _cohort_cutoffs(
     level: CourseLevel,
     start_date: date,
 ) -> dict[int, datetime]:
-    """Each course week's cutoff for one start cohort: its earliest window close (E9 decision 14).
+    """Each course week's cutoff for one start cohort: its earliest window close (ADR 0203).
 
     Every section of one start cohort, length and level in one term shares its
     window closes, so this is ADR 0178's earliest close within the population,
@@ -1143,7 +1135,7 @@ def named_set_series(
 ) -> list[NamedSetCohort]:
     """A named set's figures for one leadership reader in one term: one series per start cohort.
 
-    SPEC §5.1 and §5.5, E9 ruling 5 and decisions 10 and 14. For the set's
+    SPEC §5.1 and §5.5, ADR 0203. For the set's
     declared length L and level V:
 
       - **cohorts** are the start dates of the reader's purview sections of the
@@ -1231,7 +1223,7 @@ def named_set_series(
 
 
 # ---------------------------------------------------------------------------
-# A roll-up node's own figures, for one leadership reader (E9-07, SPEC §5.5).
+# A roll-up node's own figures, for one leadership reader (ADR 0205, SPEC §5.5).
 # ---------------------------------------------------------------------------
 
 
@@ -1274,38 +1266,40 @@ def node_series(
     start date (SPEC §2.2: averaging week 3 across cohorts that began weeks apart
     is meaningless). Each cohort's course week N is cut off at its own earliest
     week-N close among the node's sections of that cohort, the same freeze the
-    named-set read applies (E9 decision 14), and only weeks whose report has
-    opened are answered. Each cohort's sections are read by each set function
+    named-set read applies (ADR 0203), and only weeks whose report has
+    opened are answered (`reporting.published_weeks_of`). Each cohort's sections are read by each set function
     once, so a node's figures cost two statements per cohort.
 
     Answered in start-date order, and each cohort's weeks in course-week order.
     """
     if not section_ids:
         return []
-    rows = session.execute(
-        select(Section.id, Section.start_date, Week.number, SurveyWindow.closes_at)
-        .join(SurveyWindow, SurveyWindow.section_id == Section.id)
-        .join(Week, Week.id == SurveyWindow.week_id)
-        .where(Section.id.in_(sorted(section_ids)), Section.term_id == term.id)
-    ).all()
+    starts: dict[UUID, date] = dict(
+        session.execute(
+            select(Section.id, Section.start_date).where(
+                Section.id.in_(sorted(section_ids)),
+                Section.term_id == term.id,
+                select(SurveyWindow.id).where(SurveyWindow.section_id == Section.id).exists(),
+            )
+        )
+        .tuples()
+        .all()
+    )
     cohorts: dict[date, set[UUID]] = {}
-    closes: dict[date, dict[int, datetime]] = {}
-    for section_id, start_date, number, closes_at in rows:
+    for section_id, start_date in starts.items():
         cohorts.setdefault(start_date, set()).add(section_id)
-        course_week = course_week_of(number, section_start=start_date, term_start=term.start_date)
-        earliest = closes.setdefault(start_date, {})
-        if course_week >= 1 and (course_week not in earliest or closes_at < earliest[course_week]):
-            earliest[course_week] = closes_at
-    now = clock.now(session, settings=settings)
-    zone = ZoneInfo(settings.institution_timezone)
+    closes: dict[date, dict[int, datetime]] = {start_date: {} for start_date in cohorts}
+    for section_id, published in published_weeks_of(session, starts, settings=settings).items():
+        earliest = closes[starts[section_id]]
+        for week in published:
+            if week.course_week >= 1 and (
+                week.course_week not in earliest or week.closes_at < earliest[week.course_week]
+            ):
+                earliest[week.course_week] = week.closes_at
     instructor, course = REPORT_STREAMS
     series: list[NodeCohort] = []
     for start_date in sorted(cohorts):
-        cutoffs = {
-            course_week: closes_at
-            for course_week, closes_at in closes[start_date].items()
-            if week_is_published(closes_at, now=now, zone=zone)
-        }
+        cutoffs = closes[start_date]
         answered = _answered(session, sorted(cohorts[start_date]), cutoffs)
         weeks = []
         for course_week in sorted(cutoffs):

@@ -59,7 +59,8 @@ comment, and each stream's `response_count` is the week's response count.
   reasoning keeps such reads apart.
 - **A 403 for a reader with no course** (as the review queue answers). A chair of
   a department with no courses is a real reader; an empty read answers them, and
-  the assistant dean, dean and vice president read nothing until E9.
+  the assistant dean, dean and vice president read nothing here (ADR 0206 later
+  gave them the exclusion log and policy over their purview).
 - **Per-section calls for the owed read.** One query per section and week grows
   with the reader's courses.
 - **Reading each comment's current state for the filter.** It cannot say when a

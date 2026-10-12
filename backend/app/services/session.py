@@ -33,7 +33,7 @@ the SPA captures and thereafter sends as `Authorization: Bearer`.
 `session_from_request` reads the Bearer header first and the cookie only when
 there is none, so the Bearer path carries the session with no cookie required.
 
-**Ending a session early (E9-04, ADR 0202).** A token verifies until its `exp`,
+**Ending a session early (ADR 0202).** A token verifies until its `exp`,
 so a role switch and a logout end a session by recording its `jti` in
 `revoked_session` until that `exp` (`revoke_session`). Every role gate asks
 `is_revoked` after the token verifies, and answers a revoked session with the
@@ -174,8 +174,8 @@ def issue_session(
 ) -> str:
     """One signed session token, expiring `SESSION_LIFETIME_SECONDS` after `now`.
 
-    **`expires_at`, when given, is the token's `exp` instead** (E9-04 fix round,
-    ruling G1); `iat` is still `now`. The role switch passes the old token's
+    **`expires_at`, when given, is the token's `exp` instead** (ADR 0202);
+    `iat` is still `now`. The role switch passes the old token's
     `exp`, so a switch is never a refresh: a session lives no longer for having
     changed role, however many times it does.
 
@@ -331,7 +331,7 @@ def clear_session_cookie(response: Response, settings: Settings) -> None:
     The same `SameSite=None` and the same `Secure` rule, not Starlette's
     defaults: a deletion is itself a `Set-Cookie`, and a browser can refuse a
     `SameSite=Lax` one arriving on a cross-site response, which is every
-    response inside the LMS's iframe. Logout (E9-04) is the caller.
+    response inside the LMS's iframe. Logout (ADR 0202) is the caller.
     """
     response.delete_cookie(
         SESSION_COOKIE,
@@ -398,7 +398,7 @@ def session_from_request(request: Request, secret: bytes) -> SessionClaims | Non
     verifies on every later request, which is what lets a session survive
     navigation between landing routes.
 
-    **It does not ask whether the session was revoked** (E9-04, ADR 0202). That
+    **It does not ask whether the session was revoked** (ADR 0202). That
     needs the database, and this stays a pure read over the request and the
     secret. Every role gate in `app.api.deps` reads through it and then asks
     `is_revoked`, which is the one place a route reads a session (the sweep in
@@ -424,7 +424,7 @@ def fragment_redirect(role: LandingRole, token: str) -> RedirectResponse:
 
 
 # ---------------------------------------------------------------------------
-# Ending a session before its token expires (E9-04, ADR 0202).
+# Ending a session before its token expires (ADR 0202).
 # ---------------------------------------------------------------------------
 
 
