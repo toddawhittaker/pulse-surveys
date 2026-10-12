@@ -253,6 +253,24 @@
     animation: pulse-trend-fade-in 150ms ease-out 560ms both;
   }
 
+  /* A round cap grows each dash by half the stroke width at both ends, which
+   * closes the dashed legend swatch's gaps and makes a dot read as a dash. Butt
+   * caps keep every patterned line and swatch to its declared pattern. */
+  .pulse-trend-line.pulse-trend-cohort-3,
+  .pulse-trend-line.pulse-trend-cohort-4,
+  .pulse-trend-line.pulse-trend-cohort-5,
+  .pulse-trend-line.pulse-trend-cohort-6,
+  .pulse-trend-line.pulse-trend-cohort-7,
+  .pulse-trend-line.pulse-trend-cohort-8,
+  .pulse-trend-legend-line.pulse-trend-cohort-3,
+  .pulse-trend-legend-line.pulse-trend-cohort-4,
+  .pulse-trend-legend-line.pulse-trend-cohort-5,
+  .pulse-trend-legend-line.pulse-trend-cohort-6,
+  .pulse-trend-legend-line.pulse-trend-cohort-7,
+  .pulse-trend-legend-line.pulse-trend-cohort-8 {
+    stroke-linecap: butt;
+  }
+
   /* The lower panel's patterned lines keep the panel's delay. */
   .pulse-trend-plot-delayed .pulse-trend-line.pulse-trend-cohort-3,
   .pulse-trend-plot-delayed .pulse-trend-line.pulse-trend-cohort-4,
