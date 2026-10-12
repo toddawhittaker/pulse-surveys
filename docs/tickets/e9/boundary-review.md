@@ -94,7 +94,8 @@ so `threat-model` ran.
 left (an import's audit row holds every name its diff shows; two comments named
 a deleted function), and `lti-oidc`'s LOW that no cookieless drive ran the
 switch and logout: `exit-assistant-dean.spec.ts` runs both inside the launch
-frame.
+frame. And \`adr-docs-completeness\`'s MED that some deferrals lived only in
+pull request bodies: \`../e10/carried-from-e9.md\` now names every one.
 
 **Recorded, nothing owed:** `spec-conformance`'s LOWs that E9-10's heavy code
 was written before its tests (recorded in #343), that E9-09's done-when 4 test
@@ -107,7 +108,8 @@ fixed by E9-14.
 (linking a login before a Care grant hides who holds Care; person creation and
 edits are unaudited), the audit screen's scoping of `audit_log.detail`,
 `data-model`'s redundant `uq_comparison_set_name`, `code-reviewer`'s AST
-sweep-helper consolidation, and the residues E9-14 accepted.
+sweep-helper consolidation, \`invariant-coverage\`'s LOW that the marker gate
+finds invariant modules by file name, and the residues E9-14 accepted.
 
 ## The exit clause, driven against the running stack
 
