@@ -58,6 +58,10 @@ from fixtures.moderation import HARMFUL
 from fixtures.named_sets import MINTED, NAME_FIELD, NamedSetDoor
 from fixtures.report_api import FULL_WEEK
 from fixtures.report_views import INSTRUCTOR_STREAM
+from fixtures.session_switch import COOKIE, DEAN_HAT, INSTRUCTOR_HAT, LAUNCH
+from fixtures.session_switch import INSTRUCTOR as INSTRUCTOR_LANDING
+from fixtures.session_switch import LEADERSHIP as LEADERSHIP_LANDING
+from fixtures.session_switch import MINTED as SESSION_MINTED
 from fixtures.submit import (
     COOKIE_SESSION,
     CSRF_DEPENDENCY_PREFIX,
@@ -84,7 +88,11 @@ LEADERSHIP = "csrf_verified_leadership"
 # module's three requests, over HTTP against the built application (`docs/MISTAKES.md`
 # entry 47): no token and another session's token refused, the bound token admitted.
 INSTRUCTOR = "csrf_verified_instructor"
-DRIVERS = (STUDENT, LEADERSHIP, INSTRUCTOR)
+# E9-04's: the role switch (`POST /session/switch`), gated by a session in any role.
+# Its write is the old session's revocation, so "took effect" is a `revoked_session`
+# row for the old token's `jti`, and "nothing written" is none.
+SESSION = "csrf_verified_session"
+DRIVERS = (STUDENT, LEADERSHIP, INSTRUCTOR, SESSION)
 
 
 class CookieBorneWrite(NamedTuple):
@@ -195,10 +203,42 @@ def an_instructor_excluding_a_comment(request: pytest.FixtureRequest) -> CookieB
     )
 
 
+def a_two_hat_person_switching_roles(request: pytest.FixtureRequest) -> CookieBorneWrite:
+    """E9-04's switch, driven by a two-hat person whose instructor session rides the cookie.
+
+    She holds a dean's and an instructor's assignment, starts from her launch
+    instructor session and asks for leadership. The forged token is genuine and
+    bound to another session of hers. What is counted is the `revoked_session`
+    rows naming her old session's `jti`: none before, and one after an admitted
+    switch, because a switch revokes the session it was asked from.
+    """
+    world = request.getfixturevalue("session_switch")
+    person = world.person(hats=(DEAN_HAT, INSTRUCTOR_HAT))
+    old = world.mint(person, door=LAUNCH, role=INSTRUCTOR_LANDING)
+    jti = world.jti_of(old)
+    forged = csrf_token_for(world.mint(person, door=LAUNCH, role=INSTRUCTOR_LANDING), world.secret)
+    assert forged != csrf_token_for(old, world.secret), (
+        "The two sessions' CSRF tokens are the same string, so the forged case is not carrying "
+        "another session's token at all."
+    )
+
+    def switch(csrf: Any) -> Any:
+        return world.switch(old, LEADERSHIP_LANDING, carrier=COOKIE, csrf=csrf)
+
+    return CookieBorneWrite(
+        what="a two-hat person's switch",
+        without_a_token=lambda: switch(None),
+        with_another_sessions_token=lambda: switch(forged),
+        with_the_bound_token=lambda: switch(SESSION_MINTED),
+        writes=lambda: int(jti in world.revocation_rows()),
+    )
+
+
 DRIVE = {
     STUDENT: a_student_submitting,
     LEADERSHIP: a_leader_defining_a_set,
     INSTRUCTOR: an_instructor_excluding_a_comment,
+    SESSION: a_two_hat_person_switching_roles,
 }
 
 
