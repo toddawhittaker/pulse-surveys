@@ -1,7 +1,7 @@
 """the org node label view, and a set-based person-for-user resolver
 
 Revision ID: e9f6c8e0a706
-Revises: e9a7c9e1b807
+Revises: e9d4a6b8c905
 Create Date: 2026-10-12 14:00:00.000000
 
 E9-07, ADR 0205. Two objects.
@@ -37,7 +37,7 @@ from alembic import op
 from app.views_sql import read_sql
 
 revision: str = "e9f6c8e0a706"
-down_revision: str | Sequence[str] | None = "e9a7c9e1b807"
+down_revision: str | Sequence[str] | None = "e9d4a6b8c905"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
