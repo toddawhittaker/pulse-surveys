@@ -131,3 +131,66 @@ def test_a_lead_asking_for_a_sibling_leads_group_or_the_no_lead_group_is_answere
             f"The {kind} group answered lead A {leads}; a {kind} id nothing holds answered "
             f"{missing}. A group that exists is refused exactly as one that does not."
         )
+
+
+def test_a_lead_asking_for_her_own_lead_group_and_her_departments_no_lead_group_is_answered_as_a_missing_node(
+    lead_review: LeadReviewWorld,
+) -> None:
+    """E9-14 fix round, P5: lead A's own `lead` group, and the `no_lead` group: the missing-node answer.
+
+    The sibling's group above is refused by the purview as well as by the role
+    gate, so dropping the gate leaves it refused. Lead A's own group is inside
+    her purview — every course in it is hers — so only the by-lead refusal
+    keeps it from her (SPEC §5.5: "never for Lead Faculty"). The mutation
+    battery on e88d4fc8 (row 10) dropped that refusal from `rollup_figures` and
+    nothing went red.
+
+    **The present twin:** the chair asking the same two URLs is answered 200.
+    **The refusal guard:** lead A's answer is a 4xx, so the equality is not two
+    empty 200s.
+
+    **The mutation it kills:** the by-lead kinds answered to any reader whose
+    purview holds the group's courses (battery row 10). **The near miss it
+    spares:** whatever 404 and sentence the route answers a node that does not
+    exist.
+    """
+    review = lead_review
+    term = term_of(review)
+    chair_tree = body_of(
+        review.ask("GET", tree_url(term), token=review.chair.token), "The chair's tree"
+    )
+    groups = chair_tree.get("by_lead") or []
+    own = [
+        group
+        for group in groups
+        if group.get("kind") == "lead"
+        and any(str(node.get("id")) == str(review.own_course) for node in descendants(group))
+    ]
+    no_lead = [group for group in groups if group.get("kind") == "no_lead"]
+    assert len(own) == 1 and len(no_lead) == 1, (
+        f"The chair's tree holds {len(own)} lead groups over lead A's course and {len(no_lead)} "
+        f"no-lead groups ({groups!r}); one of each was expected. A broken world, not a red."
+    )
+
+    for what, kind, group in (
+        ("her own lead group", "lead", own[0]),
+        ("the department's no-lead group", "no_lead", no_lead[0]),
+    ):
+        url = figures_url(kind, group["id"], term)
+        chairs = answer(review.ask("GET", url, token=review.chair.token))
+        leads = answer(review.ask("GET", url, token=review.lead.token))
+        missing = answer(
+            review.ask("GET", figures_url(kind, uuid4(), term), token=review.lead.token)
+        )
+        assert chairs[0] == 200, (
+            f"The present twin: the chair asking for {what} answered {chairs[0]} "
+            f"{str(chairs[1])[:300]!r}."
+        )
+        assert 400 <= leads[0] < 500, (
+            f"Lead A asking for {what} answered {leads[0]} {str(leads[1])[:300]!r}. SPEC §5.5: "
+            "the by-lead pivot is never a lead's, her own group included."
+        )
+        assert leads == missing, (
+            f"{what.capitalize()} answered lead A {leads}; a {kind} id nothing holds answered "
+            f"{missing}."
+        )
