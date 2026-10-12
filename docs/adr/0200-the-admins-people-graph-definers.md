@@ -103,7 +103,8 @@ not.
 - **Amendment (staff names).** The admin console is a second way a staff name
   reaches a reader, beside ADR 0191's channel: the three people-graph reads and
   their CSV export name people to an admin, and an import's `IMPORT_APPLIED`
-  row holds the names it wrote in `audit_log.detail` (`people_graph_v002.sql`).
+  row holds every name its dry-run diff shows, the replaced and removed
+  ones included, in `audit_log.detail` (`people_graph_v002.sql`).
   Each is admin-checked; a screen that later reads `audit_log.detail` must scope
   it as a staff-name read. SPEC §8 states the exception.
 
