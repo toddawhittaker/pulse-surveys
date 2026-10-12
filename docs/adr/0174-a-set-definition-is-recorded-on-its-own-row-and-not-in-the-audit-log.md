@@ -14,7 +14,10 @@ and its fourth acceptance criterion asks that "the log row for each write
 exists — asserted by reading the audit trail, not the return value".
 
 Verifying what the machinery is, which is what the ticket asked for, turns up
-four facts about `audit_log` as this repository has it today:
+four facts about `audit_log` as this repository had it at E5-06. (E9-02 changed
+the first two and the fourth: `AuditAction` has six members, `subject_user_id` is
+nullable, and the people-graph definers write rows too; see
+[ADR 0200](0200-the-admins-people-graph-definers.md). The decision below stands.)
 
 - `app.models.audit.AuditAction` has exactly one member, `IDENTITY_REVEAL`, and
   its docstring says so: "One member, and it is the whole of E0-10's audit

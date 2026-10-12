@@ -1,0 +1,163 @@
+"""The sentences the admin's people-graph writes refuse with, and the admin gate's two — E9-02.
+
+SPEC §6.3 puts the People & reporting editor and the Lead Faculty mapping table in
+the admin console. The writes underneath them are `SECURITY DEFINER` functions
+in `app/views_sql/people_graph_v001.sql` (ADR 0200), and each refusal they can
+make is raised as SQLSTATE `P0001` whose message is **exactly one key below**,
+for example `admin_people.actor_not_an_admin`. The message names no person and
+no id. A caller reads the key off the database error and looks it up in `COPY`;
+E9-06 writes that translation, and E9-02 ships none.
+
+**One refusal carries a number.** `admin_people.assignment_has_reports` is raised
+with the count of assignments that still report to the one being revoked, as
+digits in the error's detail field. Its text holds the placeholder `{count}`,
+filled with `entry.text.format(count=...)`, as `app.copy.gradebook` fills its
+own placeholders.
+
+**Each sentence describes only itself.** It is answered to an admin about a staff
+record, and it names no person, no role holder and no node, because the same
+sentence is shown whichever record was refused.
+
+**The gate's two sentences live here too**, beside the refusals, because the
+admin gate answers every admin route and not one screen. They need words of
+their own because the leadership gate's sentences say "leadership". The status
+codes and challenges are the leadership gate's (`NOT_LEADERSHIP_STATUS`,
+`NOT_YOUR_ROLE_STATUS` and their challenges in `app.api.deps`). `NOT_ADMIN` and
+`NOT_ADMIN_ROLE` are the constants the gate imports, each its entry's own text.
+
+**The surface owes SPEC §4.1 item 5 no confidentiality line.** Everything on
+the people pages is a staff record: names, categories, role assignments,
+reporting lines, lead mappings and whether a web login is linked. No student and
+no response is shown (E9 README decision 15).
+"""
+
+from collections.abc import Mapping
+
+from app.copy import CopyEntry
+
+__all__ = ["COPY", "NOT_ADMIN", "NOT_ADMIN_ROLE"]
+
+# --- The admin gate ---------------------------------------------------------
+
+# The 401 for a request with no session the gate can verify: none at all, a
+# malformed token, an expired one, or one signed with another key. One sentence
+# for all four, so a caller trying tokens cannot tell a real one from a forgery.
+_NOT_AN_ADMIN_SESSION = CopyEntry(
+    key="admin_people.not_an_admin_session",
+    text="This request does not carry an Admin session.",
+)
+
+# The 403 for a real, verified session in another role (ADR 0196's shape). One
+# sentence for every other role.
+_NOT_YOUR_ROLE = CopyEntry(
+    key="admin_people.not_your_role",
+    text="This request carries a signed-in session whose role is not Admin.",
+)
+
+# --- The definers' named refusals -------------------------------------------
+
+# Every write, when the acting person's key holds no live ADMIN assignment.
+_ACTOR_NOT_AN_ADMIN = CopyEntry(
+    key="admin_people.actor_not_an_admin",
+    text="Only somebody holding the Admin role may make this change.",
+)
+
+_NO_SUCH_PERSON = CopyEntry(
+    key="admin_people.no_such_person",
+    text="There is no person record here.",
+)
+
+_NO_SUCH_ASSIGNMENT = CopyEntry(
+    key="admin_people.no_such_assignment",
+    text="There is no role assignment here.",
+)
+
+# Decision 11: teaching grants are the roster sync's, never the editor's.
+_INSTRUCTOR_IS_LMS_OWNED = CopyEntry(
+    key="admin_people.instructor_is_lms_owned",
+    text=(
+        "Teaching assignments come from the learning platform's roster, so they are not "
+        "granted, revoked or given a reporting line here."
+    ),
+)
+
+_SCOPE_IS_NOT_THE_ROLES_NODE = CopyEntry(
+    key="admin_people.scope_is_not_the_roles_node",
+    text="This role is granted at another level of the organization than the one chosen.",
+)
+
+# Ruling 7: revoke deletes, and the database refuses to delete a row others
+# report to. `{count}` is filled from the refusal's detail field.
+_ASSIGNMENT_HAS_REPORTS = CopyEntry(
+    key="admin_people.assignment_has_reports",
+    text=(
+        "Assignments still reporting to this one: {count}. Point each of them to another "
+        "assignment before revoking this one."
+    ),
+)
+
+# ADR 0044's trigger, or the rule that a Care assignment reports to nobody.
+_EDGE_DOES_NOT_CLIMB = CopyEntry(
+    key="admin_people.edge_does_not_climb",
+    text=(
+        "An assignment reports only to a role above it in the chain, never to or from Care, and "
+        "never in a loop. This reporting line breaks that rule."
+    ),
+)
+
+_NO_SUCH_COURSE = CopyEntry(
+    key="admin_people.no_such_course",
+    text="There is no such course here.",
+)
+
+_COURSE_ALREADY_LED = CopyEntry(
+    key="admin_people.course_already_led",
+    text="This course already has a lead. Unmap the current lead first.",
+)
+
+_COURSE_NOT_LED = CopyEntry(
+    key="admin_people.course_not_led",
+    text="This course has no lead to unmap.",
+)
+
+_SUBJECT_LINKED_TO_ANOTHER = CopyEntry(
+    key="admin_people.subject_linked_to_another",
+    text="This web login is already linked to another person.",
+)
+
+_PERSON_ALREADY_LINKED = CopyEntry(
+    key="admin_people.person_already_linked",
+    text="This person already has a web login linked. Unlink it first.",
+)
+
+_PERSON_NOT_LINKED = CopyEntry(
+    key="admin_people.person_not_linked",
+    text="This person has no web login to unlink.",
+)
+
+# What the gate serves. Each is its entry's own text, so a reworded sentence is
+# one edit above.
+NOT_ADMIN = _NOT_AN_ADMIN_SESSION.text
+NOT_ADMIN_ROLE = _NOT_YOUR_ROLE.text
+
+# What the inventory reads, and what a caller looks a definer's key up in.
+COPY: Mapping[str, CopyEntry] = {
+    entry.key: entry
+    for entry in (
+        _NOT_AN_ADMIN_SESSION,
+        _NOT_YOUR_ROLE,
+        _ACTOR_NOT_AN_ADMIN,
+        _NO_SUCH_PERSON,
+        _NO_SUCH_ASSIGNMENT,
+        _INSTRUCTOR_IS_LMS_OWNED,
+        _SCOPE_IS_NOT_THE_ROLES_NODE,
+        _ASSIGNMENT_HAS_REPORTS,
+        _EDGE_DOES_NOT_CLIMB,
+        _NO_SUCH_COURSE,
+        _COURSE_ALREADY_LED,
+        _COURSE_NOT_LED,
+        _SUBJECT_LINKED_TO_ANOTHER,
+        _PERSON_ALREADY_LINKED,
+        _PERSON_NOT_LINKED,
+    )
+}
