@@ -1,9 +1,10 @@
-import { useEffect, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX } from 'react';
 
 import { readMappings, type MappingPageView } from '../../api/admin';
 import type { MappingSort, Order } from '../../lib/adminTable';
 import { copy, fillCopy } from '../../copy/adminPeople';
 import { AdminPage, type Gate } from './AdminPage';
+import { useAnnouncer } from './announcer';
 import { ImportPanel } from './ImportPanel';
 import { Pager, SortHeader, nextOrder } from './tableParts';
 
@@ -15,6 +16,7 @@ export const MAPPINGS_TESTID = 'pulse-admin-mappings';
 export const MAPPINGS_TABLE_TESTID = 'pulse-admin-mappings-table';
 
 const HEADING_ID = 'pulse-admin-mappings-heading';
+const CAPTION_ID = 'pulse-admin-mappings-caption';
 
 type Load =
   | { readonly kind: 'loading' }
@@ -35,7 +37,8 @@ export function MappingsRoute(): JSX.Element {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [reloads, setReloads] = useState(0);
   const [gate, setGate] = useState<Gate>(null);
-  const [announcement, setAnnouncement] = useState('');
+  const [announcement, announce] = useAnnouncer(copy('admin_people.page.loading'));
+  const firstRead = useRef(true);
 
   useEffect(() => {
     let live = true;
@@ -43,17 +46,21 @@ export function MappingsRoute(): JSX.Element {
       if (!live) return;
       if (answer.kind === 'ok') {
         setLoad({ kind: 'page', page: answer.value });
+        if (firstRead.current) {
+          firstRead.current = false;
+          announce('');
+        }
       } else if (answer.kind === 'session-ended' || answer.kind === 'not-your-role') {
         setGate(answer.kind);
       } else {
         setLoad({ kind: 'error' });
-        setAnnouncement(copy('admin_people.page.unavailable'));
+        announce(copy('admin_people.page.unavailable'));
       }
     });
     return () => {
       live = false;
     };
-  }, [sort, order, pageNumber, reloads]);
+  }, [sort, order, pageNumber, reloads, announce]);
 
   function sortBy(column: MappingSort): void {
     setOrder(nextOrder(sort === column, order));
@@ -67,7 +74,7 @@ export function MappingsRoute(): JSX.Element {
       headingId={HEADING_ID}
       heading={copy('admin_people.page.mappings_heading')}
       intro={copy('admin_people.page.mappings_intro')}
-      announcement={load.kind === 'loading' ? copy('admin_people.page.loading') : announcement}
+      announcement={announcement}
       gate={gate}
     >
       {load.kind === 'page' ? (
@@ -80,7 +87,7 @@ export function MappingsRoute(): JSX.Element {
           ) : (
             <div className="pulse-admin-scroll">
               <table className="pulse-admin-table" data-testid={MAPPINGS_TABLE_TESTID}>
-                <caption className="pulse-admin-caption">
+                <caption className="pulse-admin-caption" id={CAPTION_ID} tabIndex={-1}>
                   {copy('admin_people.page.mappings_table_label')}
                 </caption>
                 <thead>
@@ -115,13 +122,15 @@ export function MappingsRoute(): JSX.Element {
             pageSize={load.page.page_size}
             total={load.page.total}
             onPage={setPageNumber}
+            announce={announce}
+            captionId={CAPTION_ID}
           />
         </>
       ) : null}
 
       <ImportPanel
         table="mappings"
-        announce={setAnnouncement}
+        announce={announce}
         onGate={setGate}
         onApplied={() => setReloads((count) => count + 1)}
       />

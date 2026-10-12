@@ -226,7 +226,8 @@ describe('/admin/people, the People & reporting table', () => {
     mountAt(PEOPLE_PAGE);
     await screen.findByTestId('pulse-admin-people-table');
 
-    expect(screen.getByText('Page 1 of 2')).toBeTruthy();
+    const pager = screen.getByRole('navigation', { name: 'Pages' });
+    expect(within(pager).getByText('Page 1 of 2')).toBeTruthy();
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Previous page' }).disabled).toBe(
       true,
     );
@@ -235,7 +236,12 @@ describe('/admin/people, the People & reporting table', () => {
     await waitFor(() => {
       expect(tableRowNames()).toEqual(['Prof. Cy Zimmer']);
     });
-    expect(screen.getByText('Page 2 of 2')).toBeTruthy();
+    expect(within(pager).getByText('Page 2 of 2')).toBeTruthy();
+    // The pager is also said aloud, and focus left the disabled control for the table.
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe('Page 2 of 2');
+    });
+    expect(document.activeElement?.tagName).toBe('CAPTION');
     expect(asked.map((ask) => ask.path)).toContain('/admin/people?sort=name&order=asc&page=2');
   });
 
@@ -351,6 +357,9 @@ describe('the person panel', () => {
     mountAt(PEOPLE_PAGE);
     const region = await screen.findByRole('status');
     const panel = await manage('Bo Adams');
+    const nodeSelect = await within(panel).findByLabelText<HTMLSelectElement>('Granted at');
+    await within(nodeSelect).findByRole('option', { name: 'Biology (Sciences)' });
+    fireEvent.change(nodeSelect, { target: { value: 'dept-a' } });
     fireEvent.click(within(panel).getByRole('button', { name: 'Grant role' }));
 
     await waitFor(() => {
@@ -435,6 +444,11 @@ describe('the person panel', () => {
     ]);
 
     fireEvent.change(select, { target: { value: 'dean-1' } });
+    // Choosing writes nothing: the choice is sent by its own button (WCAG 3.2.2).
+    expect(asked.some((ask) => ask.method === 'PUT')).toBe(false);
+    fireEvent.click(
+      within(panel).getAllByRole('button', { name: /^Save reporting line for Lead Faculty/ })[0] as HTMLElement,
+    );
     await waitFor(() => {
       expect(
         asked.find((ask) => ask.method === 'PUT' && ask.path.endsWith('/reports-to'))?.body,
@@ -504,6 +518,121 @@ describe('the person panel', () => {
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toBe('Person added.');
     });
+  });
+});
+
+describe('keyboard and screen-reader behaviour', () => {
+  it('moves focus into the panel when it opens, and back to its Manage button when it closes', async () => {
+    serving(peopleReads());
+    mountAt(PEOPLE_PAGE);
+    const opener = await screen.findByRole('button', { name: 'Manage Bo Adams' });
+    fireEvent.click(opener);
+    const panel = await screen.findByTestId('pulse-admin-person-panel');
+
+    expect(document.activeElement).toBe(within(panel).getByRole('heading', { name: 'Manage Bo Adams' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Close' }));
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('says an identical outcome again: the same node is cleared and set for each announcement', async () => {
+    const SENTENCE = 'Assignments still reporting to this one: 1. Point each of them to another assignment before revoking this one.';
+    serving((ask) => {
+      if (ask.method === 'DELETE') return json(409, { detail: SENTENCE });
+      return peopleReads()(ask);
+    });
+    mountAt(PEOPLE_PAGE);
+    const region = await screen.findByRole('status');
+    const panel = await manage('Bo Adams');
+    const revoke = within(panel).getByRole('button', { name: /^Revoke Chair/ });
+
+    const seen: string[] = [];
+    new MutationObserver(() => seen.push(region.textContent ?? '')).observe(region, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    fireEvent.click(revoke);
+    await waitFor(() => {
+      expect(region.textContent).toBe(SENTENCE);
+    });
+    fireEvent.click(revoke);
+    await waitFor(() => {
+      expect(seen.filter((text) => text === SENTENCE)).toHaveLength(2);
+    });
+    // Between the two the region was emptied, which is what makes the second a change.
+    expect(seen).toContain('');
+    expect(screen.getByRole('status')).toBe(region);
+  });
+
+  it('puts focus on the roles heading after a revoke', async () => {
+    serving((ask) => (ask.method === 'DELETE' ? none() : peopleReads()(ask)));
+    mountAt(PEOPLE_PAGE);
+    const panel = await manage('Bo Adams');
+    fireEvent.click(within(panel).getByRole('button', { name: /^Revoke Chair/ }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(within(panel).getByRole('heading', { name: 'Roles held' }));
+    });
+  });
+
+  it('names where each assignment is held, in the row, the revoke button and the reports-to controls', async () => {
+    const TWO_CHAIRS = person('p-two', 'Eve Ng', 'Faculty', [
+      assignment('chair-bio', 'CHAIR', null),
+      assignment('chair-chem', 'CHAIR', null),
+    ]).assignments as ReturnType<typeof assignment>[];
+    TWO_CHAIRS[0] = { ...TWO_CHAIRS[0], scope_node_id: 'dept-bio' } as never;
+    TWO_CHAIRS[1] = { ...TWO_CHAIRS[1], scope_node_id: 'dept-chem' } as never;
+    serving((ask) => {
+      if (ask.path === '/admin/org-nodes?role=CHAIR') {
+        return json(200, {
+          nodes: [
+            { node_id: 'dept-bio', label: 'Biology', parent_label: 'Sciences' },
+            { node_id: 'dept-chem', label: 'Chemistry', parent_label: 'Sciences' },
+          ],
+        });
+      }
+      if (ask.method === 'GET' && ask.path.startsWith('/admin/people?')) {
+        return json(200, peoplePage([person('p-two', 'Eve Ng', 'Faculty', TWO_CHAIRS)]));
+      }
+      return peopleReads()(ask);
+    });
+    mountAt(PEOPLE_PAGE);
+
+    // The table row says where, so two Chair lines are not alike.
+    const row = (await screen.findByRole('rowheader', { name: 'Eve Ng' })).closest('tr') as HTMLElement;
+    await waitFor(() => {
+      expect(within(row).getAllByRole('listitem').map((line) => line.textContent)).toEqual([
+        'Chair at Biology (Sciences) · reports to nobody',
+        'Chair at Chemistry (Sciences) · reports to nobody',
+      ]);
+    });
+
+    fireEvent.click(within(row).getByRole('button', { name: 'Manage Eve Ng' }));
+    const panel = await screen.findByTestId('pulse-admin-person-panel');
+    expect(
+      await within(panel).findByRole('button', { name: 'Revoke Chair at Biology (Sciences)' }),
+    ).toBeTruthy();
+    expect(within(panel).getByRole('button', { name: 'Revoke Chair at Chemistry (Sciences)' })).toBeTruthy();
+    expect(within(panel).getByLabelText('Reports to, for Chair at Chemistry (Sciences)')).toBeTruthy();
+  });
+
+  it('announces the dry run’s counts, and puts focus on the import heading after cancelling', async () => {
+    serving((ask) => {
+      if (ask.path.startsWith('/admin/lead-mappings?')) return json(200, mappingRows([MAPPING]));
+      if (ask.path === '/admin/lead-mappings/import/dry-run') return json(200, theDiff(THE_DIGEST));
+      return undefined;
+    });
+    mountAt(MAPPINGS_PAGE);
+    await screen.findByTestId('pulse-admin-mappings-table');
+    await chooseFile(CSV);
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe(
+        '1 added · 1 changed · 0 removed · 1 left without a lead',
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Import a CSV file' }));
   });
 });
 
@@ -640,9 +769,11 @@ describe('/admin/lead-mappings, the Lead Faculty mapping table and its import', 
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(applyButton()).toBeNull();
     expect(screen.queryByTestId('pulse-admin-import-diff')).toBeNull();
-    expect(screen.getByRole('status').textContent).toBe(
-      'The import was cancelled and nothing was changed.',
-    );
+    await waitFor(() => {
+      expect(screen.getByRole('status').textContent).toBe(
+        'The import was cancelled and nothing was changed.',
+      );
+    });
     expect(asked.some((ask) => ask.path === '/admin/lead-mappings/import')).toBe(false);
   });
 
@@ -716,8 +847,10 @@ describe('/admin/lead-mappings, the Lead Faculty mapping table and its import', 
       expect(screen.getByRole('status').textContent).toBe(STALE);
     });
     // The refusal took the apply control away; only a fresh dry run brings it back.
+    // Its sentence is on the page itself, not only in the live region.
     expect(applyButton()).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Run a fresh dry run' }));
+    expect(within(screen.getByRole('main')).getAllByText(STALE).length).toBeGreaterThanOrEqual(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Check the file again' }));
     await screen.findByTestId('pulse-admin-import-diff');
     expect(applyButton()).not.toBeNull();
 

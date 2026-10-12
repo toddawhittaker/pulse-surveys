@@ -1,9 +1,11 @@
-import { useEffect, useId, useState, type FormEvent, type JSX } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type JSX } from 'react';
 
-import { addPerson, readPeople, type PeoplePageView } from '../../api/admin';
+import { GRANTABLE_ROLES, addPerson, readPeople, type PeoplePageView } from '../../api/admin';
 import type { Order, PeopleSort } from '../../lib/adminTable';
 import { copy, fillCopy } from '../../copy/adminPeople';
 import { AdminPage, type Gate } from './AdminPage';
+import { useAnnouncer } from './announcer';
+import { useNodeLabels } from './nodeLabels';
 import { ImportPanel } from './ImportPanel';
 import { Field, PersonPanel, roleLabel } from './PersonPanel';
 import { settle } from './outcome';
@@ -17,6 +19,7 @@ export const PEOPLE_TESTID = 'pulse-admin-people';
 export const PEOPLE_TABLE_TESTID = 'pulse-admin-people-table';
 
 const HEADING_ID = 'pulse-admin-people-heading';
+const CAPTION_ID = 'pulse-admin-people-caption';
 
 type Load =
   | { readonly kind: 'loading' }
@@ -38,8 +41,11 @@ export function PeopleRoute(): JSX.Element {
   const [load, setLoad] = useState<Load>({ kind: 'loading' });
   const [reloads, setReloads] = useState(0);
   const [gate, setGate] = useState<Gate>(null);
-  const [announcement, setAnnouncement] = useState('');
+  const [announcement, announce] = useAnnouncer(copy('admin_people.page.loading'));
   const [selected, setSelected] = useState<string | null>(null);
+  const manageButtons = useRef(new Map<string, HTMLButtonElement>());
+  const firstRead = useRef(true);
+  const labels = useNodeLabels(announce, setGate);
 
   useEffect(() => {
     let live = true;
@@ -47,17 +53,21 @@ export function PeopleRoute(): JSX.Element {
       if (!live) return;
       if (answer.kind === 'ok') {
         setLoad({ kind: 'page', page: answer.value });
+        if (firstRead.current) {
+          firstRead.current = false;
+          announce('');
+        }
       } else if (answer.kind === 'session-ended' || answer.kind === 'not-your-role') {
         setGate(answer.kind);
       } else {
         setLoad({ kind: 'error' });
-        setAnnouncement(copy('admin_people.page.unavailable'));
+        announce(copy('admin_people.page.unavailable'));
       }
     });
     return () => {
       live = false;
     };
-  }, [sort, order, pageNumber, reloads]);
+  }, [sort, order, pageNumber, reloads, announce]);
 
   const reload = (): void => setReloads((count) => count + 1);
 
@@ -70,13 +80,24 @@ export function PeopleRoute(): JSX.Element {
   const people = load.kind === 'page' ? load.page.people : [];
   const chosen = people.find((person) => person.person_id === selected) ?? null;
 
+  // The names of the places the page's assignments are held at.
+  const heldRoles = [
+    ...new Set(people.flatMap((person) => person.assignments.map((assignment) => assignment.role))),
+  ].join();
+  const { ensure } = labels;
+  useEffect(() => {
+    for (const role of heldRoles === '' ? [] : (heldRoles.split(',') as (typeof GRANTABLE_ROLES)[number][])) {
+      ensure(role);
+    }
+  }, [ensure, heldRoles]);
+
   return (
     <AdminPage
       testid={PEOPLE_TESTID}
       headingId={HEADING_ID}
       heading={copy('admin_people.page.people_heading')}
       intro={copy('admin_people.page.people_intro')}
-      announcement={load.kind === 'loading' ? copy('admin_people.page.loading') : announcement}
+      announcement={announcement}
       gate={gate}
     >
       {load.kind === 'page' ? (
@@ -89,7 +110,7 @@ export function PeopleRoute(): JSX.Element {
           ) : (
             <div className="pulse-admin-scroll">
               <table className="pulse-admin-table" data-testid={PEOPLE_TABLE_TESTID}>
-                <caption className="pulse-admin-caption">
+                <caption className="pulse-admin-caption" id={CAPTION_ID} tabIndex={-1}>
                   {copy('admin_people.page.people_table_label')}
                 </caption>
                 <thead>
@@ -123,7 +144,13 @@ export function PeopleRoute(): JSX.Element {
                           <ul className="pulse-admin-assignments">
                             {person.assignments.map((assignment) => (
                               <li key={assignment.assignment_id}>
-                                {roleLabel(assignment.role)}
+                                {assignment.scope_node_id === '' ||
+                                labels.labelOf(assignment.scope_node_id) === null
+                                  ? roleLabel(assignment.role)
+                                  : fillCopy('admin_people.page.assignment_at', {
+                                      role: roleLabel(assignment.role),
+                                      place: labels.labelOf(assignment.scope_node_id) ?? '',
+                                    })}
                                 {' · '}
                                 {assignment.reports_to_name === null ||
                                 assignment.reports_to_role === null
@@ -146,6 +173,10 @@ export function PeopleRoute(): JSX.Element {
                         <button
                           type="button"
                           className="pulse-admin-button-plain"
+                          ref={(button) => {
+                            if (button === null) manageButtons.current.delete(person.person_id);
+                            else manageButtons.current.set(person.person_id, button);
+                          }}
                           onClick={() => setSelected(person.person_id)}
                         >
                           {fillCopy('admin_people.page.manage', { name: person.name })}
@@ -162,6 +193,8 @@ export function PeopleRoute(): JSX.Element {
             pageSize={load.page.page_size}
             total={load.page.total}
             onPage={setPageNumber}
+            announce={announce}
+            captionId={CAPTION_ID}
           />
         </>
       ) : null}
@@ -170,15 +203,20 @@ export function PeopleRoute(): JSX.Element {
         <PersonPanel
           key={chosen.person_id}
           person={chosen}
-          announce={setAnnouncement}
+          announce={announce}
           onGate={setGate}
           onChanged={reload}
-          onClose={() => setSelected(null)}
+          labels={labels}
+          onClose={() => {
+            // The Manage button that opened the panel is still in the table.
+            manageButtons.current.get(chosen.person_id)?.focus();
+            setSelected(null);
+          }}
         />
       )}
 
-      <AddPerson announce={setAnnouncement} onGate={setGate} onAdded={reload} />
-      <ImportPanel table="people" announce={setAnnouncement} onGate={setGate} onApplied={reload} />
+      <AddPerson announce={announce} onGate={setGate} onAdded={reload} />
+      <ImportPanel table="people" announce={announce} onGate={setGate} onApplied={reload} />
     </AdminPage>
   );
 }

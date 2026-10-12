@@ -1,4 +1,4 @@
-import { useId, useState, type ChangeEvent, type JSX } from 'react';
+import { useId, useRef, useState, type ChangeEvent, type JSX } from 'react';
 
 import {
   applyImport,
@@ -59,6 +59,10 @@ export function ImportPanel({
 }): JSX.Element {
   const [held, setHeld] = useState<Held>({ kind: 'idle' });
   const fileId = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+
+  /** The control pressed is about to leave, so focus goes to the section's heading. */
+  const toHeading = (): void => headingRef.current?.focus();
 
   /** Whether `answer` was one the page cannot go on from; if so, say so. */
   function gated(answer: AdminOutcome<unknown>): boolean {
@@ -78,7 +82,7 @@ export function ImportPanel({
     if (gated(answer)) return;
     if (answer.kind === 'ok') {
       setHeld({ kind: 'dry', csv, diff: answer.value });
-      announce(copy('admin_people.page.diff_heading'));
+      announce(summaryOf(answer.value));
     } else if (answer.kind === 'refused') {
       setHeld({ kind: 'refused', detail: answer.detail });
       announce(answer.detail);
@@ -115,6 +119,7 @@ export function ImportPanel({
     if (answer.kind === 'ok') {
       setHeld({ kind: 'idle' });
       announce(fillCopy('admin_people.page.import_applied', { summary: summaryOf(answer.value) }));
+      toHeading();
       onApplied();
     } else if (answer.kind === 'refused') {
       setHeld({ kind: 'stale', csv, detail: answer.detail });
@@ -143,7 +148,7 @@ export function ImportPanel({
 
   return (
     <section className="pulse-admin-section" aria-labelledby={`${fileId}-heading`}>
-      <h2 className="pulse-admin-subheading" id={`${fileId}-heading`}>
+      <h2 className="pulse-admin-subheading" id={`${fileId}-heading`} tabIndex={-1} ref={headingRef}>
         {copy('admin_people.page.import_heading')}
       </h2>
       <p className="pulse-admin-help">{copy('admin_people.page.import_intro')}</p>
@@ -172,7 +177,10 @@ export function ImportPanel({
                 type="button"
                 className="pulse-admin-button"
                 data-testid={IMPORT_APPLY_TESTID}
-                onClick={() => void apply(held.csv, held.diff)}
+                onClick={() => {
+                  toHeading();
+                  void apply(held.csv, held.diff);
+                }}
               >
                 {copy('admin_people.page.import_apply')}
               </button>
@@ -182,6 +190,7 @@ export function ImportPanel({
                 type="button"
                 className="pulse-admin-button-plain"
                 onClick={() => {
+                  toHeading();
                   setHeld({ kind: 'idle' });
                   announce(copy('admin_people.page.import_cancelled'));
                 }}
@@ -193,12 +202,19 @@ export function ImportPanel({
         </div>
       ) : null}
 
+      {held.kind === 'stale' || held.kind === 'refused' ? (
+        <p className="pulse-admin-refusal">{held.detail}</p>
+      ) : null}
+
       {held.kind === 'stale' ? (
         <div className="pulse-admin-row">
           <button
             type="button"
             className="pulse-admin-button"
-            onClick={() => void dryRunOf(held.csv)}
+            onClick={() => {
+              toHeading();
+              void dryRunOf(held.csv);
+            }}
           >
             {copy('admin_people.page.import_retry')}
           </button>
@@ -206,6 +222,7 @@ export function ImportPanel({
             type="button"
             className="pulse-admin-button-plain"
             onClick={() => {
+              toHeading();
               setHeld({ kind: 'idle' });
               announce(copy('admin_people.page.import_cancelled'));
             }}

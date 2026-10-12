@@ -1,23 +1,22 @@
-import { useEffect, useId, useState, type FormEvent, type JSX } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type JSX } from 'react';
 
 import {
   GRANTABLE_ROLES,
   editPerson,
   grantRole,
   linkWebLogin,
-  readOrgNodes,
   readReportsToOptions,
   revokeRole,
   setReportsTo,
   unlinkWebLogin,
   type AssignmentLineView,
   type AssignmentRole,
-  type OrgNodeView,
   type PersonLineView,
   type ReportsToOptionView,
 } from '../../api/admin';
 import { copy, fillCopy } from '../../copy/adminPeople';
 import type { Gate } from './AdminPage';
+import { nodeText, type NodeLabels } from './nodeLabels';
 import { settle } from './outcome';
 
 /** Where a spec finds the panel. */
@@ -29,6 +28,7 @@ type Props = {
   readonly onGate: (gate: Exclude<Gate, null>) => void;
   readonly onChanged: () => void;
   readonly onClose: () => void;
+  readonly labels: NodeLabels;
 };
 
 export function roleLabel(role: AssignmentRole): string {
@@ -45,35 +45,57 @@ export function roleLabel(role: AssignmentRole): string {
  * role, a login linked to somebody else) is shown in the server's sentence with
  * nothing removed.
  */
-export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Props): JSX.Element {
+/** The place an assignment is held at, if its node's name has arrived. */
+function placeOf(labels: NodeLabels, assignment: AssignmentLineView): string | null {
+  return labels.labelOf(assignment.scope_node_id);
+}
+
+/** An assignment as a person reads it: its role, and where it is held once that is known. */
+function assignmentText(labels: NodeLabels, assignment: AssignmentLineView): string {
+  const place = placeOf(labels, assignment);
+  return place === null
+    ? roleLabel(assignment.role)
+    : fillCopy('admin_people.page.assignment_at', { role: roleLabel(assignment.role), place });
+}
+
+export function PersonPanel({
+  person,
+  announce,
+  onGate,
+  onChanged,
+  onClose,
+  labels,
+}: Props): JSX.Element {
   const id = useId();
   const [name, setName] = useState(person.name);
   const [category, setCategory] = useState(person.category);
   const [role, setRole] = useState<AssignmentRole>(GRANTABLE_ROLES[0] ?? 'ADMIN');
   const [node, setNode] = useState('');
-  const [loaded, setLoaded] = useState<{
-    readonly role: AssignmentRole;
-    readonly nodes: readonly OrgNodeView[];
-  } | null>(null);
-  // Nodes read for another role are not this role's, so none show until its own arrive.
-  const nodes = loaded !== null && loaded.role === role ? loaded.nodes : [];
+  const nodes = labels.nodesFor(role);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const rolesHeadingRef = useRef<HTMLHeadingElement>(null);
+  const loginHeadingRef = useRef<HTMLHeadingElement>(null);
   const [issuer, setIssuer] = useState('');
   const [subject, setSubject] = useState('');
 
-  // The places a role is granted at depend on the role, and the server says which.
+  // Opening the panel moves the reader into it: the control that opened it is
+  // still where focus is, and a keyboard or screen-reader user would otherwise
+  // have to find that something appeared.
   useEffect(() => {
-    let live = true;
-    void readOrgNodes(role).then((answer) => {
-      if (!live) return;
-      if (answer.kind === 'ok') setLoaded({ role, nodes: answer.value });
-      else if (answer.kind === 'session-ended' || answer.kind === 'not-your-role') {
-        onGate(answer.kind);
-      } else announce(copy('admin_people.page.nodes_unavailable'));
-    });
-    return () => {
-      live = false;
-    };
-  }, [role, announce, onGate]);
+    headingRef.current?.focus();
+  }, []);
+
+  // The places a role is granted at depend on the role, and the server says which.
+  const { ensure } = labels;
+  useEffect(() => {
+    ensure(role);
+  }, [ensure, role]);
+  const heldRoles = [...new Set(person.assignments.map((assignment) => assignment.role))].join();
+  useEffect(() => {
+    for (const held of heldRoles === '' ? [] : (heldRoles.split(',') as AssignmentRole[])) {
+      ensure(held);
+    }
+  }, [ensure, heldRoles]);
 
   async function submit(
     event: FormEvent,
@@ -93,6 +115,8 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
         onGate,
       )
     ) {
+      // The button pressed is about to leave; focus goes to the list's heading.
+      rolesHeadingRef.current?.focus();
       onChanged();
     }
   }
@@ -103,7 +127,7 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
       data-testid={PERSON_PANEL_TESTID}
       aria-labelledby={`${id}-heading`}
     >
-      <h2 className="pulse-admin-subheading" id={`${id}-heading`}>
+      <h2 className="pulse-admin-subheading" id={`${id}-heading`} tabIndex={-1} ref={headingRef}>
         {fillCopy('admin_people.page.manage_heading', { name: person.name })}
       </h2>
 
@@ -138,16 +162,19 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
         </button>
       </form>
 
-      <h3 className="pulse-admin-diff-heading">{copy('admin_people.page.assignments_heading')}</h3>
+      <h3 className="pulse-admin-diff-heading" tabIndex={-1} ref={rolesHeadingRef}>
+        {copy('admin_people.page.assignments_heading')}
+      </h3>
       {person.assignments.length === 0 ? (
         <p className="pulse-admin-help">{copy('admin_people.page.no_roles')}</p>
       ) : (
         <ul className="pulse-admin-assignments">
           {person.assignments.map((assignment) => (
             <li key={assignment.assignment_id} className="pulse-admin-assignment">
-              <span className="pulse-admin-role">{roleLabel(assignment.role)}</span>
+              <span className="pulse-admin-role">{assignmentText(labels, assignment)}</span>
               <ReportsToSelect
                 assignment={assignment}
+                text={assignmentText(labels, assignment)}
                 announce={announce}
                 onGate={onGate}
                 onChanged={onChanged}
@@ -157,7 +184,12 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
                 className="pulse-admin-button-plain"
                 onClick={() => void revoke(assignment)}
               >
-                {fillCopy('admin_people.page.revoke', { role: roleLabel(assignment.role) })}
+                {placeOf(labels, assignment) === null
+                  ? fillCopy('admin_people.page.revoke', { role: roleLabel(assignment.role) })
+                  : fillCopy('admin_people.page.revoke_at', {
+                      role: roleLabel(assignment.role),
+                      place: placeOf(labels, assignment) ?? '',
+                    })}
               </button>
             </li>
           ))}
@@ -197,17 +229,13 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
             id={`${id}-node`}
             className="pulse-admin-input"
             value={node}
+            required
             onChange={(event) => setNode(event.target.value)}
           >
             <option value="">{copy('admin_people.page.node_choose')}</option>
             {nodes.map((choice) => (
               <option key={choice.node_id} value={choice.node_id}>
-                {choice.parent_label === null
-                  ? choice.label
-                  : fillCopy('admin_people.page.node_option', {
-                      name: choice.label,
-                      parent: choice.parent_label,
-                    })}
+                {nodeText(choice)}
               </option>
             ))}
           </select>
@@ -217,7 +245,9 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
         </button>
       </form>
 
-      <h3 className="pulse-admin-diff-heading">{copy('admin_people.page.login_heading')}</h3>
+      <h3 className="pulse-admin-diff-heading" tabIndex={-1} ref={loginHeadingRef}>
+        {copy('admin_people.page.login_heading')}
+      </h3>
       {person.web_login_linked ? (
         <button
           type="button"
@@ -225,6 +255,7 @@ export function PersonPanel({ person, announce, onGate, onChanged, onClose }: Pr
           onClick={() =>
             void unlinkWebLogin(person.person_id).then((answer) => {
               if (settle(answer, copy('admin_people.page.login_was_unlinked'), announce, onGate)) {
+                loginHeadingRef.current?.focus();
                 onChanged();
               }
             })
@@ -301,17 +332,23 @@ export function Field({
  */
 function ReportsToSelect({
   assignment,
+  text,
   announce,
   onGate,
   onChanged,
 }: {
   readonly assignment: AssignmentLineView;
+  readonly text: string;
   readonly announce: (message: string) => void;
   readonly onGate: (gate: Exclude<Gate, null>) => void;
   readonly onChanged: () => void;
 }): JSX.Element {
   const id = useId();
   const [options, setOptions] = useState<readonly ReportsToOptionView[] | null>(null);
+  // The choice is held here and sent by its own button: a select fires `change`
+  // on every arrow key, and a write per keystroke is a change of context
+  // nobody asked for (WCAG 3.2.2).
+  const [choice, setChoice] = useState(assignment.reports_to ?? '');
 
   useEffect(() => {
     let live = true;
@@ -333,23 +370,14 @@ function ReportsToSelect({
   return (
     <span className="pulse-admin-field-inline">
       <label className="pulse-admin-label" htmlFor={id}>
-        {fillCopy('admin_people.page.reports_to_label', { role: roleLabel(assignment.role) })}
+        {fillCopy('admin_people.page.reports_to_label', { assignment: text })}
       </label>
       <select
         id={id}
         className="pulse-admin-input"
-        value={parent ?? ''}
+        value={choice}
         disabled={options === null}
-        onChange={(event) => {
-          const chosen = event.target.value;
-          void setReportsTo(assignment.assignment_id, chosen === '' ? null : chosen).then(
-            (answer) => {
-              if (settle(answer, copy('admin_people.page.reports_to_saved'), announce, onGate)) {
-                onChanged();
-              }
-            },
-          );
-        }}
+        onChange={(event) => setChoice(event.target.value)}
       >
         <option value="">{copy('admin_people.page.reports_to_none')}</option>
         {parent !== null && !listed ? (
@@ -369,6 +397,21 @@ function ReportsToSelect({
           </option>
         ))}
       </select>
+      <button
+        type="button"
+        className="pulse-admin-button-plain"
+        onClick={() =>
+          void setReportsTo(assignment.assignment_id, choice === '' ? null : choice).then(
+            (answer) => {
+              if (settle(answer, copy('admin_people.page.reports_to_saved'), announce, onGate)) {
+                onChanged();
+              }
+            },
+          )
+        }
+      >
+        {fillCopy('admin_people.page.save_reports_to', { assignment: text })}
+      </button>
     </span>
   );
 }

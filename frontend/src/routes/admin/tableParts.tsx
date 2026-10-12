@@ -41,20 +41,34 @@ export function Pager({
   pageSize,
   total,
   onPage,
+  announce,
+  captionId,
 }: {
   readonly page: number;
   readonly pageSize: number;
   readonly total: number;
   readonly onPage: (page: number) => void;
+  readonly announce: (message: string) => void;
+  /** The table's caption, which takes focus when the control pressed disables itself. */
+  readonly captionId: string;
 }): JSX.Element {
   const pages = Math.max(1, Math.ceil(total / pageSize));
+
+  function go(to: number): void {
+    onPage(to);
+    announce(fillCopy('admin_people.page.page_of', { page: String(to), pages: String(pages) }));
+    // A pressed button that becomes disabled drops focus to the page; the
+    // table's caption is where the reader's next move starts.
+    if (to <= 1 || to >= pages) document.getElementById(captionId)?.focus();
+  }
+
   return (
     <nav className="pulse-admin-pager" aria-label={copy('admin_people.page.pager_label')}>
       <button
         type="button"
         className="pulse-admin-button-plain"
         disabled={page <= 1}
-        onClick={() => onPage(page - 1)}
+        onClick={() => go(page - 1)}
       >
         {copy('admin_people.page.previous_page')}
       </button>
@@ -65,7 +79,7 @@ export function Pager({
         type="button"
         className="pulse-admin-button-plain"
         disabled={page >= pages}
-        onClick={() => onPage(page + 1)}
+        onClick={() => go(page + 1)}
       >
         {copy('admin_people.page.next_page')}
       </button>
