@@ -236,8 +236,10 @@ Each was checked in the tree at 40d3e24b.
 
 - **ADRs.** **0199** is 01's (the walk, the clamp, the chokepoint; supersedes
   0003 in part, amends 0046 and 0108). **0200** is 02's (the admin's definers,
-  every role grantable, revoke deletes, the audit). **0201** is 03's (the
-  set-based name channel; supersedes 0191 in part). **0202** is 04's (the
+  every role grantable, revoke deletes, the audit, and the route as the real
+  admin check because `pulse_app` asserts the admin's key). **0201** is 03's
+  (the set-based name channel; ruling 3 for chair and above and decision 16
+  for leads; supersedes 0191 in part). **0202** is 04's (the
   switch and logout). **0203** is 05's (named-set figures, the seal counting
   the reader, the cutoffs, the residues of ruling 6, the set-name index;
   amends 0173 and 0179). **0204** is 06's (CSV keys, and the dry run as an

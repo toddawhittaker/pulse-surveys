@@ -41,7 +41,14 @@ a named refusal rather than a 500.
 
 **The writes, each an admin-checked definer** (the reader is checked inside
 the function, as in `section_staff_names_v001.sql`; owned by a NOLOGIN role;
-`pulse_app` holds `EXECUTE` and nothing else on the tables):
+`pulse_app` holds `EXECUTE` and nothing else on the tables). **What the
+database check is worth:** `pulse_app`, the application's database role,
+passes the acting admin's person key to the definer, and the definer checks
+that key holds a live `ADMIN` assignment. The database cannot tell whether the
+key is the session's own, so its admin check is only as good as the route that
+supplies the key. The real check is the route: `require_admin` and a key taken
+from the verified session only (E9-06 done-when 13). The definer stops writes
+that bypass the definers and writes that name a non-admin key, nothing more.
 
 - create a person (name, category) and edit a person's name and category;
 - grant a role assignment at a scope node; revoke one; set or clear its
@@ -87,7 +94,8 @@ Read first: SPEC §2, §2.1, §4, §6.2 and §6.3; ADRs 0001, 0041, 0044, 0071,
   15.
 - SPEC §13: the new view file.
 - ADR **0200** (the admin's definers, every role grantable, revoke deletes,
-  the audit row as the control).
+  the audit row as the control; and that `pulse_app` asserts the acting
+  admin's key, so the route is the real admin check).
 
 ## Reuse, do not rewrite
 
@@ -106,6 +114,10 @@ the existing unique constraints on `lead_faculty_mapping` and
 2. **`pulse_app` cannot write around the definers.** As `pulse_app`, a direct
    `INSERT`, `UPDATE` or `DELETE` on `person`, `role_assignment`,
    `lead_faculty_mapping` and `web_login_subject` is refused by the database.
+   This is the database's whole guarantee: a `pulse_app` session that passes
+   a real admin's key to a definer is answered as that admin, so neither this
+   test nor done-when 1 claims the database knows who is acting. ADR 0200
+   says so.
 3. **Every Pulse-owned role is grantable, to anyone (ruling 1).** An admin
    grants `CARE` to another person, `ADMIN` to another person, and `CARE`,
    `ADMIN` and `DEAN` to their own person; each write succeeds.

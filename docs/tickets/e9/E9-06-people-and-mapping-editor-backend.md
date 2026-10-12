@@ -39,7 +39,7 @@ included, to anyone, the admin included. Ruling 7: revoking deletes.
 - **A teaching grant with a child edge** cannot be made (the carried entry):
   one test that the editor's edge write under an `INSTRUCTOR` assignment is
   refused.
-- **One person, two lead assignments** (E9-01 done-when 8): the people view
+- **One person, two lead assignments** (E9-01 done-when 9): the people view
   shows both assignments and their chairs, so the admin can see that both
   chairs reach every course mapped to that person.
 
@@ -100,7 +100,12 @@ trigger; the copy registry pattern in `backend/app/copy/`.
 12. **Words.** Every new sentence is in the copy registry under
     `admin_people.` and passes the copy inventory with no change to the
     inventory test.
-13. **The records match.** ADR 0204 is written and indexed; SPEC §13 draws
+13. **The acting admin is the session's person.** A grant request carrying
+    another admin's person id in the query string, the path or the body is
+    applied as the session's own person, and the audit row names the
+    session's person. Every route passes the definers the key from the
+    verified session only (E9-02 says why the route is the real check).
+14. **The records match.** ADR 0204 is written and indexed; SPEC §13 draws
     the new files.
 
 ## Shares files with
