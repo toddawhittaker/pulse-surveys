@@ -129,6 +129,10 @@ MAPPING_HEADER: tuple[str, ...] = ("course_id", "course", "person_id", "lead")
 NAMED_REFUSAL = "P0001"
 SERIALIZATION_FAILURE = "40001"
 
+# The named refusals that carry a count, as digits in the error's detail field,
+# for the `{count}` in their sentence (`app.copy.admin_people`).
+COUNTED_REFUSALS: frozenset[str] = frozenset({"admin_people.assignment_has_reports"})
+
 # A spreadsheet runs a cell that starts with one of these as a formula. The
 # export writes such a cell, and any cell starting with the escape itself, with
 # one `'` in front; the import removes exactly that one.
@@ -186,7 +190,7 @@ def _translated(error: DBAPIError) -> PeopleRefusedError:
     if _sqlstate(error) != NAMED_REFUSAL or key is None or key not in COPY:
         raise error
     entry = COPY[key]
-    if key == "admin_people.assignment_has_reports":
+    if key in COUNTED_REFUSALS:
         detail = getattr(diagnostic, "message_detail", None) or ""
         if not detail.isdigit():
             raise error
