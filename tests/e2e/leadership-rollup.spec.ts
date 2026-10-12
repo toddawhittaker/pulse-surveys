@@ -151,7 +151,7 @@ test('a chair reads the roll-up by lead, opens an attention card, and reads the 
   await expect(rollup.locator('article.pulse-rollup-article h2')).toHaveText(rootName);
 
   // By-lead mode is offered to a chair, and switches the tree.
-  const byLead = rollup.getByRole('button', { name: BY_LEAD });
+  const byLead = rollup.getByRole('button', { name: BY_LEAD, exact: true });
   await expect(byLead).toHaveAttribute('aria-pressed', 'false');
   await byLead.click();
   await expect(byLead).toHaveAttribute('aria-pressed', 'true');
