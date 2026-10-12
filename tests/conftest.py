@@ -307,11 +307,8 @@ pytest_plugins = (
     "fixtures.the_hold",
     "fixtures.response_draft",
     "fixtures.response_loop_doors",
-<<<<<<< HEAD
     "fixtures.session_switch",
-=======
     "fixtures.people_graph",
->>>>>>> origin/epic/e9-leadership-rollups
 )
 
 
