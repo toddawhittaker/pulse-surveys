@@ -50,12 +50,16 @@ residue, and the leadership rollup mockup's count.
 
 ## No deployment reaches real students until E10's Care queue exists
 
+**Lands in:** [E9-13](E9-13-e9-exit.md) repeats it for E10.
+
 The owner's ruling 5 (`../e6/README.md`), repeated as every epic since E6 was
 asked to repeat it. E8 adds no reader of `threat_case`. **Owner:** E10.
 **Done when:** the Care queue reads `threat_case`, and only then may a
 deployment reach real students.
 
 ## A stored summary can carry a comment excluded after it was written
+
+**Lands in:** [E9-09](E9-09-drill-down-and-the-wider-roles.md) (the drill-down, through the on-behalf filter moved onto decision sequence).
 
 Not triggered in E8: SPEC §5.4 shows students no summary, so E8 built no reader
 of a stored summary. **Owner:** the first ticket that shows a stored summary up
@@ -66,6 +70,8 @@ test that excludes a summarized comment and reads the summary as that reader.
 
 ## The Lead Faculty name in the student page header
 
+**Lands in:** [E9-08](E9-08-lead-faculty-name-on-course-pages.md).
+
 Ruling 5 of `../e8/README.md`: SPEC §2.1 names the Lead Faculty in the page
 header, and neither the student results page nor the instructor report shows
 it. **Owner:** E9, with its staff-name work. **Done when:** both headers name
@@ -74,12 +80,16 @@ read that replaces it), with a test that a course with no lead shows none.
 
 ## The leadership rollup mockup still passes a count to the small-N notice
 
+**Lands in:** [E9-11](E9-11-leadership-frontend.md).
+
 From `../e7/carried-from-e6.md`, half closed by E8-02.
 `design/LeadershipRollup.dc.html` still passes `responded` and `total` to
 `SmallNNotice`. **Owner:** E9, which builds the rollup. **Done when:** the
 mockup passes neither attribute.
 
 ## Comments that tell ticket history
+
+**Lands in:** each E9 ticket in the files it edits ([E9-08](E9-08-lead-faculty-name-on-course-pages.md), [E9-09](E9-09-drill-down-and-the-wider-roles.md), [E9-11](E9-11-leadership-frontend.md)); [E9-13](E9-13-e9-exit.md) lists what is left.
 
 E8-01 and E8-03 rewrote the comments in the files they edited. Left behind by
 E8-01: `services/reporting.py` (58 lines matching the pattern below),
@@ -91,6 +101,8 @@ ADR or a SPEC section for the why and says what the code does now.
 
 ## The exit drives read pinned dates in Fall 2026
 
+**Lands in:** a `process/` pull request before 2026-11-23 (`README.md`, "Process pull requests this epic needs").
+
 Unchanged from the source entry, and now close: the report and moderation
 drives move the clock to fixed dates, the latest reading 2026-11-23. E8's
 drives read every instant from window rows. **Owner:** a `process/` pull
@@ -98,6 +110,8 @@ request, which must land before 2026-11-23. **Done when:** no spec under
 `tests/e2e/` sets the clock to a literal date.
 
 ## Simplifications the E7 boundary proposed, and the chair's department walk
+
+**Lands in:** [E9-01](E9-01-purview-walk-and-chokepoint.md) (the chair's walk, written once); the other three stay with the next ticket that touches their function.
 
 E8-01 wrote the policy-of-record rule once. Still open: the lead-and-chair rule
 is written three times in SQL; the chair's walk to courses with a lead appears
@@ -109,6 +123,8 @@ heavy-lane. **Done when:** each rule is written once, or a record argues the
 extra copy, and `publish_response` takes the week its caller already resolved.
 
 ## The e2e suite's shared-stack residue
+
+**Lands in:** a `process/` pull request, or the ticket that touches each spec; [E9-13](E9-13-e9-exit.md) re-carries what is left.
 
 E8-02 made `student-results.spec.ts` re-runnable, and E8-04's drive takes fresh
 weeks on each run. Still open, each leaving rows a second run on one stack trips
@@ -128,6 +144,8 @@ stack, and the hold banner is driven once.
 
 ## The standing questions, re-asked at the E8 exit
 
+**Lands in:** [E9-13](E9-13-e9-exit.md).
+
 The answers are in `../e8/boundary-review.md`.
 
 - **`PERSON_TABLES`**: E8 added no table; unchanged and correct. **Owner:** E13
@@ -145,6 +163,8 @@ The answers are in `../e8/boundary-review.md`.
 
 ### Shares at small n can still pin the rater count
 
+**Lands in:** closed by the owner's ruling 9 (`README.md`), written into SPEC §5.4 by the E9 breakdown; [E9-08](E9-08-lead-faculty-name-on-course-pages.md) adds the line to ADR 0197.
+
 From E8-01's privacy re-check (#324), accepted as LOW. With five raters the
 shares are multiples of 20, so a student who subtracts their own rating learns
 the other four ratings as a group, though not who gave which: the group size the
@@ -157,6 +177,8 @@ says why neither.
 
 ### Split the student read out of the response-loop service
 
+**Lands in:** [E9-08](E9-08-lead-faculty-name-on-course-pages.md).
+
 From the E8 boundary's `code-reviewer` (simplification 4): `services/response_loop.py`
 is over 1,200 lines and holds the student's read beside the response loop.
 **Owner:** the next ticket that touches the student read. **Done when:** the
@@ -165,6 +187,8 @@ import sweeps name the new module.
 
 ### The landing reads a full results payload for each section
 
+**Lands in:** E13, unchanged; [E9-13](E9-13-e9-exit.md) re-carries it.
+
 From `spec-conformance`: the landing's results lead fetches each closed
 section's whole results payload to learn its newest week. **Owner:** E13, or
 earlier if load shows it. **Done when:** a slim route answers the newest
@@ -172,11 +196,15 @@ released week, or a measurement shows the full read is fine.
 
 ### Leadership staff-name reads are set-based
 
+**Lands in:** [E9-03](E9-03-staff-names-for-a-set-of-sections.md) (the definer), with [E9-07](E9-07-roll-up-backend.md), [E9-09](E9-09-drill-down-and-the-wider-roles.md) and [E9-11](E9-11-leadership-frontend.md).
+
 From `data-model`: the staff-name definer is called once per section. **Owner:**
 E9, with its leadership pages. **Done when:** every leadership page that names
 staff calls the definer once per set of sections, with a query-count test.
 
 ### ADR 0198 overstates a failed post with no response code
+
+**Lands in:** no E9 ticket touches it; [E9-13](E9-13-e9-exit.md) re-carries it.
 
 From `lti-oidc`: a `failed` row with no response code may still have landed, so
 "a score the platform never took" in ADR 0198's rejected alternatives is too
@@ -185,6 +213,8 @@ strong. **Owner:** the next ticket that touches ADR 0198 or the passback.
 took.
 
 ### A release batch's `cut_at` is the database's clock, not the effective clock
+
+**Lands in:** no E9 ticket touches it; [E9-13](E9-13-e9-exit.md) re-carries it.
 
 `release_batch.cut_at` carries a `now()` server default, while every other
 scheduling and visibility instant reads `clock.now` (ADR 0109). On a development
@@ -201,6 +231,8 @@ says what the code does.
 
 ### The exit drive's posted score is planted
 
+**Lands in:** no E9 ticket touches it; [E9-13](E9-13-e9-exit.md) re-carries it.
+
 `tests/e2e/exit-student-loop.spec.ts` writes one `grade_sync` row for the
 learner and deletes it on the way out, rather than running the passback,
 because the passback would post into the mock gradebook that
@@ -211,6 +243,8 @@ reaches the page. **Owner:** a `process/` pull request on the e2e world.
 what `exit-grade-passback.spec.ts` reads, or a record argues the plant.
 
 ### The student trend's axis ends at the latest published week
+
+**Lands in:** no E9 ticket touches it; [E9-13](E9-13-e9-exit.md) re-carries it.
 
 From E8-02 (#326), proposed and not done: the payload carries no section
 length, so `PulseTrendChart`'s axis on the student page spans to the latest

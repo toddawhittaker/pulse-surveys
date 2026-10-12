@@ -13,7 +13,7 @@ feature decisions, system behavior, rationale, status, or history.
 Before adding a line, ask whether it would still be true if the process
 changed; if yes, it belongs elsewhere. Under 150 lines.
 
-**Active epic:** E8 — Student loop closure. Tickets: `docs/tickets/e8/README.md` (on `epic/e8-student-loop-closure`).
+**Active epic:** E9 — Leadership hierarchy & roll-ups. Tickets: `docs/tickets/e9/README.md` (on `epic/e9-leadership-rollups`).
 
 ## Read before you start
 
