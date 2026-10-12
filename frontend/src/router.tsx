@@ -7,6 +7,8 @@ import {
 
 import { UnknownAddress } from './components/UnknownAddress';
 import { AdminLanding } from './routes/admin';
+import { MAPPINGS_ROUTE, MappingsRoute } from './routes/admin/Mappings';
+import { PEOPLE_ROUTE, PeopleRoute } from './routes/admin/People';
 import { CareLanding } from './routes/care';
 import { InstructorLanding } from './routes/instructor';
 import { InstructorReportRoute } from './routes/instructor/InstructorMondayReport';
@@ -223,6 +225,21 @@ const adminRoute = createRoute({
   component: AdminLanding,
 });
 
+// SPEC §6.3's two editors, under the admin area and flat off the root for the
+// reason the comparison sets are. Whether a session may open them is the API's
+// answer (an admin gate), not this table's.
+const adminPeopleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: PEOPLE_ROUTE,
+  component: PeopleRoute,
+});
+
+const adminMappingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: MAPPINGS_ROUTE,
+  component: MappingsRoute,
+});
+
 /**
  * The route tree, exported so a test can mount it on a memory history.
  *
@@ -249,6 +266,8 @@ export const routeTree = rootRoute.addChildren([
   leadershipOnBehalfRoute,
   careRoute,
   adminRoute,
+  adminPeopleRoute,
+  adminMappingsRoute,
 ]);
 
 /**
