@@ -249,6 +249,10 @@ def test_a_leads_node_figures_and_attention_cards_carry_nothing_of_a_sibling_lea
     """
     review = lead_review
     assert review.lead is not None and review.chair is not None
+    # B's section answers a week, as A's does. On e32847b8, with B's section
+    # unanswered, the chair's cohort label carried `F` alone (the unanswered `Q`
+    # was absent too), so an unanswered section gives the control nothing to see.
+    a_published_week_in_the_sibling_section(review)
     forbidden, _own = lead_review_footprints(review)
     calls = owe_every_section(monkeypatch)
     term = term_of(review)
