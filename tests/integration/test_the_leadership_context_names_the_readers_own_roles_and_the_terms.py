@@ -15,9 +15,9 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 import pytest
+from fixtures.clock import ClockOverrides
 from fixtures.lead_review import CHAIR_ROLE, LEAD_FACULTY_ROLE, LeadReviewWorld, Reader
 from fixtures.supervision import require_table, single_primary_key
-from fixtures.clock import ClockOverrides
 from fixtures.survey_windows import TERM_TABLE
 
 pytestmark = pytest.mark.integration
