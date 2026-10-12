@@ -79,9 +79,15 @@ from `report_comment` v004, so the Care-class exclusion has one home. It shows
 the text and the section at any threshold (ruling 1), with no week, time or
 count, in a fresh order on every read. `decide_as_leader` is the second door into
 the shared write, with its own check: the comment is in this reader's queue now,
-asked under the comment's lock. `exclusion_log` lists every exclusion and keep a
-person made inside the same grant, quoting a comment only where its own
-instructor's report shows it under its week (ADR 0190).
+asked under the comment's lock.
+
+`exclusion_log` lists every exclusion and keep a person made inside the reader's
+reach, which has two parts, unioned: the lead's or chair's own grant, as the
+queue reads it, and the purview of the reader's assistant dean, dean and vice
+president grants (`purview_read`, ADR 0206), who read the log and review
+nothing. It quotes a comment only where its own instructor's report shows it
+under its week (ADR 0190); on a row whose quote is withheld, only the person who
+made the decision reads its reason and date (ADR 0206's E9-14 amendment).
 """
 
 import logging
@@ -676,11 +682,13 @@ DECIDED_AS_FOR_GRANT = {
 
 
 class NoReviewGrantError(LookupError):
-    """The reader's own leadership grants put no course under review; nothing was read or written.
+    """The reader's own grants put nothing under review or in the log; nothing was read or written.
 
-    An assistant dean until E9 (ADR 0108), a dean, a vice president, a lead with
-    no mapped course, or a leadership session naming somebody who holds only an
-    instructor grant.
+    For the queue and its door: an assistant dean, a dean or a vice president
+    (they read the log and review nothing, ADR 0206), a lead with no mapped
+    course, or a leadership session naming somebody who holds only an instructor
+    grant. For the log: a reader whose lead or chair grant covers no course and
+    whose assistant dean, dean and vice president grants cover no section.
     """
 
 
