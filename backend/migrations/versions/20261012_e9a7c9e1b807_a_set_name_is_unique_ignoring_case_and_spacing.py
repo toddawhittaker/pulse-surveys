@@ -1,7 +1,7 @@
 """a set name is unique ignoring case and spacing
 
 Revision ID: e9a7c9e1b807
-Revises: 7f679faf4b8d
+Revises: e9c3f5a7b403
 Create Date: 2026-10-12 09:00:00.000000
 
 E9-05, ADR 0203. Two comparison sets whose names differ only in capitals or
@@ -33,7 +33,7 @@ from collections.abc import Sequence
 from alembic import op
 
 revision: str = "e9a7c9e1b807"
-down_revision: str | Sequence[str] | None = "7f679faf4b8d"
+down_revision: str | Sequence[str] | None = "e9c3f5a7b403"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
