@@ -1512,6 +1512,7 @@ def _benchmark_members(
         course_week=course_week,
         streams=REPORT_STREAMS,
         cutoffs=_population_cutoffs(session, section=section, published=published),
+        scope=None,  # the instructor's own report: no leadership reader
     )
     default_set = benchmarks.BenchmarkPopulation.DEFAULT_SET
     university = benchmarks.BenchmarkPopulation.UNIVERSITY

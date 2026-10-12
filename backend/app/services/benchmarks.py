@@ -839,7 +839,7 @@ def _section_populations(
     section_id: UUID,
     cutoffs: Mapping[int, datetime],
     wanted: Collection[BenchmarkPopulation],
-    scope: ActorScope | None = None,
+    scope: ActorScope | None,
 ) -> dict[BenchmarkPopulation, _Population]:
     """The section-keyed populations asked for, each resolved once and read through one `_Reads`.
 
@@ -904,7 +904,7 @@ def section_benchmarks(
     course_week: int,
     streams: Sequence[str],
     cutoffs: Mapping[int, datetime],
-    scope: ActorScope | None = None,
+    scope: ActorScope | None,
 ) -> SectionBenchmarks:
     """SPEC §5.1's comparison and university figures for one report, each population read once.
 
@@ -923,7 +923,10 @@ def section_benchmarks(
     `scope` is the leadership reader, when one reads the report (E9-09's
     drill-down). She enters the seal exactly as an instructor of the section
     does, with every section in her purview and every section she teaches as
-    what she already knows (SPEC §5.1). An instructor's own report passes none.
+    what she already knows (SPEC §5.1). An instructor's own report passes
+    `scope=None`. **Required, with no default:** a leadership caller that
+    forgot its reader would otherwise be sealed against the instructors alone,
+    so every caller states which it is.
     """
     _the_weeks_cutoff(cutoffs, course_week)  # the reported week must be among those read
     by_population = _section_populations(
@@ -970,6 +973,7 @@ def benchmark_trend(
         section_id=section_id,
         cutoffs=cutoffs,
         wanted=(population,),
+        scope=None,
     )
     return _trend(populations[population], stream=stream, cutoffs=cutoffs)
 
@@ -989,6 +993,7 @@ def benchmark_workload(
         section_id=section_id,
         cutoffs=week_cutoff,
         wanted=(population,),
+        scope=None,
     )
     return _workload(populations[population], course_week=course_week)
 
