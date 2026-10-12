@@ -458,6 +458,7 @@ pulse-surveys/
 │       │   ├── response_loop_guard_v001.sql  # who may write a response or a policy, checked at insert
 │       │   ├── response_loop_guard_v002.sql  # who may set a policy, checked for the one course a row covers
 │       │   ├── people_graph_v001.sql         # the admin's writes to the people graph and the admin's reads, each admin-checked and audited
+│       │   ├── people_graph_v002.sql         # the record of an applied people or mapping import, with its dry-run diff, admin-checked
 │       │   ├── section_staff_names_v001.sql  # the one channel a staff name reaches a reader through
 │       │   ├── section_staff_names_v002.sql  # the same channel over a set of sections, with each name's role
 │       │   └── queries.py          # typed ways into the read views
