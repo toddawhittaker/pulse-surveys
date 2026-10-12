@@ -468,12 +468,15 @@ describe('a published week with data in it', () => {
     await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
 
     // The third read is the week's response, which the composer asks for once the
-    // report is drawn; it is for the same week 7 and not for another.
-    expect(asked).toEqual([
-      publishedWeeksPath(SECTION_ID),
-      reportPath(SECTION_ID, 7),
-      weekResponsePath(SECTION_ID, 7),
-    ]);
+    // report is drawn; it is for the same week 7 and not for another. It is sent
+    // after the heading renders, so the test waits for it rather than racing it.
+    await waitFor(() => {
+      expect(asked).toEqual([
+        publishedWeeksPath(SECTION_ID),
+        reportPath(SECTION_ID, 7),
+        weekResponsePath(SECTION_ID, 7),
+      ]);
+    });
   });
 
   it('moves focus to the heading when another week arrives, and not on the first one', async () => {
