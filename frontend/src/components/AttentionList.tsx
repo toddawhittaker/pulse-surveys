@@ -9,15 +9,14 @@ import './leadershipRollup.css';
  *
  * `design/AttentionList.dc.html` is the contract: one card per rule met by one
  * section, each naming its rule in mono marigold and, for a trend rule, its
- * stream in a quiet chip; the section beneath; and a link to that section's
- * Monday report. **Never ranked**: the cards are in the server's order, by
+ * stream; the section beneath; and a link to that section's Monday report,
+ * whose accessible name says which section and week it opens. **Never ranked**: the cards are in the server's order, by
  * course, section and rule, and nothing here reorders them (§4.1 item 4).
  *
  * **Every word on a card is the server's or this surface's frame.** The rule's
  * name (`rule_name`) and the empty sentence (`attention_empty`) arrive in the
  * payload, so §5.6's four names are written once, in `app/copy/leadership_rollup.py`.
- * A stream chip is the payload's own token, `INSTRUCTOR` or `COURSE`, which the
- * mockup draws upper-case anyway.
+ * A trend rule's name already says its stream, so no separate chip repeats it.
  *
  * **No figure on a card.** The mockup's detail line ("8 of 23 responded", "3.9
  * → 3.6 → 3.4") is not in the payload: a card says which rule a section meets
@@ -33,7 +32,11 @@ export function AttentionList({
   /** The calm sentence the payload sends when no card is due. */
   readonly empty: string | null;
   /** The link to one card's section-week report. */
-  readonly reportLink: (card: AttentionCardView, children: ReactNode) => JSX.Element;
+  readonly reportLink: (
+    card: AttentionCardView,
+    children: ReactNode,
+    label: string,
+  ) => JSX.Element;
 }): JSX.Element {
   if (cards.length === 0) {
     return (
@@ -54,9 +57,6 @@ export function AttentionList({
           className="pulse-attention-card"
         >
           <div className="pulse-attention-head">
-            {card.stream === null ? null : (
-              <span className="pulse-attention-stream">{card.stream}</span>
-            )}
             <span className="pulse-attention-rule">{card.rule_name}</span>
           </div>
           <p className="pulse-attention-section">
@@ -67,7 +67,15 @@ export function AttentionList({
               week: String(card.course_week).padStart(2, '0'),
             })}
           </p>
-          {reportLink(card, copy('leadership_rollup.attention.open'))}
+          {reportLink(
+            card,
+            copy('leadership_rollup.attention.open'),
+            fillCopy('leadership_rollup.attention.open_named', {
+              course: card.course_name,
+              section: card.section_code,
+              week: String(card.course_week),
+            }),
+          )}
         </li>
       ))}
     </ul>

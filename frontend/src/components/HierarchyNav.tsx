@@ -22,8 +22,8 @@ import './leadershipRollup.css';
  * payload; a section row's line is its code and its teaching instructor.
  *
  * **Keyboard and screen reader.** The tree is nested lists inside a labelled
- * `nav`. Each row is two native buttons: the disclosure, which says which node
- * it opens and whether it is open (`aria-expanded`), and the row itself, which
+ * `nav`. Each row is two native buttons: the disclosure, which names its node
+ * once and says whether it is open through `aria-expanded`, and the row itself, which
  * selects the node and carries `aria-current` when it is the one shown. A
  * section row is a link instead, because selecting a section opens its report
  * at an address of its own (`sectionLink`).
@@ -43,7 +43,11 @@ export function HierarchyNav({
   /** The link a section row is: its drill-down, at its own address. */
   readonly sectionLink: (node: RollupNodeView, children: ReactNode) => JSX.Element;
 }): JSX.Element {
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  // Collapsed, except the way down to the node shown, so its row (and its
+  // `aria-current`) is in the document from the start.
+  const [open, setOpen] = useState<ReadonlySet<string>>(
+    () => new Set(selectedId === null ? [] : ancestorsOf(roots, selectedId)),
+  );
 
   function toggle(id: string): void {
     const next = new Set(open);
@@ -85,6 +89,18 @@ export function HierarchyNav({
       />
     </nav>
   );
+}
+
+/** The ids of the nodes above the one with `id`, root first, or none. */
+function ancestorsOf(nodes: readonly RollupNodeView[], id: string): string[] {
+  for (const node of nodes) {
+    if (node.id === id) return [];
+    const below = ancestorsOf(node.children, id);
+    if (below.length > 0 || node.children.some((child) => child.id === id)) {
+      return [node.id, ...below];
+    }
+  }
+  return [];
 }
 
 /** Every node with children, at any depth: what "Expand all" opens. */
@@ -129,10 +145,7 @@ function Rows({
                   type="button"
                   className="pulse-hierarchy-toggle"
                   aria-expanded={isOpen}
-                  aria-label={fillCopy(
-                    isOpen ? 'leadership_rollup.nav.collapse' : 'leadership_rollup.nav.expand',
-                    { name: node.name },
-                  )}
+                  aria-label={fillCopy('leadership_rollup.nav.toggle', { name: node.name })}
                   onClick={() => {
                     toggle(node.id);
                   }}

@@ -33,9 +33,11 @@ const CARDS: AttentionCardView[] = [
   card('response_rate_low', 'Response rate under 40%', null, 'R2WW', 'BIOL 2150'),
 ];
 
-function link(attention: AttentionCardView, children: ReactNode) {
+function link(attention: AttentionCardView, children: ReactNode, label: string) {
   return (
-    <a href={`/app/leadership/sections/${attention.section_id}?week=${String(attention.course_week)}`}>
+    <a
+      aria-label={label}
+      href={`/app/leadership/sections/${attention.section_id}?week=${String(attention.course_week)}`}>
       {children}
     </a>
   );
@@ -49,7 +51,7 @@ describe('AttentionList', () => {
     );
     expect(sections).toEqual(['CHEM 1210 · U2WW', 'BIOL 3200 · R1WW', 'BIOL 2150 · R2WW']);
     expect(screen.getByText('Response rate under 40%')).toBeTruthy();
-    const links = screen.getAllByRole('link', { name: 'Open the Monday report' });
+    const links = screen.getAllByRole('link', { name: /^Open the Monday report: / });
     expect(links.map((element) => element.getAttribute('href'))).toEqual([
       '/app/leadership/sections/id-U2WW?week=7',
       '/app/leadership/sections/id-R1WW?week=7',
@@ -57,12 +59,12 @@ describe('AttentionList', () => {
     ]);
   });
 
-  it('names a trend card’s stream, and no stream on a card that has none', () => {
+  it('names each link by its section and week, and draws no raw stream token', () => {
     render(<AttentionList cards={CARDS} empty={null} reportLink={link} />);
-    const streams = Array.from(document.querySelectorAll('.pulse-attention-stream')).map(
-      (element) => element.textContent,
-    );
-    expect(streams).toEqual(['INSTRUCTOR']);
+    expect(
+      screen.getByRole('link', { name: 'Open the Monday report: BIOL 3200 · R1WW, week 7' }),
+    ).toBeTruthy();
+    expect(screen.queryByText('INSTRUCTOR')).toBeNull();
   });
 
   it('shows the server’s calm sentence when no card is due', () => {

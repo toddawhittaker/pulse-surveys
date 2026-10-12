@@ -4,7 +4,7 @@
  * Tokens only. `design/HierarchyNav.dc.html`, `design/AggregateHeader.dc.html`,
  * `design/AttentionList.dc.html` and `design/LeadershipRollup.dc.html` are the
  * contract; where a prototype writes a bare pixel value off the token ramp (the
- * 11px mono labels, the 36px row, the 280px pane) it is kept as written. The one
+ * 36px row, the 280px pane) it is kept as written; type stays on the ramp. The one
  * motion is the tree's 150ms caret turn, which the token file's reduced-motion
  * rule removes.
  */
@@ -141,11 +141,11 @@
   flex: 1;
   min-height: 32px;
   border: none;
-  border-radius: 3px;
+  border-radius: var(--radius-input);
   background: transparent;
   color: var(--spruce);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-1);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
@@ -153,6 +153,7 @@
 
 .pulse-rollup-mode[aria-pressed='true'] {
   background: var(--chalk);
+  box-shadow: inset 0 -2px 0 var(--marigold-deep);
   font-weight: 600;
 }
 
@@ -167,7 +168,7 @@
   padding: 0;
   list-style: none;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-1);
   letter-spacing: 0.04em;
   color: var(--spruce-60);
 }
@@ -195,6 +196,11 @@
 .pulse-rollup-crumb-current {
   color: var(--spruce);
   font-weight: 500;
+}
+
+/* The cohort chips carry an input's edge, so each is a visible control. */
+.pulse-rollup-choices .pulse-rollup-mode {
+  border: 1px solid var(--input-edge);
 }
 
 /* The cohort and named-set choices under the trend. */
@@ -230,7 +236,7 @@
   background: transparent;
   color: var(--spruce-60);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-1);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
@@ -318,7 +324,7 @@
 
 .pulse-hierarchy-count {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-1);
   line-height: 1.4;
   color: var(--spruce-60);
 }
@@ -385,20 +391,9 @@
   gap: var(--space-2);
 }
 
-.pulse-attention-stream {
-  padding: 2px 8px;
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-input);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--spruce-60);
-}
-
 .pulse-attention-rule {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-1);
   letter-spacing: 0.04em;
   color: var(--marigold-deep);
 }
@@ -418,6 +413,7 @@
 
 .pulse-attention-link {
   margin-top: var(--space-1);
+  text-decoration: underline;
   font-size: var(--text-1);
   font-weight: 500;
   color: var(--marigold-deep);

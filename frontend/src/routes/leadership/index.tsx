@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import { Link } from '@tanstack/react-router';
 
@@ -63,9 +63,11 @@ import './leadershipComparisonSets.css';
  * one. Each answer is shown only while the question it answered is still the
  * one on screen.
  *
- * **One polite live region, present from the first render**, carries every
- * loading line, refusal and failure, so a screen reader hears each as it
- * arrives rather than finding it later in the page.
+ * **Polite live regions that exist before their text arrives.** The page's
+ * region, present from the first render, carries the context's and the tree's
+ * loading lines and refusals; the content pane's, mounted with the tree, carries
+ * a node's; the named-set control's carries the set's. Choosing a node moves
+ * focus to its heading, so a reader hears what was chosen.
  *
  * **No comment appears here** (SPEC §5.5, settled at the E9 breakdown): the
  * roll-up carries figures and attention cards, and a section's comments are
@@ -289,9 +291,29 @@ function Rollup({
     (first === undefined ? [] : [first]);
   const node = path.at(-1) ?? null;
 
+  // A choice moves focus to the chosen node's heading: a breadcrumb press
+  // unmounts the button pressed, and a tree press changes the whole pane.
+  const focusTheHeading = useRef(false);
   function choose(next: RollupNodeView): void {
+    focusTheHeading.current = true;
     setChosen({ kind: next.kind, id: next.id });
   }
+  useEffect(() => {
+    if (!focusTheHeading.current) return;
+    focusTheHeading.current = false;
+    document.getElementById(NODE_HEADING_ID)?.focus();
+  }, [chosen]);
+
+  const kind = node === null ? null : figuresKind(node);
+  const figures = useKeyedRead<RollupFiguresView>(
+    node === null || kind === null ? null : `${kind}/${node.id}`,
+    () =>
+      node === null || kind === null
+        ? Promise.resolve({ kind: 'unavailable' as const, detail: null })
+        : readRollupFigures(kind, node.id, term.id).then((answer) =>
+            answer.kind === 'figures' ? { kind: 'ok' as const, value: answer.figures } : answer,
+          ),
+  );
 
   return (
     <div className="pulse-rollup-panes">
@@ -370,7 +392,23 @@ function Rollup({
             ))}
           </ol>
         </nav>
-        {node === null ? null : <NodeFigures key={`${node.kind}:${node.id}`} node={node} term={term} />}
+        <p className="pulse-rollup-status" role="status">
+          {node === null
+            ? ''
+            : figures === null
+              ? copy('leadership_rollup.figures.loading')
+              : figures.kind === 'ok'
+                ? ''
+                : refusalLine(figures, 'leadership_rollup.figures.unavailable')}
+        </p>
+        {node === null ? null : (
+          <NodeFigures
+            key={`${node.kind}:${node.id}`}
+            node={node}
+            term={term}
+            figures={figures?.kind === 'ok' ? figures.value : null}
+          />
+        )}
       </div>
     </div>
   );
@@ -380,30 +418,16 @@ function Rollup({
 function NodeFigures({
   node,
   term,
+  figures,
 }: {
   readonly node: RollupNodeView;
   readonly term: RollupTermView;
+  readonly figures: RollupFiguresView | null;
 }): JSX.Element {
-  const kind = figuresKind(node);
-  const figures = useKeyedRead<RollupFiguresView>(kind === null ? null : `${kind}/${node.id}`, () =>
-    kind === null
-      ? Promise.resolve({ kind: 'unavailable' as const, detail: null })
-      : readRollupFigures(kind, node.id, term.id).then((answer) =>
-          answer.kind === 'figures' ? { kind: 'ok' as const, value: answer.figures } : answer,
-        ),
-  );
-
   return (
     <article className="pulse-rollup-article" aria-labelledby={NODE_HEADING_ID}>
       <AggregateHeader headingId={NODE_HEADING_ID} name={node.name} scopeLine={node.label} />
-      <p className="pulse-rollup-status" role="status">
-        {figures === null
-          ? copy('leadership_rollup.figures.loading')
-          : figures.kind === 'ok'
-            ? ''
-            : refusalLine(figures, 'leadership_rollup.figures.unavailable')}
-      </p>
-      {figures?.kind === 'ok' ? <Figures figures={figures.value} term={term} /> : null}
+      {figures === null ? null : <Figures figures={figures} term={term} />}
     </article>
   );
 }
@@ -434,8 +458,9 @@ function Figures({
       <AttentionList
         cards={figures.attention}
         empty={figures.attention_empty}
-        reportLink={(card: AttentionCardView, children: ReactNode) => (
+        reportLink={(card: AttentionCardView, children: ReactNode, label: string) => (
           <Link
+            aria-label={label}
             className="pulse-attention-link"
             to={DRILL_DOWN_ROUTE}
             params={{ sectionId: card.section_id }}

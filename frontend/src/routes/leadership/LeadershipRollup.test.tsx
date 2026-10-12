@@ -74,7 +74,9 @@ function node(
  * alphabetical order. The page must show them exactly as sent.
  */
 const HIERARCHY: RollupNodeView[] = [
-  node('prefix', 'pre-mars', 'MARS', '3 courses · 9 sections', 9),
+  node('prefix', 'pre-mars', 'MARS', '3 courses · 9 sections', 9, [
+    node('course', 'crs-mars', 'MARS 2210', '9 sections', 9),
+  ]),
   node('prefix', 'pre-biol', 'BIOL', '2 courses · 5 sections', 5),
   node('prefix', 'pre-chem', 'CHEM', '1 course · 2 sections', 2),
 ];
@@ -180,6 +182,8 @@ function aRollup(tree: RollupTreeView, series: NamedSetSeriesView = A_SHOWN_SERI
     [LEADERSHIP_CONTEXT_PATH]: () => json(200, CONTEXT),
     [rollupTreePath(TERM)]: () => json(200, tree),
     [rollupFiguresPath('prefix', 'pre-mars', TERM)]: () => json(200, FIGURES),
+    [rollupFiguresPath('course', 'crs-mars', TERM)]: () =>
+      json(200, { ...FIGURES, kind: 'course', id: 'crs-mars' }),
     [rollupFiguresPath('lead', 'lead-rivera', TERM)]: () => json(200, { ...FIGURES, kind: 'lead' }),
     [COMPARISON_SETS_PATH]: () => json(200, { sets: [A_SET_SUMMARY] }),
     [setSeriesPath(A_SET_SUMMARY.id, TERM)]: () => json(200, series),
@@ -309,5 +313,41 @@ describe('/leadership, the roll-up', () => {
     expect(screen.getAllByRole('heading', { level: 1 }).map((h) => h.textContent)).toEqual([
       'Your roll-up',
     ]);
+  });
+
+  it('puts focus on the chosen node’s heading, from the tree and from a breadcrumb', async () => {
+    aRollup(A_LEADS_TREE);
+    mount();
+    await screen.findByRole('heading', { level: 2, name: 'MARS' });
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+    fireEvent.click(screen.getByRole('button', { name: /^MARS 2210/ }));
+    await waitFor(() => {
+      expect(document.activeElement?.textContent).toBe('MARS 2210');
+    });
+    expect(document.activeElement?.tagName).toBe('H2');
+
+    const crumbs = screen.getByRole('navigation', { name: 'Where you are in the tree' });
+    fireEvent.click(within(crumbs).getByRole('button', { name: 'MARS' }));
+    await waitFor(() => {
+      expect(document.activeElement?.textContent).toBe('MARS');
+    });
+    expect(document.activeElement?.tagName).toBe('H2');
+  });
+
+  it('keeps one figures status region mounted across choices, and announces the read in it', async () => {
+    aRollup(A_LEADS_TREE);
+    mount();
+    await screen.findByRole('group', { name: 'Start cohort' });
+    const pane = document.querySelector('.pulse-rollup-content-pane');
+    const region = pane?.querySelector(':scope > [role="status"]');
+    expect(region).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /^CHEM/ }));
+    // CHEM's figures are not served, so the same region says so.
+    await waitFor(() => {
+      expect(region?.textContent).toBe(
+        'The figures for this part of the tree could not be loaded just now. Choose it again to retry.',
+      );
+    });
+    expect(pane?.querySelector(':scope > [role="status"]')).toBe(region);
   });
 });

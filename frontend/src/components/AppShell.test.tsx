@@ -85,7 +85,7 @@ describe('AppShell', () => {
       ['instructor', 'Instructor'],
     ]);
     expect((list as HTMLSelectElement).value).toBe('leadership');
-    expect(screen.getByRole('button', { name: 'Switch' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Switch' }).getAttribute('aria-disabled')).toBe('true');
   });
 
   it('switches through the double-submit route, holds the new session, and opens its view', async () => {
@@ -142,7 +142,9 @@ describe('AppShell', () => {
     fireEvent.click(signOut);
 
     expect(await screen.findByTestId(SIGNED_OUT_TESTID)).toBeTruthy();
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('You are signed out');
+    const heading = screen.getByRole('heading', { level: 1 });
+    expect(heading.textContent).toBe('You are signed out');
+    expect(document.activeElement).toBe(heading);
     expect(screen.queryByText('The page')).toBeNull();
     expect(sessionToken()).toBeNull();
     const sent = asked.find((ask) => ask.method === 'POST');
@@ -156,13 +158,19 @@ describe('AppShell', () => {
       [`POST ${LOGOUT_PATH}`]: () => json(403, { detail: 'No.' }),
     });
     renderShell();
-    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    const signOut = await screen.findByRole('button', { name: 'Sign out' });
+    signOut.focus();
+    fireEvent.click(signOut);
+    // While the request is out the button stays focusable: aria-disabled, not disabled.
+    expect(signOut.getAttribute('aria-disabled')).toBe('true');
+    expect(signOut.hasAttribute('disabled')).toBe(false);
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toBe(
         'Signing out did not go through. Please try again.',
       );
     });
     expect(screen.getByText('The page')).toBeTruthy();
+    expect(document.activeElement).toBe(signOut);
     expect(sessionToken()).toBe('the-old-session');
   });
 

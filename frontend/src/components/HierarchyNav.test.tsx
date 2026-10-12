@@ -62,7 +62,7 @@ describe('HierarchyNav', () => {
     expect(within(nav).getByText('MARS')).toBeTruthy();
     // BIOL's course is beneath a closed disclosure.
     expect(screen.queryByText('BIOL 2150')).toBeNull();
-    const toggle = screen.getByRole('button', { name: 'Show what BIOL holds' });
+    const toggle = screen.getByRole('button', { name: 'What BIOL holds' });
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
   });
 
@@ -76,11 +76,11 @@ describe('HierarchyNav', () => {
 
   it('opens and closes one node, and expands and collapses all', () => {
     renderTree();
-    fireEvent.click(screen.getByRole('button', { name: 'Show what BIOL holds' }));
+    const toggle = screen.getByRole('button', { name: 'What BIOL holds' });
+    fireEvent.click(toggle);
     expect(screen.getByText('BIOL 2150')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Hide what BIOL holds' }).getAttribute('aria-expanded')).toBe(
-      'true',
-    );
+    // One name for the control; its state is aria-expanded's.
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     // The course is still closed: one press opens one level.
     expect(screen.queryByText('R3WW · Dr. M. Ellison')).toBeNull();
 
@@ -107,5 +107,15 @@ describe('HierarchyNav', () => {
     const section = screen.getByRole('link', { name: 'R3WW · Dr. M. Ellison' });
     expect(section.getAttribute('href')).toBe('/app/leadership/sections/sec-r3');
     expect(screen.queryByRole('button', { name: /R3WW/ })).toBeNull();
+  });
+
+  it('opens the way down to the node shown, so the shown row is in the document', () => {
+    render(
+      <HierarchyNav roots={ROOTS} selectedId="crs-2150" onSelect={vi.fn()} sectionLink={link} />,
+    );
+    expect(screen.getByRole('button', { name: /^BIOL 2150/ }).getAttribute('aria-current')).toBe(
+      'true',
+    );
+    expect(screen.queryByText('R3WW · Dr. M. Ellison')).toBeNull();
   });
 });

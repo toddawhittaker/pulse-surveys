@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import {
   logOut,
@@ -44,8 +44,10 @@ function openLanding(role: LandingName): void {
  * ended session stays on screen. A refused logout says so and leaves the
  * session as it was.
  *
- * **Both refusals go into one polite live region** that exists from the
- * shell's first render, before any refusal can arrive.
+ * **Both refusals go into the shell's polite live region**, which exists from
+ * the shell's first render, before any refusal can arrive. A pressed control
+ * is marked `aria-disabled` rather than disabled while its request is out, so
+ * focus stays on it and the refusal is heard where the reader is.
  */
 export function AppShell({
   children,
@@ -75,18 +77,8 @@ export function AppShell({
   }, []);
 
   if (signedOut) {
-    return (
-      <main
-        className="pulse-landing"
-        data-testid={SIGNED_OUT_TESTID}
-        aria-labelledby={SIGNED_OUT_HEADING_ID}
-      >
-        <h1 id={SIGNED_OUT_HEADING_ID}>{copy('landing.signed_out.heading')}</h1>
-        <p>{copy('landing.signed_out.body')}</p>
-      </main>
-    );
+    return <SignedOut />;
   }
-
   async function switchTo(role: LandingName): Promise<void> {
     setBusy(true);
     setRefusal('');
@@ -123,8 +115,9 @@ export function AppShell({
           <button
             type="button"
             className="pulse-shell-button"
-            disabled={busy}
+            aria-disabled={busy}
             onClick={() => {
+              if (busy) return;
               void signOut();
             }}
           >
@@ -160,7 +153,7 @@ function Switcher({
       className="pulse-rollup-field"
       onSubmit={(event) => {
         event.preventDefault();
-        if (chosen !== landings.current) void onSwitch(chosen);
+        if (!busy && chosen !== landings.current) void onSwitch(chosen);
       }}
     >
       <label className="pulse-rollup-field">
@@ -168,8 +161,9 @@ function Switcher({
         <select
           className="pulse-rollup-select"
           value={chosen}
-          disabled={busy}
+          aria-disabled={busy}
           onChange={(event) => {
+            if (busy) return;
             const picked = landings.landings.find((name) => name === event.target.value);
             if (picked !== undefined) setChosen(picked);
           }}
@@ -184,10 +178,29 @@ function Switcher({
       <button
         type="submit"
         className="pulse-shell-button"
-        disabled={busy || chosen === landings.current}
+        aria-disabled={busy || chosen === landings.current}
       >
         {copy('landing.switcher.submit')}
       </button>
     </form>
+  );
+}
+
+/**
+ * The signed-out state. Its heading takes focus when it arrives, because the
+ * button that was pressed has gone and focus would otherwise fall to the page.
+ */
+function SignedOut(): JSX.Element {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    heading.current?.focus();
+  }, []);
+  return (
+    <main className="pulse-landing" data-testid={SIGNED_OUT_TESTID} aria-labelledby={SIGNED_OUT_HEADING_ID}>
+      <h1 id={SIGNED_OUT_HEADING_ID} ref={heading} tabIndex={-1}>
+        {copy('landing.signed_out.heading')}
+      </h1>
+      <p>{copy('landing.signed_out.body')}</p>
+    </main>
   );
 }

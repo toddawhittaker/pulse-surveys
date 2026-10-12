@@ -116,9 +116,7 @@ async function chooseTheRootHoldingTheCard(page: Page): Promise<void> {
   expect(count, 'The by-lead tree has no root.').toBeGreaterThan(0);
   for (let index = 0; index < count; index += 1) {
     await roots.nth(index).click();
-    await expect(page.locator('article.pulse-rollup-article [role="status"]').first()).toHaveText(
-      '',
-    );
+    await expect(page.locator('.pulse-rollup-content-pane > [role="status"]')).toHaveText('');
     if ((await attentionLinkTo(page).count()) > 0) return;
   }
   throw new Error(`No root of the chair's by-lead tree carries the card for ${BIOL.label}.`);
@@ -137,6 +135,20 @@ test('a chair reads the roll-up by lead, opens an attention card, and reads the 
   await expect(rollup.getByRole('navigation', { name: 'Your purview' })).toBeVisible();
   await expect(rollup.locator('article.pulse-rollup-article h2')).toBeVisible();
   await expectNoAxeViolations(page, 'The roll-up');
+
+  // Keyboard: open the first root, choose its first child, then press the
+  // root's breadcrumb with Enter; focus lands on the root's heading.
+  const firstRoot = rollup.locator('nav.pulse-hierarchy > ul > li').first();
+  const rootName = (await firstRoot.locator('.pulse-hierarchy-select .pulse-hierarchy-name').first().textContent()) ?? '';
+  await firstRoot.locator('button.pulse-hierarchy-toggle').first().press('Enter');
+  await firstRoot.locator('ul button.pulse-hierarchy-select').first().press('Enter');
+  const crumb = rollup
+    .getByRole('navigation', { name: 'Where you are in the tree' })
+    .getByRole('button', { name: rootName, exact: true });
+  await crumb.focus();
+  await page.keyboard.press('Enter');
+  await expect(rollup.locator('article.pulse-rollup-article h2')).toBeFocused();
+  await expect(rollup.locator('article.pulse-rollup-article h2')).toHaveText(rootName);
 
   // By-lead mode is offered to a chair, and switches the tree.
   const byLead = rollup.getByRole('button', { name: BY_LEAD });

@@ -45,8 +45,7 @@ export const LEADERSHIP_ROLLUP_COPY = {
   'leadership_rollup.nav.label': 'Your purview',
   'leadership_rollup.nav.expand_all': 'Expand all',
   'leadership_rollup.nav.collapse_all': 'Collapse all',
-  'leadership_rollup.nav.expand': 'Show what {name} holds',
-  'leadership_rollup.nav.collapse': 'Hide what {name} holds',
+  'leadership_rollup.nav.toggle': 'What {name} holds',
   'leadership_rollup.breadcrumbs.label': 'Where you are in the tree',
 
   // One node's figures.
@@ -65,6 +64,8 @@ export const LEADERSHIP_ROLLUP_COPY = {
   'leadership_rollup.participation.absent': 'No published week for this start cohort yet.',
   'leadership_rollup.attention.heading': 'Needs attention',
   'leadership_rollup.attention.open': 'Open the Monday report',
+  'leadership_rollup.attention.open_named':
+    'Open the Monday report: {course} · {section}, week {week}',
   'leadership_rollup.attention.week': 'WK {week}',
 
   // The named-set line beside the node's own (SPEC §5.5).
