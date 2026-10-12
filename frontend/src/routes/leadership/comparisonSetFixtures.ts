@@ -295,7 +295,7 @@ export const A_SET_WITH_A_CROSS_LEVEL_MEMBER: ComparisonSetDetailView = {
  * would actually see.
  */
 export const A_DUPLICATE_NAME_REFUSAL =
-  'Another comparison set already uses this name, and a set is named once.';
+  'Another comparison set already uses this name, or the same name with different capitals or spacing, and a set is named once.';
 export const A_NOT_THE_DEFINER_REFUSAL =
   'A comparison set is edited and deleted by the leader who defined it, and this one was defined by somebody else.';
 export const AN_UNKNOWN_SET_REFUSAL = 'There is no comparison set here.';

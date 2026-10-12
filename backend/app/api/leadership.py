@@ -6,23 +6,26 @@ keeps it thin: a handler here resolves the session, hands the work to
 Every decision — who may change which set, what a set may be, how wide one is —
 is in that service, and the payload's shape is `app.schemas.comparison_sets`.
 
-**Seven named-set routes.** The institution's sets, one set, the choices a
+**Eight named-set routes.** The institution's sets, one set, the choices a
 set is defined out of, and the three writes; plus the preview, which is how a
 definer sees what a set reaches before anything renders a figure over it. E5-09
-consumes all seven.
+consumes those seven. The eighth (E9-05) is a set's figures for one leader:
+the only one scoped to the reader's purview, through `leadership_scope`, and the
+only one serving a figure (E9-11 draws it).
 
 **Three moderation review routes** (E6-05), after the sets: the
 reader's review queue, a decision on one queued comment, and the exclusion log.
 
-**The response loop's routes** (E7-03, ADR 0194), at the end of this file: the
-response policy (read and switch), the responses owed, and the five on-behalf
-doors. Like the review routes, each is scoped to the reader's own leadership
-grant, in `app.services.response_loop`; the section at the foot of this file
-says what each refuses.
-Unlike the sets, these are scoped to the reader's own leadership grant
-(`app.services.authz.lead_review_courses`), and the module docstring of
-`app.services.moderation` says what each answers; the section at the foot of
-this file says what each refuses.
+**The response loop's routes** (ADR 0194): the response policy (read and
+switch), the responses owed, and the five on-behalf doors. Like the review
+routes, each is scoped to the reader's own leadership grant
+(`app.services.authz.lead_review_courses`), with one widening (ADR 0206): the
+exclusion log and the policy read also answer an assistant dean, a dean or a
+vice president over their purview, taken from `leadership_scope`. Each section
+below says what its routes refuse.
+
+**The drill-down** (SPEC §5.5, ADR 0206), last: one section's Monday report,
+read-only, for a section inside the reader's purview.
 
 **`/leadership/comparison-sets/options` is declared before
 `/leadership/comparison-sets/{set_id}`, and that is load-bearing.** FastAPI
@@ -97,19 +100,27 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.ai.gateway import AIGatewayError
-from app.api.deps import csrf_verified_leadership, person_of, require_leadership
+from app.api.deps import (
+    csrf_verified_leadership,
+    leadership_scope,
+    person_of,
+    require_leadership,
+)
 from app.api.instructor import assistant_busy, assistant_unusable
 from app.config import Settings
+from app.copy.instructor_report import SECTION_UNAVAILABLE, WEEK_UNAVAILABLE
 from app.copy.leadership_moderation import (
     NO_REVIEW_GRANT,
     NOT_IN_QUEUE,
     REASON_BLANK,
     REASON_TOO_LONG,
 )
+from app.copy.leadership_rollup import TERM_UNAVAILABLE
 from app.copy.leadership_sets import NOT_THE_SETS_DEFINER, SET_UNAVAILABLE
 from app.copy.response_loop import NO_POLICY_TO_SET, ON_BEHALF_UNAVAILABLE
 from app.db import get_session
 from app.schemas.comparison_sets import (
+    NamedSetSeries,
     SetDetail,
     SetList,
     SetOptions,
@@ -117,7 +128,12 @@ from app.schemas.comparison_sets import (
     SetWrite,
 )
 from app.schemas.moderation import ExclusionLog, LeadDecision, LogRow, QueueItem, ReviewQueue
-from app.schemas.report import DraftCheckRequest, DraftCheckView, ResponseDraftView
+from app.schemas.report import (
+    DraftCheckRequest,
+    DraftCheckView,
+    InstructorReport,
+    ResponseDraftView,
+)
 from app.schemas.response_loop import (
     OnBehalfWeek,
     OwedWeek,
@@ -126,15 +142,18 @@ from app.schemas.response_loop import (
     ResponseWrite,
     WeekResponseView,
 )
+from app.services.authz import ActorScope
 from app.services.comparison_sets import (
     NotTheSetsDefinerError,
     SetUnavailableError,
+    TermUnavailableError,
     WriteRefusedError,
     create_set,
     definition_options,
     delete_set,
     edit_set,
     listed_sets,
+    named_set_figures,
     preview_of,
     read_set,
 )
@@ -151,7 +170,10 @@ from app.services.moderation import (
 )
 from app.services.reporting import (
     AssistantBusyError,
+    CourseWeekUnavailableError,
+    SectionUnavailableError,
     UnusableAnswerError,
+    leadership_report,
     one_assistant_call_at_a_time,
 )
 from app.services.response_loop import (
@@ -183,6 +205,8 @@ OPTIONS_PATH = f"{SETS_PATH}/options"
 # One set, and what it reaches.
 SET_PATH = f"{SETS_PATH}/{{set_id}}"
 PREVIEW_PATH = f"{SET_PATH}/preview"
+# One set's figures for the reader, in the term named by the `term_id` query.
+SET_SERIES_PATH = f"{SET_PATH}/series"
 
 # The statuses the three keyed refusals answer with. 404 for an id nothing
 # defined and 403 for another leader's set: the two are different facts and a
@@ -190,6 +214,8 @@ PREVIEW_PATH = f"{SET_PATH}/preview"
 # the list does not already show.
 SET_UNAVAILABLE_STATUS = 404
 NOT_THE_SETS_DEFINER_STATUS = 403
+# A term id no term carries, on the series route. Terms are no secret.
+TERM_UNAVAILABLE_STATUS = 404
 
 CREATED = 201
 NO_CONTENT = 204
@@ -334,6 +360,41 @@ def remove_set(
         raise _not_the_definer() from None
 
 
+@router.get(SET_SERIES_PATH, summary="A comparison set's figures over my purview, one term")
+def read_set_series(
+    set_id: UUID,
+    term_id: UUID,
+    request: Request,
+    response: Response,
+    scope: ActorScope = Depends(leadership_scope),
+    session: Session = Depends(get_session),
+) -> NamedSetSeries:
+    """One set's figures for the session's own reader, in the term asked for (E9-05).
+
+    **The reader's scope comes from `leadership_scope` and from nothing in the
+    request** (ADR 0199): a query string carrying another person's id is not
+    read, so it is answered with the session's own scope. The figures are
+    computed over the set's sections inside that purview, per start cohort, and
+    a set wholly outside it answers exactly what a thin set inside it does.
+
+    Two refusals past the gate, in order: a set id nothing defined is the 404
+    every keyed route here answers, and a term id no term carries is a 404 of its
+    own. A `term_id` that is absent or not a uuid is FastAPI's own 422.
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return named_set_figures(
+            session, set_id=set_id, scope=scope, term_id=term_id, settings=settings
+        )
+    except SetUnavailableError:
+        raise _unavailable() from None
+    except TermUnavailableError:
+        raise HTTPException(
+            status_code=TERM_UNAVAILABLE_STATUS, detail=TERM_UNAVAILABLE.text
+        ) from None
+
+
 @router.get(PREVIEW_PATH, summary="How many courses and sections a set reaches")
 def read_preview(
     set_id: UUID,
@@ -454,18 +515,22 @@ def decide_on_queued_comment(
         ) from None
 
 
-@router.get(LOG_PATH, summary="The exclusion log inside my own grant")
+@router.get(LOG_PATH, summary="The exclusion log inside my own grant or purview")
 def read_exclusion_log(
     request: Request,
     response: Response,
-    claims: SessionClaims = Depends(require_leadership),
+    scope: ActorScope = Depends(leadership_scope),
     session: Session = Depends(get_session),
 ) -> ExclusionLog:
-    """Every exclusion, keep and undo a person made inside the reader's own grant, newest first."""
+    """Every exclusion, keep and undo a person made inside the reader's reach, newest first.
+
+    A lead's or chair's own grant, and an assistant dean's, dean's or vice
+    president's purview (ADR 0206); the scope is the session's own.
+    """
     settings: Settings = request.app.state.settings
     response.headers["Cache-Control"] = NO_STORE
     try:
-        logged = exclusion_log(session, person_id=person_of(claims), settings=settings)
+        logged = exclusion_log(session, scope=scope, settings=settings)
     except NoReviewGrantError:
         raise _no_review_grant() from None
     return ExclusionLog(
@@ -519,12 +584,13 @@ ON_BEHALF_UNAVAILABLE_STATUS = 404
 @router.get(POLICY_PATH, summary="The response policy of every course I set or read it for")
 def read_response_policy(
     response: Response,
-    claims: SessionClaims = Depends(require_leadership),
+    scope: ActorScope = Depends(leadership_scope),
     session: Session = Depends(get_session),
 ) -> PolicyOverview:
-    """The courses the reader sets the policy for, and a chair's led courses, which they read."""
+    """The courses the reader sets the policy for, and those they read: a chair's led
+    courses, and every course of an assistant dean's, dean's or vice president's purview."""
     response.headers["Cache-Control"] = NO_STORE
-    return policy_overview(session, person_id=person_of(claims))
+    return policy_overview(session, scope=scope)
 
 
 @router.put(POLICY_PREFIX_PATH, summary="Switch the response policy for my courses in one prefix")
@@ -533,14 +599,16 @@ def switch_response_policy(
     write: PolicyWrite,
     response: Response,
     claims: SessionClaims = Depends(csrf_verified_leadership),
+    scope: ActorScope = Depends(leadership_scope),
     session: Session = Depends(get_session),
 ) -> PolicyOverview:
-    """One row per course of the prefix the reader sets the policy for; answered with the new read."""
+    """One row per course of the prefix the reader sets the policy for; answered with the new read.
+
+    `claims` is the CSRF-checked gate; the reader is the same session's `scope`.
+    """
     response.headers["Cache-Control"] = NO_STORE
     try:
-        return set_policy(
-            session, person_id=person_of(claims), prefix_id=prefix_id, mode=write.mode
-        )
+        return set_policy(session, scope=scope, prefix_id=prefix_id, mode=write.mode)
     except NoPolicyToSetError:
         raise HTTPException(
             status_code=NO_POLICY_TO_SET_STATUS, detail=NO_POLICY_TO_SET.text
@@ -711,3 +779,54 @@ def _on_behalf_unavailable() -> HTTPException:
     return HTTPException(
         status_code=ON_BEHALF_UNAVAILABLE_STATUS, detail=ON_BEHALF_UNAVAILABLE.text
     )
+
+
+# ---------------------------------------------------------------------------
+# The drill-down (SPEC §5.5, ADR 0206).
+#
+# One section's Monday report, wholesale and read-only, for a section inside the
+# reader's purview. A section outside it and a section that does not exist get
+# the instructor report's one 404 and sentence; a week with no published report
+# gets its other one. The route carries no write, and the report it serves
+# carries no action.
+# ---------------------------------------------------------------------------
+
+DRILL_DOWN_PATH = "/leadership/sections/{section_id}/weeks/{course_week}/report"
+DRILL_DOWN_UNAVAILABLE_STATUS = 404
+
+
+@router.get(DRILL_DOWN_PATH, summary="One section's Monday report, read-only, inside my purview")
+def read_drill_down(
+    section_id: UUID,
+    course_week: int,
+    request: Request,
+    response: Response,
+    scope: ActorScope = Depends(leadership_scope),
+    session: Session = Depends(get_session),
+) -> InstructorReport:
+    """The instructor's report of one section-week, as a leader reads it (SPEC §5.5).
+
+    The scope comes from `leadership_scope` and from nothing in the request
+    (ADR 0199). Comments show under the section's own per-stream threshold and
+    release batches, exactly as its instructor reads them; no comment is marked
+    as the reader's decision, and the benchmark lines are sealed against the
+    reader (SPEC §5.1).
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return leadership_report(
+            session,
+            scope=scope,
+            section_id=section_id,
+            course_week=course_week,
+            settings=settings,
+        )
+    except SectionUnavailableError:
+        raise HTTPException(
+            status_code=DRILL_DOWN_UNAVAILABLE_STATUS, detail=SECTION_UNAVAILABLE.text
+        ) from None
+    except CourseWeekUnavailableError:
+        raise HTTPException(
+            status_code=DRILL_DOWN_UNAVAILABLE_STATUS, detail=WEEK_UNAVAILABLE.text
+        ) from None

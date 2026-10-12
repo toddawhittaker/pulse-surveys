@@ -542,10 +542,22 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     column. Their owner is a NOLOGIN role of its own,
 #     `pulse_people_graph_definer`, which holds nothing on `user_identity`.
 #     The count moves from eleven to twenty-three.
+#   - `admin_record_import(actor_person_id uuid, kind text, diff jsonb)` — E9-06's
+#     fix round, in `views_sql/people_graph_v002.sql`. SPEC §8 makes `audit_log`
+#     include every import "with their dry-run diffs", and `pulse_app` holds no
+#     privilege on `audit_log` and must not: a grant cannot require the caller to
+#     be an admin, and an `INSERT` grant would let the application write any
+#     action at all into the append-only log. So the import's record is one
+#     function whose body checks the actor's live `ADMIN` assignment exactly as
+#     the twelve above do (refusing with `admin_people.actor_not_an_admin`) and
+#     writes one `IMPORT_APPLIED` row carrying the actor, the kind and the diff.
+#     It takes a person key, a word and the diff the admin was shown, returns no
+#     identity, and is owned by the same `pulse_people_graph_definer`. The count
+#     moves from twenty-three to twenty-four.
 #
 # What is *not* here is the point of the list: the functions of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
-# **twenty-fourth** entry appearing here is a new door into identity that some later
+# **twenty-fifth** entry appearing here is a new door into identity that some later
 # ticket opened without arguing for it. The number moves only in a change that
 # writes the sentence admitting the entry, as each of the eleven above did; an
 # entry arriving without one is the thing this inventory exists to make
@@ -579,6 +591,7 @@ SANCTIONED_APPLICATION_EXECUTE = (
     "admin_read_people",
     "admin_read_role_assignments",
     "admin_read_lead_mappings",
+    "admin_record_import",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
@@ -900,13 +913,14 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # `SANCTIONED_APPLICATION_EXECUTE`, and a grant of one would be red there.
 #
 # **E9-02 adds a ninth, `pulse_people_graph_definer`**, the owner of the twelve
-# people-graph definers (ADR 0200). It is the first owner that writes the people
+# people-graph definers (ADR 0200), and of E9-06's `admin_record_import` beside them. It is the first owner that writes the people
 # graph, and what it may reach is pinned in
 # `tests/integration/test_the_people_graph_definers_answer_only_an_admin.py::
 # test_the_people_graph_definers_owner_holds_exactly_what_its_writes_need`:
 # column-scoped reads and writes on `person`, the writes on `role_assignment`,
 # `lead_faculty_mapping` and `web_login_subject` its bodies make, an `INSERT` on
-# five `audit_log` columns, and nothing on `user_identity`.
+# the `audit_log` columns its rows fill (E9-06 adds `detail`), and nothing on
+# `user_identity`.
 MODERATION_DEFINER_ROLE = "pulse_moderation_definer"
 STAFF_NAME_DEFINER_ROLE = "pulse_staff_name_definer"
 RESPONSE_GUARD_DEFINER_ROLE = "pulse_response_guard_definer"

@@ -608,8 +608,8 @@ def test_a_launch_by_an_assistant_dean_alone_binds_nothing_and_is_recorded(
     §2.1 makes the assistant dean the worked example of why purview comes from the
     supervision graph: "own led courses union every supervised chair's department — a set no
     single containment node holds". Their assignment's scope node is the dean's college,
-    and they do **not** hold that college; transitive purview is what would resolve what
-    they do hold, and it raises by design until E9 (ADR 0003).
+    and they do **not** hold that college; transitive purview is what resolves what they
+    do hold (E9-01, ADR 0199), and with no chair reporting to them here it holds nothing.
 
     So a person whose only leadership assignment is `ASSISTANT_DEAN` does not pass this
     condition, and this test pins that as a consequence rather than leaving it to be

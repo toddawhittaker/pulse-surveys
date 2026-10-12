@@ -75,3 +75,7 @@ those characters unescaped, so the encoding reads back to the same value.
   either changes the digest.
 - Assignments and reporting lines are edited in the editor, not by import; the
   people file carries names and categories only.
+- An applied import leaves one `IMPORT_APPLIED` audit row naming the admin, with
+  the kind and the diff it answered in `audit_log.detail`, written by
+  `admin_record_import` (`people_graph_v002.sql`) inside the apply's transaction
+  before its commit, so a dry run or a refused apply leaves none (SPEC §8).

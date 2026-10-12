@@ -29,8 +29,14 @@ for it: `care_and_instructor_person` in `tests/fixtures/supervision.py`, named b
 that ticket
 as reused here. The combination is legal — the separation is between
 capabilities, not between people — so the assertion is not that such a person is
-refused. It is that resolving them yields the teaching grant, and only the
-teaching grant, with Care beside it.
+refused. It is that Care sits beside the purview and never in it.
+
+**What E9-01 changed here.** `resolve_scope` now answers the *leadership* scope
+(ruling 4 of `docs/tickets/e9/README.md`: "the union of leadership assignments
+only"), so a teaching hat no longer contributes to it. The purview test that
+resolved the Care-and-instructor person to their taught section is therefore
+rewritten over a Care-and-lead person, whose led course is the leadership half
+the purview must hold and whose institution-scoped Care hat it must not.
 
 Every read runs over a `pulse_app` connection, for the reason
 `test_own_grant_follows_the_role_grain.py` sets out at length.
@@ -176,42 +182,59 @@ def test_own_grant_on_a_care_assignment_raises_rather_than_returning_a_purview(
         authz.own_grant(application_session, assignment_id=care[key])
 
 
-def test_a_person_holding_care_and_a_teaching_assignment_resolves_to_the_teaching_grant(
+def test_a_person_holding_care_and_a_lead_assignment_resolves_to_the_led_course_alone(
     authz: Any, committed_rows: Any, application_session: Any
 ) -> None:
     """The two-hat person, which E0-09 calls legal and E0-11 has to keep separate.
 
-    E0-09 built `care_and_instructor_person` for this and said why in the fixture:
-    "it is capabilities that do not compose, not people". So the person is not
-    refused and the scope is not empty — what the scope holds is the section their
-    teaching assignment grants, and nothing the Care assignment touches.
+    **Rewritten by E9-01**, from a Care-and-instructor person to a Care-and-lead
+    person. The old version asserted the purview was the taught section; ruling 4
+    makes the scope `resolve_scope` answers a leadership scope, in which a
+    teaching hat contributes nothing, so that assertion is now wrong (E9-01
+    done-when 8 asserts the teaching hat's absence directly). The rule this test
+    exists for is unchanged: the scope holds what the reporting hat grants, and
+    nothing the Care assignment touches.
 
     **The institution is the tell.** The Care assignment is scoped to the
     institution (§2's table, E0-09's criterion 7), so a resolver that unioned it
-    in produces a purview holding every college in the university — for an
-    adjunct. That is the largest possible widening in this product and the one
-    §4.1 item 6 forbids absolutely, and it arrives with no error, no log line and
-    nothing on the screen to distinguish it from a VP's own view.
+    in produces a purview holding every college in the university. That is the
+    largest possible widening in this product and the one §4.1 item 6 forbids
+    absolutely, and it arrives with no error, no log line and nothing on the
+    screen to distinguish it from a VP's own view.
     """
     rows = committed_rows
     graph = rows.graph
-    hats = graph.care_and_instructor_person()
+    person = graph.person()
+    course = graph.scope("course")
     section = graph.scope("section")
+    written(graph, lambda: graph.lead_mapping(person=person, course=course), "The lead mapping")
+    written(
+        graph,
+        lambda: graph.assign("LEAD_FACULTY", scope=course, person=person, reports_to=None),
+        "The lead assignment",
+    )
+    written(
+        graph,
+        lambda: graph.assign(
+            "CARE", scope=graph.scope("institution"), person=person, reports_to=None
+        ),
+        "The Care assignment at the institution",
+    )
     rows.commit()
 
-    scope = authz.resolve_scope(application_session, person_id=hats["person"])
+    scope = authz.resolve_scope(application_session, person_id=person)
     held = levels(scope.purview)
+    expected = {name: frozenset() for name in PURVIEW_LEVELS}
+    expected["course_ids"] = frozenset({course})
+    expected["section_ids"] = frozenset({section})
 
-    assert held == {
-        name: frozenset({section}) if name == "section_ids" else frozenset()
-        for name in PURVIEW_LEVELS
-    }, (
-        f"A person holding a `CARE` assignment and a teaching assignment resolved to {held}. §2's "
+    assert held == expected, (
+        f"A person holding a `CARE` assignment and a lead assignment resolved to {held}. §2's "
         "table gives Care 'Institution (Office of Community Standards) — threat/self-harm queue "
         "and re-identification only; **no reporting access**', and §2 states the rule outright: "
-        "'Care is deliberately not composable with reporting roles.' The teaching assignment "
-        "grants one section; anything else here came from the Care row, and an `institution_ids` "
-        "is every college in the university."
+        "'Care is deliberately not composable with reporting roles.' The lead assignment grants "
+        "one course and its section; anything else here came from the Care row, and an "
+        "`institution_ids` is every college in the university."
     )
 
 

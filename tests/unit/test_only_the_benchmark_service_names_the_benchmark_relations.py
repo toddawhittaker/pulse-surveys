@@ -50,6 +50,11 @@ compliance.
 
 **Which failure a red is on today's tree:** the sweep test, naming
 `views_sql/queries.py`, which still carries the two wrappers E5-14 deletes.
+
+**E9-05 adds a second rule** (done-when 12): no module under `backend/app/`,
+the service included, names one of the four cohort views, because E9-05
+deletes their last reader and E9-12 drops them. Its controls are planted the
+same way.
 """
 
 import ast
@@ -255,6 +260,146 @@ def test_the_walk_reaches_every_directory_and_spares_only_the_service(tmp_path: 
         f"The walk returned {sorted(found)} over the planted tree; its offenders are "
         "`services/reporting.py` and `views_sql/queries.py`, and `services/benchmarks.py` is "
         "the one exemption."
+    )
+
+
+# E9-05 done-when 12: after `named_set_term_axis` is deleted, the four cohort views
+# have no reader under `backend/app/`, **the benchmark service included**, so that
+# E9-12 can retire them. The interface for E9-05 narrows the check to Python
+# modules (ruling 3 there): `views_sql/*.sql` defines the views until E9-12 drops
+# them, and a `.sql` file is not a reader.
+COHORT_VIEWS = (
+    "benchmark_cohort_week",
+    "benchmark_cohort_rating_week",
+    "benchmark_cohort_term_axis",
+    "benchmark_cohort_rating_term_axis",
+)
+
+# The four names a deleted read leaves behind, by E9-05's interface: "Deleted:
+# `named_set_trend`, `named_set_workload`, `named_set_term_axis`, `TermAxisPoint`".
+# (`_COHORT_TERM_AXIS`, the fifth, is a private constant; the cohort sweep below
+# finds the string it held.)
+DELETED_NAMED_SET_READS = (
+    "named_set_trend",
+    "named_set_workload",
+    "named_set_term_axis",
+    "TermAxisPoint",
+)
+
+
+def cohort_views_named_under(root: Path) -> dict[str, list[str]]:
+    """Every module under `root`, with no exemption, naming one of the four cohort views."""
+    return {
+        str(path.relative_to(root)): named
+        for path in sorted(root.rglob("*.py"))
+        if (
+            named := [
+                relation
+                for relation in relations_named_in(path.read_text(encoding="utf-8"), str(path))
+                if relation in COHORT_VIEWS
+            ]
+        )
+    }
+
+
+def test_the_cohort_view_sweep_spares_no_module_and_sees_a_planted_reader(tmp_path: Path) -> None:
+    """The control on the cohort-view sweep, both directions. **A red means this test is broken.**
+
+    `docs/MISTAKES.md` entry 3's canary: a planted `services/benchmarks.py` that
+    holds a cohort-view read (the shape `_COHORT_TERM_AXIS` had) must be found —
+    the exemption the rule above grants the service is exactly what this sweep
+    must not grant — and a planted module naming only a set function, or a
+    versioned SQL file name, must be spared.
+
+    **The mutations this kills:** the cohort sweep reusing `offenders_under` with
+    the service exempt (the planted service read walks free); a sweep narrowed to
+    the set functions; the four views transcribed short by one.
+    """
+    planted = {
+        "services/benchmarks.py": (
+            "_COHORT_TERM_AXIS = 'SELECT * FROM public.benchmark_cohort_term_axis'\n"
+            "SET = 'benchmark_set_week'\n"
+        ),
+        "services/rollups.py": "SQL = 'SELECT 1 FROM benchmark_cohort_rating_week'\n",
+        "services/other.py": "SET = 'benchmark_set_rating_week'\n",
+        "views_sql/__init__.py": "FILES = ('benchmark_cohort_week_v001.sql',)\n",
+    }
+    for name, source in planted.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding="utf-8")
+
+    found = cohort_views_named_under(tmp_path)
+    assert found == {
+        "services/benchmarks.py": ["benchmark_cohort_term_axis"],
+        "services/rollups.py": ["benchmark_cohort_rating_week"],
+    }, f"The cohort-view sweep returned {found} over the planted tree."
+
+
+@pytest.mark.invariant
+def test_no_module_under_the_application_names_a_cohort_view_the_benchmark_service_included() -> (
+    None
+):
+    """E9-05 done-when 12: nothing under `backend/app/**/*.py` names a cohort view.
+
+    `named_set_term_axis` was the last reader of `benchmark_cohort_term_axis`
+    (README fact list), and E9-05 deletes it with `TermAxisPoint` and
+    `_COHORT_TERM_AXIS`. After that no Python module may name any of the four
+    views, and `services/benchmarks.py` gets **no** exemption here, unlike the
+    rule above.
+
+    **The canary in the body** (`docs/MISTAKES.md` entry 3): the same matcher,
+    run over the real service, finds a set function's name there — so a blind
+    matcher cannot report this sweep clean.
+
+    **The mutation it kills:** `named_set_term_axis` (or its SQL constant) left in
+    `benchmarks.py`; any new module reading a cohort view, which E9-12 would then
+    break by dropping it. **Expected red before E9-05 lands:** this assertion,
+    naming `services/benchmarks.py` and `benchmark_cohort_term_axis`.
+    """
+    service = APP_ROOT / THE_SERVICE
+    canary = relations_named_in(service.read_text(encoding="utf-8"), str(service))
+    assert set(canary) & {"benchmark_set_week", "benchmark_set_rating_week"}, (
+        f"The matcher found {canary} in {THE_SERVICE}, which calls the set functions, so it can "
+        "see nothing and the sweep below would pass over every module."
+    )
+
+    found = cohort_views_named_under(APP_ROOT)
+    assert not found, (
+        f"These modules under backend/app name a cohort view: {found}. E9-05 deletes the last "
+        "reader (`named_set_term_axis`), README decision 10 leaves the four views unread, and "
+        "E9-12 drops them. A reader left behind breaks when they go."
+    )
+
+
+@pytest.mark.invariant
+def test_the_deleted_named_set_reads_are_gone_from_the_benchmark_service() -> None:
+    """E9-05 done-when 12's first clause, and the interface's deletions.
+
+    `named_set_term_axis` answers a set's declared length and level
+    institution-wide and cannot be scoped to a reader, and `named_set_trend` and
+    `named_set_workload` take no reader at all. E9-05 replaces all three with
+    `named_set_series`, which takes the reader's scope. A reader-less door left
+    in place is a door some later caller uses.
+
+    **The control in the body:** the module imports and exposes the replacement,
+    `named_set_series`, so "absent" is not a module that failed to load.
+
+    **The mutation it kills:** any of the four kept beside the new door.
+    **Expected red before E9-05 lands:** the first assertion, naming
+    `named_set_series` as missing.
+    """
+    import importlib
+
+    module = importlib.import_module("app.services.benchmarks")
+    assert callable(getattr(module, "named_set_series", None)), (
+        "`app.services.benchmarks` exposes no `named_set_series`, E9-05's one named-set door "
+        "taking the reader's scope and the viewed term."
+    )
+    left = [name for name in DELETED_NAMED_SET_READS if hasattr(module, name)]
+    assert not left, (
+        f"`app.services.benchmarks` still defines {left}. E9-05 deletes them: none takes a reader, "
+        "and `named_set_term_axis` cannot be narrowed to one."
     )
 
 

@@ -1,5 +1,7 @@
 # 0179 — A benchmark figure is sealed against what its reader can subtract
 
+**Amended by [ADR 0203](0203-named-set-figures-are-read-inside-the-readers-purview-and-the-seal-counts-every-hat.md)** (E9-05): a reader's sections are every section she teaches together with every section in her leadership purview, and a leadership reader passed to `section_benchmarks` is sealed against exactly as an instructor is.
+
 **Status:** Accepted — E5-14. Amends decision 1 of
 [ADR 0166](0166-the-benchmark-populations-and-the-minimums-every-one-of-their-figures-passes.md);
 its decision 2 (the default set leaves out the reported section, the university

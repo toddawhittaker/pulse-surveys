@@ -2,7 +2,8 @@
 
 SPEC §6.3 puts the People & reporting editor and the Lead Faculty mapping table in
 the admin console. The writes underneath them are `SECURITY DEFINER` functions
-in `app/views_sql/people_graph_v001.sql` (ADR 0200), and each refusal they can
+in `app/views_sql/people_graph_v001.sql` (ADR 0200) and `people_graph_v002.sql`
+(E9-06's import record), and each refusal they can
 make is raised as SQLSTATE `P0001` whose message is **exactly one key below**,
 for example `admin_people.actor_not_an_admin`. The message names no person and
 no id. A caller reads the key off the database error and looks it up in `COPY`;
@@ -135,6 +136,14 @@ _PERSON_NOT_LINKED = CopyEntry(
     text="This person has no web login to unlink.",
 )
 
+# `admin_record_import` (people_graph_v002.sql), asked to record an import of a
+# kind other than a people file or a mapping file. The service passes only the
+# two, so this reaches nobody unless the service is wrong.
+_IMPORT_KIND_UNKNOWN = CopyEntry(
+    key="admin_people.import_kind_unknown",
+    text="This import is neither a people file nor a lead mapping file, so nothing was changed.",
+)
+
 # --- The editor's own sentences (the import and its dry run) ----------------
 
 # Each lead mapping a dry run would remove: SPEC §2.1's "unmapped, falls to
@@ -205,6 +214,7 @@ COPY: Mapping[str, CopyEntry] = {
         _SUBJECT_LINKED_TO_ANOTHER,
         _PERSON_ALREADY_LINKED,
         _PERSON_NOT_LINKED,
+        _IMPORT_KIND_UNKNOWN,
         _UNMAPPED_FALLS_TO_CHAIR,
         _IMPORT_LINE_REFUSED,
         _IMPORT_HEADER_WRONG,

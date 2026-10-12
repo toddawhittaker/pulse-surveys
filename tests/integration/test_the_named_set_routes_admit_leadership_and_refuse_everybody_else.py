@@ -62,8 +62,9 @@ from fixtures.named_sets import NamedSetDoor, detail_of
 
 pytestmark = pytest.mark.integration
 
-# The seven routes, by the name a failure message calls them, with the status
-# the work order's contract block fixes for each when it is answered.
+# The eight routes (E5-06's seven and E9-05's series), by the name a failure
+# message calls them, with the status the work order's contract block fixes for
+# each when it is answered.
 ADMITTED_STATUS = {
     "list": 200,
     "create": 201,
@@ -72,6 +73,9 @@ ADMITTED_STATUS = {
     "edit": 200,
     "delete": 204,
     "preview": 200,
+    # E9-05's series route (`SET_SERIES_PATH`), the eighth under the named-set path:
+    # one set's figures for the viewed term over the session's purview.
+    "series": 200,
 }
 
 ROUTES = tuple(ADMITTED_STATUS)
@@ -121,6 +125,8 @@ def ask(door: NamedSetDoor, route: str, *, token: Any, set_id: Any = None) -> An
         return door.remove(target, token=token)
     if route == "preview":
         return door.preview(target, token=token)
+    if route == "series":
+        return door.series(target, token=token)
     raise AssertionError(f"{route!r} is not one of {ROUTES}")
 
 
@@ -447,8 +453,9 @@ def test_every_named_set_route_declares_one_of_the_two_leadership_dependencies(
     reaches no route at all (ADR 0140).
 
     **Which routes are counted, and which are held to the gate (the ruling on
-    `docs/disputes/E6-05-04.md`).** The count of seven is the named-set
-    contract's, so it is taken over the routes under the named-set path only:
+    `docs/disputes/E6-05-04.md`).** The count is the named-set contract's (seven
+    from E5-06, eight since E9-05's series route), so it is taken over the routes
+    under the named-set path only:
     E6-05 puts three moderation routes in the same module, and "every route in
     `app.api.leadership`" stopped meaning "the named-set routes" the day it did.
     The dependency check is **not** narrowed with it: every route the module

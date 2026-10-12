@@ -110,7 +110,7 @@ def student_week_results(
     # A staff name, not a figure about the week, so it is read before the hold
     # decides anything and carried in every state.
     lead_name = response_loop.section_lead_name(
-        session, section_id=section.id, reader_user_id=user_id, settings=settings
+        session, section_id=section.id, reader_user_id=user_id, scope=None, settings=settings
     )
 
     state, response = response_loop._state_and_response(

@@ -787,6 +787,36 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/comparison-sets/{set_id}/series": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * A comparison set's figures over my purview, one term
+         * @description One set's figures for the session's own reader, in the term asked for (E9-05).
+         *
+         *     **The reader's scope comes from `leadership_scope` and from nothing in the
+         *     request** (ADR 0199): a query string carrying another person's id is not
+         *     read, so it is answered with the session's own scope. The figures are
+         *     computed over the set's sections inside that purview, per start cohort, and
+         *     a set wholly outside it answers exactly what a thin set inside it does.
+         *
+         *     Two refusals past the gate, in order: a set id nothing defined is the 404
+         *     every keyed route here answers, and a term id no term carries is a 404 of its
+         *     own. A `term_id` that is absent or not a uuid is FastAPI's own 422.
+         */
+        readonly get: operations["read_set_series_leadership_comparison_sets__set_id__series_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/leadership/comparison-sets/{set_id}/preview": {
         readonly parameters: {
             readonly query?: never;
@@ -861,8 +891,11 @@ export interface paths {
             readonly cookie?: never;
         };
         /**
-         * The exclusion log inside my own grant
-         * @description Every exclusion, keep and undo a person made inside the reader's own grant, newest first.
+         * The exclusion log inside my own grant or purview
+         * @description Every exclusion, keep and undo a person made inside the reader's reach, newest first.
+         *
+         *     A lead's or chair's own grant, and an assistant dean's, dean's or vice
+         *     president's purview (ADR 0206); the scope is the session's own.
          */
         readonly get: operations["read_exclusion_log_leadership_moderation_log_get"];
         readonly put?: never;
@@ -882,7 +915,8 @@ export interface paths {
         };
         /**
          * The response policy of every course I set or read it for
-         * @description The courses the reader sets the policy for, and a chair's led courses, which they read.
+         * @description The courses the reader sets the policy for, and those they read: a chair's led
+         *     courses, and every course of an assistant dean's, dean's or vice president's purview.
          */
         readonly get: operations["read_response_policy_leadership_response_policy_get"];
         readonly put?: never;
@@ -904,6 +938,8 @@ export interface paths {
         /**
          * Switch the response policy for my courses in one prefix
          * @description One row per course of the prefix the reader sets the policy for; answered with the new read.
+         *
+         *     `claims` is the CSRF-checked gate; the reader is the same session's `scope`.
          */
         readonly put: operations["switch_response_policy_leadership_response_policy__prefix_id__put"];
         readonly post?: never;
@@ -1011,6 +1047,32 @@ export interface paths {
          * @description Under the reader's own name and the role they answer for the course under.
          */
         readonly post: operations["publish_on_behalf_response_leadership_sections__section_id__weeks__course_week__on_behalf_response_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/sections/{section_id}/weeks/{course_week}/report": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One section's Monday report, read-only, inside my purview
+         * @description The instructor's report of one section-week, as a leader reads it (SPEC §5.5).
+         *
+         *     The scope comes from `leadership_scope` and from nothing in the request
+         *     (ADR 0199). Comments show under the section's own per-stream threshold and
+         *     release batches, exactly as its instructor reads them; no comment is marked
+         *     as the reader's decision, and the benchmark lines are sealed against the
+         *     reader (SPEC §5.1).
+         */
+        readonly get: operations["read_drill_down_leadership_sections__section_id__weeks__course_week__report_get"];
+        readonly put?: never;
+        readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1887,6 +1949,49 @@ export interface components {
              * Format: uuid
              */
             readonly person_id: string;
+        };
+        /**
+         * NamedSetCohort
+         * @description One start cohort of the reader's purview in the viewed term, and its published weeks.
+         */
+        readonly NamedSetCohort: {
+            /**
+             * Section Start Date
+             * Format: date
+             */
+            readonly section_start_date: string;
+            /** Weeks */
+            readonly weeks: readonly components["schemas"]["NamedSetWeek"][];
+        };
+        /**
+         * NamedSetSeries
+         * @description A named set's figures for one leadership reader in one term, one series per start cohort.
+         *
+         *     A set wholly outside the reader's purview answers exactly the shape a thin set
+         *     inside it does: the purview's cohorts, every figure suppressed (E9-05).
+         */
+        readonly NamedSetSeries: {
+            /** Cohorts */
+            readonly cohorts: readonly components["schemas"]["NamedSetCohort"][];
+        };
+        /**
+         * NamedSetWeek
+         * @description One course week of one start cohort, on both of SPEC §2.2's week axes, every figure sealed.
+         *
+         *     The two rating means and the workload mean and median, each suppressed or
+         *     shown on its own decision (§4.1 item 7 covers "a mean, a median, or any
+         *     other statistic"). One validator per member, so removing one seal is one
+         *     test going red.
+         */
+        readonly NamedSetWeek: {
+            /** Course Week */
+            readonly course_week: number;
+            /** Term Week */
+            readonly term_week: number;
+            readonly instructor_mean: components["schemas"]["ComparisonFigure"];
+            readonly course_mean: components["schemas"]["ComparisonFigure"];
+            readonly workload_mean: components["schemas"]["ComparisonFigure"];
+            readonly workload_median: components["schemas"]["ComparisonFigure"];
         };
         /**
          * OnBehalfStream
@@ -3970,6 +4075,39 @@ export interface operations {
             };
         };
     };
+    readonly read_set_series_leadership_comparison_sets__set_id__series_get: {
+        readonly parameters: {
+            readonly query: {
+                readonly term_id: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly set_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NamedSetSeries"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly read_preview_leadership_comparison_sets__set_id__preview_get: {
         readonly parameters: {
             readonly query?: never;
@@ -4308,6 +4446,38 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["WeekResponseView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_drill_down_leadership_sections__section_id__weeks__course_week__report_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["InstructorReport"];
                 };
             };
             /** @description Validation Error */

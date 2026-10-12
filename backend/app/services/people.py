@@ -1,7 +1,7 @@
 """The admin's people editor: the two tables, their writes, and their CSV import (SPEC §6.3).
 
 Every read and every write goes through E9-02's `SECURITY DEFINER` functions in
-`app/views_sql/people_graph_v001.sql` (ADR 0200). This module never touches
+`app/views_sql/people_graph_v001.sql` (ADR 0200) and `people_graph_v002.sql`. This module never touches
 `person`, `role_assignment`, `lead_faculty_mapping` or `web_login_subject`
 itself; it orders, pages and diffs what the definers answer, and it turns their
 named refusals into the sentences in `app.copy.admin_people`.
@@ -23,7 +23,10 @@ read before, and rolls back. Its digest is a hash over the file and the named
 records' before-state, and an apply recomputes it inside a `SERIALIZABLE`
 transaction before writing, so an apply makes the dry run's changes or none: if
 a named record moved, a concurrent writer collided, or any one line was
-refused, the whole file is rolled back.
+refused, the whole file is rolled back. An apply that commits leaves one
+`IMPORT_APPLIED` audit row holding its kind and its diff, written by
+`admin_record_import` (`people_graph_v002.sql`) in the same transaction; a dry
+run leaves none.
 """
 
 import csv
@@ -720,9 +723,39 @@ def _on_line(line: int, session: Session, statement: str, values: dict[str, Any]
 
 
 def _begin(session: Session, *, applying: bool) -> None:
-    """An apply runs `SERIALIZABLE`, so a write landing between its check and its commit fails it."""
+    """An apply runs `SERIALIZABLE`, so a write landing between its check and its commit fails it.
+
+    The admin gate has already read through this session (the revocation
+    check), so its transaction is open, and an isolation level asked of an open
+    transaction is ignored. So the gate's read-only transaction is ended first,
+    and `SET TRANSACTION` is the new transaction's first statement, before the
+    digest re-check takes its snapshot.
+    """
     if applying:
-        session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+        session.rollback()
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+
+
+_RECORD_IMPORT = (
+    "SELECT public.admin_record_import(CAST(:actor AS uuid), :kind, CAST(:diff AS jsonb))"
+)
+
+
+def _record_import(
+    session: Session,
+    actor: UUID | None,
+    kind: Literal["people", "lead_mappings"],
+    diff: PeopleDiff | MappingDiff,
+) -> None:
+    """The apply's one `IMPORT_APPLIED` audit row (SPEC §8), in its transaction, before its commit.
+
+    The diff recorded is the one the apply answers, without its digest. The
+    apply only reaches this point when its digest matched, so that is the diff
+    the dry run answered. A failure here fails the apply.
+    """
+    recorded = diff.model_dump(mode="json", exclude={"digest"})
+    values = {"actor": _key(actor), "kind": kind, "diff": json.dumps(recorded)}
+    _call(session, _RECORD_IMPORT, values)
 
 
 def _finish(session: Session, *, applying: bool) -> None:
@@ -790,6 +823,8 @@ def _import_people(
                 if _values(before[person]) != _values(everyone_after[person])
             ],
         )
+        if applying:
+            _record_import(session, actor, "people", diff)
         _finish(session, applying=applying)
     except BaseException:
         session.rollback()
@@ -839,6 +874,8 @@ def _import_mappings(
             course: everything_after[course] for course in wanted if course in everything_after
         }
         diff = _mapping_diff(session, expected, before, after, _people(session, actor))
+        if applying:
+            _record_import(session, actor, "lead_mappings", diff)
         _finish(session, applying=applying)
     except BaseException:
         session.rollback()

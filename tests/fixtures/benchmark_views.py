@@ -323,9 +323,10 @@ EVERY_COURSE_WEEK = tuple(range(1, 19))
 # E5-14's freeze-at-close ruling, as the service is asked for it.
 #
 # **Assumed interface** (the E5-14 work order leaves the Python spelling open and
-# says to choose the smallest one and write it down): `benchmark_trend`,
-# `benchmark_workload`, `named_set_trend` and `named_set_workload` each take a
-# required keyword argument `cutoffs`, a mapping from course week to an aware
+# says to choose the smallest one and write it down): `benchmark_trend` and
+# `benchmark_workload` each take a required keyword argument `cutoffs` (as did
+# E5's two named-set doors, which E9-05 deleted; `named_set_series` computes its
+# cutoffs itself, per start cohort), a mapping from course week to an aware
 # instant. A response contributes to course week *w* only if its window closed at
 # or before `cutoffs[w]` and it was last submitted at or before `cutoffs[w]`. A
 # trend answers one point for exactly each course week the mapping names; a
@@ -357,13 +358,14 @@ RESOLVE_DEFAULT_SET = "resolve_default_set"
 RESOLVE_UNIVERSITY = "resolve_university"
 RESOLVE_NAMED_SET = "resolve_named_set"
 
-# The figure layer: two per population axis, plus the term-axis pass-through
-# E5-06's preview and E9 read.
+# The figure layer: the default-set and university doors, and E9-05's one
+# named-set door. E9-05's interface deletes `named_set_trend`,
+# `named_set_workload` and `named_set_term_axis` (none of them took a reader) and
+# puts `named_set_series(session, *, set_id, scope, term_id, settings)` in their
+# place, answering one `NamedSetCohort` per start cohort of the reader's purview.
 BENCHMARK_TREND = "benchmark_trend"
 BENCHMARK_WORKLOAD = "benchmark_workload"
-NAMED_SET_TREND = "named_set_trend"
-NAMED_SET_WORKLOAD = "named_set_workload"
-NAMED_SET_TERM_AXIS = "named_set_term_axis"
+NAMED_SET_SERIES = "named_set_series"
 
 # The two values and the enumeration that carries them.
 POPULATION_ENUM = "BenchmarkPopulation"
@@ -380,9 +382,7 @@ BENCHMARK_SERVICE_NAMES = (
     RESOLVE_NAMED_SET,
     BENCHMARK_TREND,
     BENCHMARK_WORKLOAD,
-    NAMED_SET_TREND,
-    NAMED_SET_WORKLOAD,
-    NAMED_SET_TERM_AXIS,
+    NAMED_SET_SERIES,
     POPULATION_ENUM,
     BENCHMARK_POINT,
     WORKLOAD_COMPARISON,
@@ -912,10 +912,11 @@ def carries(figure: Any, expected: Any) -> bool:
 def figures_in(value: Any, figure_type: Any) -> list[Any]:
     """Every comparison figure inside an arbitrary result, at any depth.
 
-    `named_set_term_axis`'s row shape is the implementer's — the work order says
-    so in as many words — so the provenance sweep finds the figures by their
-    *type* and never by a member name. A dataclass, a tuple, a mapping and a
-    plain object are all walked.
+    Written when `named_set_term_axis`'s row shape was the implementer's (E9-05
+    deleted that door), and kept because `section_benchmarks` and
+    `named_set_series` answer nested results too: the provenance sweep finds the
+    figures by their *type* and never by a member name. A dataclass, a tuple, a
+    mapping and a plain object are all walked.
     """
     if isinstance(value, figure_type):
         return [value]
@@ -1724,9 +1725,7 @@ __all__ = [
     "INSTRUCTOR_RATING_POSITION",
     "INSTRUCTOR_STREAM",
     "LEAD_FACULTY_MAPPING_TABLE",
-    "NAMED_SET_TERM_AXIS",
-    "NAMED_SET_TREND",
-    "NAMED_SET_WORKLOAD",
+    "NAMED_SET_SERIES",
     "PINNED_NOW",
     "POPULATION_ENUM",
     "PRIOR_TERM",
