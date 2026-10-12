@@ -349,6 +349,9 @@ def test_a_course_with_a_lead_is_refused_a_second_until_it_is_unmapped(
     world = people_graph
     course = world.a_course()
     first, second = world.a_person(), world.a_person()
+    # E9-14 item 2: only a Lead Faculty holder can be mapped, so the second lead
+    # holds the role and the refusal below is the one-lead-per-course one.
+    world.assignment("LEAD_FACULTY", person=second)
     world.a_mapping(person=first, course=course)
 
     refused = world.call("admin_map_lead_course", world.admin, person=second, course=course)

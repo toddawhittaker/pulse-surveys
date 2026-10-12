@@ -207,6 +207,8 @@ def test_the_lead_door_refuses_a_call_that_names_no_reader_or_two(
         else {"reader_user_id": student.user_id, "reader_person_id": teacher.person_id}
     )
 
+    # E9-14 item 4: `scope` is a required keyword, so it is passed (as an own
+    # page passes it) and the refusal is about the reader keys alone.
     with pytest.raises(ValueError):
-        door(world.application_session, section_id=world.taught, **readers)
+        door(world.application_session, section_id=world.taught, scope=None, **readers)
     world.application_session.rollback()

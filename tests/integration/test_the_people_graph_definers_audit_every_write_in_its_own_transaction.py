@@ -212,6 +212,9 @@ def test_a_mapping_change_leaves_one_row_naming_the_lead_and_the_course(
     """
     world = people_graph
     lead = world.a_person()
+    # E9-14 item 2: a course is mapped only to a Lead Faculty holder. Seeded
+    # directly, so it writes no audit row of its own.
+    world.assignment("LEAD_FACULTY", person=lead)
     course = world.a_course()
     if change == "unmap":
         world.a_mapping(person=lead, course=course)

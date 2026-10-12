@@ -470,6 +470,10 @@ def _set_reports_to(world: PeopleGraphWorld) -> Prepared:
 def _map_lead_course(world: PeopleGraphWorld) -> Prepared:
     course = world.a_course()
     person = world.a_person()
+    # E9-14 item 2: a course is mapped only to a person holding a `LEAD_FACULTY`
+    # assignment, so the target is given one; otherwise the admin's map would be
+    # refused for a reason the tests using this preparer are not about.
+    world.assignment("LEAD_FACULTY", person=person)
     return Prepared(
         "admin_map_lead_course",
         {"person": person, "course": course},

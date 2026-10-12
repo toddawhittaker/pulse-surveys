@@ -283,7 +283,10 @@ def _a_grant_row(world: PeopleGraphWorld, detail: Any) -> dict[str, Any]:
         "subject_user_id": None,
         "case_id": None,
         "role": "CARE",
-        "scope_node_id": None,
+        # E9-14 item 3: a grant row names its scope node
+        # (`ck_audit_log_an_admin_write_names_its_role_and_scope`), so the grant
+        # row here is well formed and only `detail` decides its fate.
+        "scope_node_id": uuid4(),
         "parent_assignment_id": None,
         "detail": detail,
     }

@@ -375,11 +375,14 @@ def test_a_lead_who_teaches_a_section_of_their_led_course_finds_none_of_its_rows
     )
     body = answered.json()
     rows = the_list_in(body, f"The log read for {reader.label}")
-    canary = [row for row in rows if row.get(LOG_REASON) == canary_reason]
+    # Found by its section: E9-14 item 1 blanks a held row's reason for a reader
+    # who did not decide it (`canary_reason` is that blanked reason).
+    canary = [row for row in rows if canary_code in str(row.get(LOG_SECTION_LABEL))]
     assert len(canary) == 1, (
         f"The canary: {reader.label}'s log carries {len(canary)} rows for the exclusion in section "
-        f"{canary_code}, a section of the course they lead that they do not teach. Either the log "
-        "answered nothing, or it left out the whole course rather than the taught section."
+        f"{canary_code} ({canary_reason!r}), a section of the course they lead that they do not "
+        "teach. Either the log answered nothing, or it left out the whole course rather than the "
+        "taught section."
     )
     canary_label = str(canary[0].get(LOG_SECTION_LABEL))
     assert canary_code in canary_label and taught_code not in canary_label, (
@@ -470,11 +473,14 @@ def test_a_chair_who_teaches_a_section_of_an_unled_course_finds_none_of_its_rows
     )
     body = answered.json()
     rows = the_list_in(body, f"The log read for {reader.label}")
-    canary = [row for row in rows if row.get(LOG_REASON) == canary_reason]
+    # Found by its section: E9-14 item 1 blanks a held row's reason for a reader
+    # who did not decide it (`canary_reason` is that blanked reason).
+    canary = [row for row in rows if canary_code in str(row.get(LOG_SECTION_LABEL))]
     assert len(canary) == 1, (
         f"The canary: {reader.label}'s log carries {len(canary)} rows for the exclusion in section "
-        f"{canary_code}, a section of the unled course they review that they do not teach. Either "
-        "the log answered nothing, or it left out the whole course rather than the taught section."
+        f"{canary_code} ({canary_reason!r}), a section of the unled course they review that they "
+        "do not teach. Either the log answered nothing, or it left out the whole course rather "
+        "than the taught section."
     )
     canary_label = str(canary[0].get(LOG_SECTION_LABEL))
     assert canary_code in canary_label and taught_code not in canary_label, (
