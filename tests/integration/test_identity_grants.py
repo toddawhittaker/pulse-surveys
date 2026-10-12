@@ -5875,7 +5875,8 @@ APPLICATION_READERS = (APPLICATION_ROLE, "PUBLIC")
 # **Per view, because the sanction is per view.** Each entry below carries the
 # sentence that admits it, and the sentences come from the ticket, SPEC and the
 # ADR rather than from the SQL: E0-10's two, ADR 0046's three, E4-03's three
-# report views, E4-04's comment view and E5-03's four benchmark views, and what
+# report views, E4-04's comment view, E5-03's four benchmark views and E9-07's
+# org-node label view, and what
 # each is *for* is written down in those records. No count
 # is written here — the set grows with every ticket that ships a read view, and a
 # number in a comment is a record with a scheduled expiry (`docs/MISTAKES.md`
@@ -6148,6 +6149,17 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
         "workload_respondent_count",
         "workload_section_count",
     ),
+    # E9-07's one view, and the sentence that admits it is the re-lane's ruling:
+    # the roll-up tree must say "Mathematics" and "College of Arts and Sciences"
+    # (SPEC §2.1's labels), `pulse_app` holds no `SELECT` on `institution`,
+    # `college` or `department`, and a view keeps that rule where a column grant
+    # would break it. One row per org node above a section: the containment
+    # level, the node's key, its display name, and the key of the node it sits
+    # in. **What is absent is the point**: no person, no identity, no email and
+    # no figure. The chair or dean a label names arrives through E9-03's staff
+    # name door, and every count is computed over the reader's purview, so a
+    # name or a count on this row would be one read past both.
+    "org_node_label": ("level", "node_id", "name", "parent_id"),
 }
 
 EXPECTED_APPLICATION_READABLE_COLUMNS: frozenset[tuple[str, str]] = frozenset(

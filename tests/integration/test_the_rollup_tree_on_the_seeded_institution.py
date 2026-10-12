@@ -175,8 +175,8 @@ def test_the_seeded_vps_reads_send_policies_and_responses_a_fixed_number_of_time
 ) -> None:
     """The tree reads neither table; one college's figures read each exactly once.
 
-    `tests/integration/test_the_rollup_figures_and_attention.py` counts the same
-    two reads at two sizes of node.
+    `tests/integration/test_the_rollup_figures_read_policies_and_responses_once_at_any_size.py`
+    counts the same two reads at two sizes of node.
     """
     from sqlalchemy import select
 
