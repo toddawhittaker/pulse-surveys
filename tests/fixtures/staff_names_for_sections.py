@@ -266,9 +266,13 @@ def ask_the_set_door(
     section_ids: Sequence[Any],
     reader_user_id: Any = None,
     reader_person_id: Any = None,
-    scope: Any = None,
+    scope: Any,
 ) -> list[Row]:
-    """Call the door on `pulse_app`'s own connection; the rows it answered."""
+    """Call the door on `pulse_app`'s own connection; the rows it answered.
+
+    `scope` has no default here either: the E9-03 fix round made it a required
+    keyword on the door, so every call site says whether it filters by a purview.
+    """
     function = the_set_door()
     answered = function(
         application_session,
