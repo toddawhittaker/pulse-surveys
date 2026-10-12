@@ -43,7 +43,8 @@ class ResultsUnavailableError(Exception):
     **One exception for every refusal, and it carries nothing.** A section the
     student is not enrolled in, an enrollment that has ended, a week whose report
     has not opened, and a section or a week that does not exist all leave by it,
-    so the route answers them with one status and one sentence (ADR 0193). Telling them apart would tell a student that a section they are not in
+    so the route answers them with one status and one sentence (ADR 0193).
+    Telling them apart would tell a student that a section they are not in
     exists, or how long their own section runs.
     """
 
@@ -155,7 +156,7 @@ def student_week_results(
             for token in REPORT_STREAMS
         },
     )
-    # Ruling 1 (ADR 0197): the release group only on the latest published week's
+    # ADR 0197: the release group only on the latest published week's
     # page, only while no published week is held, and only the batches cut
     # before this week's report opened.
     released = None
