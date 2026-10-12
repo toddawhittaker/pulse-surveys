@@ -63,6 +63,10 @@ export interface OverlayPoint {
  * minimums behind it are the server's (`comparison_after_suppression`, E5's
  * breakdown decision 2); every flag below is read, never computed.
  */
+export interface OverlaySeries {
+  readonly points: readonly OverlayPoint[];
+}
+
 /**
  * One start cohort's line on an aggregate page's term axis (SPEC §2.2): its
  * label, as the server wrote it, and its weeks, each placed at its term week.
@@ -72,11 +76,19 @@ export interface CohortLine {
   readonly points: readonly TrendPoint[];
 }
 
-/** How many distinct cohort strokes there are before the styles repeat. */
-const COHORT_STROKES = 6;
+/**
+ * How many distinct cohort strokes there are before the styles repeat: three
+ * inks, solid, then dashed, then dotted.
+ */
+const COHORT_STROKES = 9;
 
-export interface OverlaySeries {
-  readonly points: readonly OverlayPoint[];
+/**
+ * Whether a cohort's stroke draws on. Only the solid ones do: the draw is a
+ * dash over `pathLength={1}`, and that length would scale a dash pattern until
+ * the line drew solid.
+ */
+function drawsOn(index: number): boolean {
+  return index % COHORT_STROKES < 3;
 }
 
 /**
@@ -447,6 +459,7 @@ export function PulseTrendChart({
     return {
       key: line.label ?? String(index),
       label: line.label,
+      drawsOn: cohorts === undefined || drawsOn(index),
       stroke: cohorts === undefined ? '' : ` pulse-trend-cohort-${String(index % COHORT_STROKES)}`,
       path: linePath(plotted),
       terminal: plotted.reduce<PlottedPoint | null>((latest, point) => point ?? latest, null),
@@ -521,7 +534,7 @@ export function PulseTrendChart({
         )}
         {drawn.map((line) =>
           line.path === '' ? null : (
-            <path key={line.key} className={`pulse-trend-line${line.stroke}`} d={line.path} pathLength={1} />
+            <path key={line.key} className={`pulse-trend-line${line.stroke}`} d={line.path} pathLength={line.drawsOn ? 1 : undefined} />
           ),
         )}
         {drawn.map(({ key, stroke, terminal }) => terminal !== null && (

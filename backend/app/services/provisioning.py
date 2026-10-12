@@ -737,7 +737,7 @@ def term_containing_today(session: Session, settings: Settings) -> Term | None:
     return session.scalars(
         select(Term)
         .where(Term.start_date <= today, Term.end_date >= today)
-        .order_by(Term.start_date.desc())
+        .order_by(Term.start_date.desc(), Term.name.desc())
     ).first()
 
 

@@ -828,3 +828,25 @@ describe('one line per start cohort', () => {
     expect(legend?.textContent).toBe('URQE');
   });
 });
+
+describe('a patterned cohort line', () => {
+  it('carries no pathLength, so its dash pattern is not scaled into a solid stroke', () => {
+    const cohorts = Array.from({ length: 7 }, (_, index) => ({
+      label: `C${String(index)}`,
+      points: [{ courseWeek: index + 1, termWeek: null, mean: 3.5 }, { courseWeek: index + 2, termWeek: null, mean: 3.6 }],
+    }));
+    const { container } = render(
+      <PulseTrendChart points={[]} label="Instructor" lengthWeeks={18} axis="term" cohorts={cohorts} />,
+    );
+    const lines = Array.from(container.querySelectorAll('path.pulse-trend-line'));
+    expect(lines[0]?.getAttribute('pathLength')).toBe('1');
+    expect(lines[3]?.hasAttribute('pathLength')).toBe(false);
+    expect(lines[6]?.hasAttribute('pathLength')).toBe(false);
+    expect(lines[6]?.getAttribute('class')).toBe('pulse-trend-line pulse-trend-cohort-6');
+    const sheet = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'instructorReportTrend.css'), 'utf8');
+    const dashed = /\.pulse-trend-line\.pulse-trend-cohort-3,[^{]*\{[^}]*stroke-dasharray:\s*6 4/;
+    const dotted = /\.pulse-trend-line\.pulse-trend-cohort-6,[^{]*\{[^}]*stroke-dasharray:\s*2 4/;
+    expect(sheet).toMatch(dashed);
+    expect(sheet).toMatch(dotted);
+  });
+});

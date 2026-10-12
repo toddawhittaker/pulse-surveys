@@ -619,9 +619,11 @@ function CohortFigures({
             ? ''
             : series === null
               ? copy('leadership_rollup.set.loading')
-              : series.kind === 'ok'
-                ? ''
-                : refusalLine(series, 'leadership_rollup.set.unavailable')
+              : series.kind !== 'ok'
+                ? refusalLine(series, 'leadership_rollup.set.unavailable')
+                : chosenSet !== null && single === null
+                  ? fillCopy('leadership_rollup.set.choose_one', { name: chosenSet.name })
+                  : ''
         }
       />
 
