@@ -31,8 +31,8 @@ release batches.
   It reuses `_payload`'s per-stream hold, release batches and §5.2 flag
   hiding unchanged. It carries no action: `decided_by_you` is false
   everywhere, no composer, no exclude, keep or undo. The benchmark lines pass
-  the reader into E9-05's seal, with their purview sections as what they
-  know.
+  the reader into E9-05's seal, whose known set is the person's leadership
+  purview together with every section they teach (§5.1).
 - **The stored-summary filter on sequence.** The on-behalf filter withholds a
   summary not strictly later than the week's latest exclusion or keep-undo by
   comparing transaction-start times, which a racing exclusion can pass (the
@@ -101,8 +101,9 @@ filter's function (moved onto sequence, never copied); E9-01's
    response write routes refuse the dean for that section.
 4. **The seal counts the reader.** The drill-down's university line for a
    section is suppressed when what is left after removing the reader's
-   purview is non-empty and thin, while the instructor's own report of the
-   same section shows it (the seal's behaviour is E9-05's; this asserts the
+   known set (leadership purview and taught sections) is non-empty and thin,
+   while the report of the same section read by an instructor with no
+   leadership assignment shows it (the seal's behaviour is E9-05's; this asserts the
    drill-down passes the reader).
 5. **No summary older than the latest exclusion, by sequence.** A summary
    written after an exclusion's transaction began but before it committed is

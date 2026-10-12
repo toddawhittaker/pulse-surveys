@@ -69,28 +69,41 @@ The existing invariant test patterns and fixtures; E9-01's forest generators;
 4. **§4.1 item 4, ordering.** For two worlds that differ only in figures, every
    list in every roll-up response has the same order. Marked `invariant`.
 5. **§4.1 item 7 for a leader.** The drill-down's comparison and university
-   figures are suppressed when the remainder after the reader's purview is
-   non-empty and below a minimum, one respondent either side; the named-set
-   series is suppressed below 3 sections or 10 respondents inside the purview.
-   Marked `invariant`.
-6. **The staff-name door passes purview sections only (ruling 3).** A
+   figures are suppressed when the remainder after the reader's known set
+   (leadership purview and taught sections, §5.1) is non-empty and below a
+   minimum, one respondent either side; the named-set series is suppressed
+   below 3 sections or 10 respondents inside the purview. Marked
+   `invariant`.
+6. **Both hats, through the drill-down route.** A Math chair teaches Biology
+   section T; the drill-down's university line U is suppressed when U less
+   Math less T is non-empty and one respondent below a minimum, and shown at
+   the minimum; the twin world, with the chair not teaching T and U less Math
+   meeting both minimums, shows U. Marked `invariant`.
+7. **The university line's two extra pieces, through the route.** With U
+   less the known set meeting both minimums, U is suppressed when (i) a
+   default comparison set of a purview section, less the known set, is
+   non-empty and thin, or (ii) the university less the known set and less
+   those sets is non-empty and thin. Each case has a shown twin, one
+   respondent either side. Marked `invariant`.
+8. **The staff-name door passes purview sections only (ruling 3).** A
    leadership page's call to the door never passes a section outside the
    reader's purview, asserted at the definer's boundary (the ids it received).
    Marked `invariant`.
-7. **Every test above can fail.** The verifier plants, for each, the named
+9. **Every test above can fail.** The verifier plants, for each, the named
    mutation (for example: drop the lead clamp; read the purview by person;
    pass the whole section list to the door; sort attention by a figure; drop
-   the reader from the seal; put a summary on the roll-up schema) and sees it
-   red, and the named near miss green.
-8. **The four cohort views are retired.** After the migration none exists and
+   the reader from the seal; seal a leader without their taught sections;
+   skip one of the university line's extra pieces; put a summary on the
+   roll-up schema) and sees it red, and the named near miss green.
+10. **The four cohort views are retired.** After the migration none exists and
    `pulse_app` holds no grant on any; nothing under `backend/app/` names them
    (search with a canary); downgrade and upgrade round-trip; the §4.1 view
    sweeps and catalog guards are green with the views gone. If E9-05, E9-07 or
    E9-09 recorded that one of them is read, that view is kept and the pull
    request says so.
-9. **CI's isolated §4.1 pass collects every new module** (no skip, no empty
+11. **CI's isolated §4.1 pass collects every new module** (no skip, no empty
    collection).
-10. **The records match.** ADR 0166 gains its line; the carried cohort-views
+12. **The records match.** ADR 0166 gains its line; the carried cohort-views
     entry is named closed in the pull request.
 
 ## Shares files with

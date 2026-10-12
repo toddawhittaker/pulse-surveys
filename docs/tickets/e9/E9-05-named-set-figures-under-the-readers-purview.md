@@ -27,12 +27,19 @@ calls any of them (ADR 0173 lets every leader list every set).
 
 **The seal counts a leadership reader (§5.1).** `_section_populations` seals
 each figure against each instructor of the reported section, using the
-sections that instructor teaches (ADR 0179's `taught` list). This ticket lets
-the seal take a leadership reader too, with every section in the reader's
-purview in place of the sections an instructor teaches. The reader enters the
-seal exactly as an instructor does, including the university line's two extra
-pieces. E9-09's drill-down passes the reader; the instructor's own report
-passes none and is unchanged.
+sections that instructor teaches (ADR 0179's `taught` list). The seal must
+cover what one **person** can subtract, across every hat they wear (§5.1):
+
+- A leadership reader's known set is every section in the person's
+  leadership purview together with every section the person teaches.
+- An instructor of the reported section who also holds a leadership
+  assignment has every section in their leadership purview added to the
+  sections they teach. So the instructor's own report changes for a two-hat
+  instructor, and stays as it is for an instructor with no leadership
+  assignment.
+
+The reader enters the seal exactly as an instructor does, including the
+university line's two extra pieces. E9-09's drill-down passes the reader.
 
 **Named-set figures (decision 10).** A named set's figure for a reader is
 computed over the set's resolved sections (`resolve_named_set`) that lie
@@ -131,35 +138,51 @@ E9-01's `Purview` and `leadership_scope`; the E5-14 sweep that allows only
    served. Marked `invariant`.
 5. **The seal counts a leadership reader.** For a reported section read with
    a leadership reader, a comparison or university figure is suppressed when
-   what is left after removing the reader's purview sections is non-empty
-   and below either minimum, and shown when that remainder is empty or meets
-   both; tested one respondent either side of the minimum. The same report
-   read with no leadership reader (the instructor's own) is unchanged:
-   existing seal tests green, unchanged. Marked `invariant`.
-6. **"Outside" and "thin" look the same.** A set wholly outside the reader's
+   what is left after removing the reader's known set (purview and taught
+   sections) is non-empty and below either minimum, and shown when that
+   remainder is empty or meets both; tested one respondent either side of
+   the minimum. For an instructor with no leadership assignment, the existing
+   seal tests stay green, unchanged. Marked `invariant`.
+6. **The seal covers both hats.** A Math chair teaches Biology section T. The
+   university line U for a report the chair reads, as chair or as T's
+   instructor, is suppressed when U less Math less T is non-empty and one
+   respondent below a minimum, and shown at the minimum. The twin: the same
+   world with the chair not teaching T, where U less Math meets both minimums
+   and U is shown. Marked `invariant`.
+7. **The university line's first extra piece, for a leader.** U less the
+   reader's known set meets both minimums, but one default comparison set of
+   a section in the purview, less the known set, is non-empty and thin; U is
+   suppressed. The shown twin: that piece meets both minimums (or is empty)
+   and U is shown. One respondent either side. Marked `invariant`.
+8. **The university line's second extra piece, for a leader.** U less the
+   known set meets both minimums, but U less the known set and less every
+   such default set is non-empty and thin; U is suppressed. The shown twin:
+   that remainder meets both minimums (or is empty) and U is shown. One
+   respondent either side. Marked `invariant`.
+9. **"Outside" and "thin" look the same.** A set wholly outside the reader's
    purview answers the same payload shape and suppression marker as a thin
    set inside it.
-7. **The cutoff is the cohort's own close.** A response submitted after start
+10. **The cutoff is the cohort's own close.** A response submitted after start
    cohort C's week-N close and before another cohort's does not count in C's
    week-N figure; one submitted before it does. Tested one second either side
    (ADR 0178's rule).
-8. **The route takes no purview.** The series route resolves the scope from
+11. **The route takes no purview.** The series route resolves the scope from
    the session through `leadership_scope`; a request carrying another
    person's id is answered from the session's own scope. A non-leadership
    session gets ADR 0196's 403.
-9. **`named_set_term_axis` is gone,** and nothing under `backend/app/` names
+12. **`named_set_term_axis` is gone,** and nothing under `backend/app/` names
    `benchmark_cohort_week`, `benchmark_cohort_rating_week`,
    `benchmark_cohort_term_axis` or `benchmark_cohort_rating_term_axis`,
    checked by a search with a canary (MISTAKES entry 3).
-10. **Near-duplicate names are refused.** Creating "nursing  core" when
+13. **Near-duplicate names are refused.** Creating "nursing  core" when
     "Nursing core" exists answers the governed refusal sentence (a route
     test); renaming a set to a near-duplicate is refused the same way; a
     name that differs in a letter is accepted. The migration renames existing
     near-duplicates and its downgrade drops only the index.
-11. **The surface is placed.** The copy inventory places `leadership_rollup`
+14. **The surface is placed.** The copy inventory places `leadership_rollup`
     in `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` and collects this ticket's keys
     under it.
-12. **The records match.** ADR 0203 is written and indexed; ADR 0173 and 0179
+15. **The records match.** ADR 0203 is written and indexed; ADR 0173 and 0179
     gain their lines; the docstrings in `benchmarks.py` that say E9 decides
     the cutoffs or that a named set has no reader are rewritten. SPEC §13
     reflects any file added or removed.
