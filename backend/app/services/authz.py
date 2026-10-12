@@ -788,6 +788,36 @@ def own_grant(session: Session, *, assignment_id: UUID) -> Purview:
     return _own_grant_of(session, _Assignment.of(row))
 
 
+def _assignments_of(session: Session, person_id: UUID) -> list[_Assignment]:
+    """Every assignment one person holds, converted, in assignment-key order."""
+    return [
+        _Assignment.of(row)
+        for row in session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings()
+    ]
+
+
+def _chaired_courses_and_those_with_a_lead(
+    session: Session, assignments: Sequence[_Assignment]
+) -> tuple[frozenset[UUID], frozenset[UUID]]:
+    """The courses in the departments these `CHAIR` rows hold, and which of them have a lead.
+
+    The one statement of the chair's walk to a department's courses with a lead.
+    `lead_review_courses` keeps the first set less the second (the chair reviews
+    an unled course), and `chaired_courses_with_a_lead` answers the second (the
+    chair reads a led course's policy and cannot set it). Every other role is
+    ignored, and a chair row with no department is a row the scope grain rule
+    refuses, so it contributes nothing rather than raising.
+    """
+    chaired: set[UUID] = set()
+    for held in assignments:
+        if held.role is AssignmentRole.CHAIR and held.department_id is not None:
+            chaired |= _nodes_beneath(session, "department", held.department_id)["course"]
+    if not chaired:
+        return frozenset(), frozenset()
+    led = frozenset(session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars())
+    return frozenset(chaired), led
+
+
 def lead_review_courses(session: Session, *, person_id: UUID) -> Mapping[UUID, AssignmentRole]:
     """The courses this person's own leadership grants put under moderation review, and the role.
 
@@ -815,24 +845,14 @@ def lead_review_courses(session: Session, *, person_id: UUID) -> Mapping[UUID, A
     supervision walk (ADR 0108), and a dean or vice president is not a reviewer
     §5.2 names, so each answers an empty mapping, which the caller refuses.
     """
-    assignments = [
-        _Assignment.of(row)
-        for row in session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings()
-    ]
+    assignments = _assignments_of(session, person_id)
     covered: dict[UUID, AssignmentRole] = {}
     if any(held.role is AssignmentRole.LEAD_FACULTY for held in assignments):
         for course_id in _lead_faculty_grant(session, person_id).course_ids:
             covered[course_id] = AssignmentRole.LEAD_FACULTY
-    chaired: set[UUID] = set()
-    for held in assignments:
-        if held.role is AssignmentRole.CHAIR and held.department_id is not None:
-            chaired |= _nodes_beneath(session, "department", held.department_id)["course"]
-    if chaired:
-        led_by_somebody = set(
-            session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars()
-        )
-        for course_id in chaired - led_by_somebody:
-            covered[course_id] = AssignmentRole.CHAIR
+    chaired, led_by_somebody = _chaired_courses_and_those_with_a_lead(session, assignments)
+    for course_id in chaired - led_by_somebody:
+        covered[course_id] = AssignmentRole.CHAIR
     return covered
 
 
@@ -848,21 +868,14 @@ def chaired_courses_with_a_lead(session: Session, *, person_id: UUID) -> frozens
     leads a course of the department they chair; the caller treats a course it
     can set as settable.
 
-    The department walk is `lead_review_courses`' own, over the same
-    `CHAIR` assignments, kept beside it so the two cannot disagree about which
-    departments a person chairs.
+    The department walk is `_chaired_courses_and_those_with_a_lead`, the same
+    statement `lead_review_courses` uses, so the two cannot disagree about which
+    departments a person chairs or which of their courses have a lead.
     """
-    assignments = [
-        _Assignment.of(row)
-        for row in session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings()
-    ]
-    chaired: set[UUID] = set()
-    for held in assignments:
-        if held.role is AssignmentRole.CHAIR and held.department_id is not None:
-            chaired |= _nodes_beneath(session, "department", held.department_id)["course"]
-    if not chaired:
-        return frozenset()
-    return frozenset(session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars())
+    _, led_by_somebody = _chaired_courses_and_those_with_a_lead(
+        session, _assignments_of(session, person_id)
+    )
+    return led_by_somebody
 
 
 def transitive_purview(session: Session | None, *, assignment_id: UUID) -> Purview:
