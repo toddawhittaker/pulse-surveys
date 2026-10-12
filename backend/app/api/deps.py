@@ -55,6 +55,7 @@ from starlette.responses import Response
 
 from app.config import Settings
 from app.copy import CopyEntry, entry
+from app.copy.admin_people import NOT_ADMIN, NOT_ADMIN_ROLE
 from app.copy.instructor_report import NOT_AN_INSTRUCTOR
 from app.copy.leadership_sets import NOT_LEADERSHIP, NOT_YOUR_ROLE
 from app.copy.student_read import NOT_A_STUDENT
@@ -97,6 +98,7 @@ __all__ = [
     "REFUSED",
     "cancelled",
     "cancelled_page",
+    "csrf_verified_admin",
     "csrf_verified_instructor",
     "csrf_verified_leadership",
     "csrf_verified_student",
@@ -108,6 +110,7 @@ __all__ = [
     "person_of",
     "refusal_page",
     "refused",
+    "require_admin",
     "require_instructor",
     "require_leadership",
     "require_student",
@@ -334,6 +337,51 @@ def require_leadership(request: Request) -> SessionClaims:
         raise HTTPException(
             status_code=NOT_YOUR_ROLE_STATUS,
             detail=NOT_YOUR_ROLE,
+            headers=NOT_YOUR_ROLE_CHALLENGE,
+        )
+    return session
+
+
+def require_admin(request: Request) -> SessionClaims:
+    """The verified session of an admin, a 403 for a real session in another role, or one 401.
+
+    E9-06's admin routes depend on this or on `csrf_verified_admin` below, so a
+    sweep asking the running application which routes carry it gets the admin
+    console's whole surface, as `require_leadership` gives the leadership one.
+
+    **This is the real admin check for the people-graph writes (ADR 0200).** The
+    definers in `views_sql/people_graph_v001.sql` take the acting admin's person
+    key as an argument and check that the key holds a live `ADMIN` assignment,
+    but `pulse_app` supplies that key and the database cannot tell whether it is
+    the session's own. So the route must take the key from the session this
+    function returns (`person_of`), never from the request.
+
+    **The role comes from the session**, decided at the door by `resolve_landing`
+    out of the person's own assignments (ADR 0098). A person who holds both a
+    dean's and an admin's assignment is refused under her leadership session and
+    admitted under her admin session: the gate judges the session, never the
+    person.
+
+    **Two refusals, in the order `require_leadership` gives them (ADR 0196).**
+    A token that is absent, malformed, expired or signed with another key gets
+    `NOT_LEADERSHIP_STATUS` (401), the `Bearer` challenge and `NOT_ADMIN`'s
+    words, before any claim is read. A real, verified, live session in any other
+    role gets `NOT_YOUR_ROLE_STATUS` (403), the `insufficient_scope` challenge
+    and `NOT_ADMIN_ROLE`'s words. The status codes and challenges are the
+    leadership gate's; only the sentences differ, because those say
+    "leadership".
+    """
+    session = session_from_request(request, request.app.state.session_secret)
+    if session is None:
+        raise HTTPException(
+            status_code=NOT_LEADERSHIP_STATUS,
+            detail=NOT_ADMIN,
+            headers=NOT_LEADERSHIP_CHALLENGE,
+        )
+    if session.role is not LandingRole.ADMIN:
+        raise HTTPException(
+            status_code=NOT_YOUR_ROLE_STATUS,
+            detail=NOT_ADMIN_ROLE,
             headers=NOT_YOUR_ROLE_CHALLENGE,
         )
     return session
@@ -1005,6 +1053,24 @@ def csrf_verified_instructor(
     implementation. What a forged decision costs is a student's comment excluded
     from a class's view, or a flagged one published, by a page on the internet
     using an instructor's signed-in browser.
+    """
+    return _double_submit_verified(request, claims)
+
+
+def csrf_verified_admin(
+    request: Request, claims: SessionClaims = Depends(require_admin)
+) -> SessionClaims:
+    """`require_admin`, plus the same double-submit check every other write carries.
+
+    E9-06's people-graph write routes carry this where its reads carry
+    `require_admin`, for the reason `csrf_verified_student` gives: forgery is a
+    defence for writes, and a route says which it means by which dependency it
+    declares. `require_admin` is *declared* rather than called, so the route stays
+    visible to every sweep that walks a route's `Dependant` graph for it, and the
+    gate's 401 or 403 is raised before this body runs.
+
+    What a forged write costs here is the people graph itself: a page on the
+    internet using an admin's signed-in browser to grant somebody Care or Admin.
     """
     return _double_submit_verified(request, claims)
 
