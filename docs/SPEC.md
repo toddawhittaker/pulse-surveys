@@ -467,11 +467,12 @@ pulse-surveys/
 │       │   ├── report.py           # the instructor's Monday report
 │       │   ├── report_benchmark.py # the report's comparison and university figures
 │       │   ├── comparison_sets.py  # the named-set management API
+│       │   ├── admin.py            # the people editor's tables, writes, and CSV import diffs
 │       │   ├── response_loop.py    # a student's week state and the response published to it
 │       │   └── moderation.py       # the Lead Faculty review queue, a leader's decision, the exclusion log
 │       │
 │       ├── copy/                   # every sentence the backend shows a person, keyed (§4.1)
-│       │   ├── admin_people.py     # the admin gate's sentences and the people-graph writes' refusals
+│       │   ├── admin_people.py     # the admin gate's sentences, the people-graph writes' refusals, the import's
 │       │   ├── entry.py            # the four pages a door answers with when there is no landing
 │       │   ├── submit.py           # the weekly survey's submit path
 │       │   ├── student_read.py     # the student read path
@@ -491,7 +492,7 @@ pulse-surveys/
 │       │   ├── instructor.py       # the Monday report reads, comment decisions, the response draft and check, the week's response
 │       │   ├── leadership.py       # named comparison sets; the review queue and exclusion log; the response policy, the responses owed, on behalf
 │       │   ├── care.py             # threat queue, audited re-identify — not built yet: E10
-│       │   └── admin.py            # observability, config, hierarchy, roles — not built yet: E11
+│       │   └── admin.py            # the people editor (§6.3); observability and config — not built yet: E11
 │       │
 │       ├── services/               # domain logic (the real app lives here)
 │       │   ├── authz.py            # the one chokepoint every entry point reads through
@@ -512,6 +513,7 @@ pulse-surveys/
 │       │   ├── report_comments.py  # §4's small-N comment rules
 │       │   ├── benchmarks.py       # comparison-set resolution, length/level matching, min-N
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
+│       │   ├── people.py           # the people editor: sorting, paging, the reports-to selector, CSV import with a dry run
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
 │       │   ├── response_loop.py    # a section's staff names for a reader of it; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)
