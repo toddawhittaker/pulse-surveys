@@ -498,7 +498,7 @@ pulse-surveys/
 │       │   ├── dev.py              # the development-only test console
 │       │   ├── student.py          # survey fetch/submit
 │       │   ├── instructor.py       # the Monday report reads, comment decisions, the response draft and check, the week's response
-│       │   ├── leadership.py       # named comparison sets and a set's figures for the reader; the review queue and exclusion log; the response policy, the responses owed, on behalf; a section's read-only drill-down
+│       │   ├── leadership.py       # named comparison sets and a set's figures for the reader; the review queue and exclusion log; the response policy, the responses owed, on behalf; the roll-up's context, tree and figures; a section's read-only drill-down and its weeks
 │       │   ├── care.py             # threat queue, audited re-identify — not built yet: E10
 │       │   └── admin.py            # the people editor (§6.3); observability and config — not built yet: E11
 │       │
@@ -568,7 +568,7 @@ pulse-surveys/
 │   ├── index.html
 │   └── src/
 │       ├── main.tsx
-│       ├── router.tsx              # TanStack Router over the five role areas
+│       ├── router.tsx              # TanStack Router over the five role areas, inside the app shell's switcher and logout
 │       ├── api/                    # typed fetchers per role, over the generated wire types (ADR 0185)
 │       │   ├── openapi.json        # the backend's OpenAPI document, written by scripts/export_openapi.py
 │       │   └── wire.gen.ts         # types generated from openapi.json by `npm run gen:wire`
@@ -578,7 +578,7 @@ pulse-surveys/
 │       └── routes/
 │           ├── student/            # weekly survey form
 │           ├── instructor/         # Monday report
-│           ├── leadership/         # comparison-set management
+│           ├── leadership/         # the roll-up and its read-only drill-down; comparison sets, moderation review, response policy
 │           ├── care/               # placeholder page; the threat queue is E10
 │           └── admin/              # placeholder page; the console is E11
 │

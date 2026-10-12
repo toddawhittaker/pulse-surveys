@@ -172,6 +172,8 @@ export const INSTRUCTOR_REPORT_STATS_COPY = {
   // And a rate with nothing to be a rate of — the validity rate of a week with
   // no responses — states neither, because "0 / 0" is not a fact about anything.
   'instructor_report_stats.rate_reading_absent': '{label}: no responses yet this week.',
+  // An aggregate rate the roll-up sends without counts: the percent alone.
+  'instructor_report_stats.rate_reading_percent_only': '{label}: {percent}.',
 
   // Whole percents, written where the rest of the report's words are, so the
   // one place a percent sign is spelled is this file.

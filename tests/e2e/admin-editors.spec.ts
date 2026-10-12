@@ -121,7 +121,7 @@ test('an admin imports a mapping file, reads the diff, applies it, and sees the 
   await page.getByTestId(IMPORT_APPLY).click();
   await expect(table.getByRole('rowheader', { name: BIOL.label })).toBeVisible();
   await expect(page.getByRole('button', { name: APPLY })).toHaveCount(0);
-  await expect(page.getByRole('status')).toContainText('The import was applied.');
+  await expect(page.locator('.pulse-admin-announcement')).toContainText('The import was applied.');
 });
 
 test('the People table opens a person’s panel, and every page scans clean', async ({ page }) => {
@@ -156,7 +156,7 @@ test('a lead faculty member is told the admin pages are not part of their role',
   for (const address of [PEOPLE_HREF, MAPPINGS_HREF]) {
     await page.goto(address);
     // The notice and the live region both carry the sentence; the region is the one.
-    await expect(page.getByRole('status')).toHaveText(NOT_YOUR_ROLE);
+    await expect(page.locator('.pulse-admin-announcement')).toHaveText(NOT_YOUR_ROLE);
     await expect(page.getByRole('table')).toHaveCount(0);
   }
   await expectNoAxeViolations(page, 'The not-your-role notice on an admin page');

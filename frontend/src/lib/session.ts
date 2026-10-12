@@ -135,3 +135,26 @@ export function csrfHeader(): Record<string, string> {
   const token = readCookie(CSRF_COOKIE);
   return token === null ? {} : { [CSRF_HEADER]: token };
 }
+
+/**
+ * Hold a session the server just issued, in place of the one the tab had.
+ *
+ * The role switcher's answer carries the new session in its body for this
+ * carrier (ADR 0202); the cookie it also sets is for a browser that keeps it.
+ */
+export function storeSessionToken(token: string): void {
+  try {
+    window.sessionStorage.setItem(SESSION_STORAGE_KEY, token);
+  } catch {
+    // Storage is unavailable; the cookie the server set is then the carrier.
+  }
+}
+
+/** Drop the tab's session, once the server has ended it. */
+export function forgetSessionToken(): void {
+  try {
+    window.sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    // Nothing was stored where nothing can be read.
+  }
+}

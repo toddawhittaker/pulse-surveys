@@ -137,6 +137,7 @@ from app.schemas.report import (
     DraftCheckRequest,
     DraftCheckView,
     InstructorReport,
+    PublishedWeeks,
     ResponseDraftView,
 )
 from app.schemas.response_loop import (
@@ -147,7 +148,7 @@ from app.schemas.response_loop import (
     ResponseWrite,
     WeekResponseView,
 )
-from app.schemas.rollup import FiguresKind, RollupFigures, RollupTree
+from app.schemas.rollup import FiguresKind, LeadershipContext, RollupFigures, RollupTree
 from app.services.authz import ActorScope
 from app.services.comparison_sets import (
     NotTheSetsDefinerError,
@@ -179,6 +180,7 @@ from app.services.reporting import (
     CourseWeekUnavailableError,
     SectionUnavailableError,
     UnusableAnswerError,
+    leadership_published_course_weeks,
     leadership_report,
     one_assistant_call_at_a_time,
 )
@@ -194,7 +196,12 @@ from app.services.response_loop import (
     responses_owed,
     set_policy,
 )
-from app.services.rollups import NodeUnavailableError, rollup_figures, rollup_tree
+from app.services.rollups import (
+    NodeUnavailableError,
+    leadership_context,
+    rollup_figures,
+    rollup_tree,
+)
 from app.services.session import SessionClaims
 
 router = APIRouter(tags=["leadership"])
@@ -427,8 +434,25 @@ def read_preview(
 
 ROLLUP_PATH = "/leadership/rollup"
 ROLLUP_NODE_PATH = f"{ROLLUP_PATH}/{{kind}}/{{node_id}}"
+CONTEXT_PATH = "/leadership/context"
 
 NODE_UNAVAILABLE_STATUS = 404
+
+
+@router.get(CONTEXT_PATH, summary="My leadership roles, the terms, and the current term")
+def read_leadership_context(
+    request: Request,
+    response: Response,
+    scope: ActorScope = Depends(leadership_scope),
+    session: Session = Depends(get_session),
+) -> LeadershipContext:
+    """What the roll-up pages read first: which term to open, and the reader's own roles.
+
+    The roles are the session's own (ADR 0199); the terms are every term, which
+    is no secret.
+    """
+    response.headers["Cache-Control"] = NO_STORE
+    return leadership_context(session, scope=scope, settings=request.app.state.settings)
 
 
 @router.get(ROLLUP_PATH, summary="The tree over my leadership purview, one term")
@@ -869,6 +893,7 @@ def _on_behalf_unavailable() -> HTTPException:
 # ---------------------------------------------------------------------------
 
 DRILL_DOWN_PATH = "/leadership/sections/{section_id}/weeks/{course_week}/report"
+DRILL_DOWN_WEEKS_PATH = "/leadership/sections/{section_id}/published-weeks"
 DRILL_DOWN_UNAVAILABLE_STATUS = 404
 
 
@@ -907,3 +932,30 @@ def read_drill_down(
         raise HTTPException(
             status_code=DRILL_DOWN_UNAVAILABLE_STATUS, detail=WEEK_UNAVAILABLE.text
         ) from None
+
+
+@router.get(
+    DRILL_DOWN_WEEKS_PATH, summary="The course weeks of a section in my purview with a report"
+)
+def read_drill_down_weeks(
+    section_id: UUID,
+    request: Request,
+    response: Response,
+    scope: ActorScope = Depends(leadership_scope),
+    session: Session = Depends(get_session),
+) -> PublishedWeeks:
+    """The published course weeks of one section, for the drill-down to open its latest.
+
+    Behind the same purview as the drill-down itself, with the same 404 and
+    sentence for a section outside it and a section that does not exist.
+    """
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        weeks = leadership_published_course_weeks(
+            session, scope=scope, section_id=section_id, settings=request.app.state.settings
+        )
+    except SectionUnavailableError:
+        raise HTTPException(
+            status_code=DRILL_DOWN_UNAVAILABLE_STATUS, detail=SECTION_UNAVAILABLE.text
+        ) from None
+    return PublishedWeeks(published_weeks=weeks)
