@@ -1,0 +1,490 @@
+"""Only `leadership_scope` reaches `resolve_scope` — E9-01, done-when 10's caller sweep.
+
+> The caller sweep finds `resolve_scope` called only from `leadership_scope` and
+> the services it passes the scope to, with a planted second caller going red and
+> the allowed caller found as a control (MISTAKES entry 35).
+
+**Why.** `resolve_scope(session, person_id=…)` answers any person's leadership
+scope. The chokepoint is that the application asks it about one person only —
+the verified session's own — and asks it in one place, `api/deps.py`'s
+`leadership_scope`. A second caller could pass any person it liked.
+
+**The rule, under `backend/app/`:**
+
+  - `services/authz.py` defines `resolve_scope` and may use it freely (the
+    chokepoint module; `leadership_grant_covers` answers on the same purview,
+    ADR 0108).
+  - `api/deps.py` may import it anywhere, and may reference it — by name, by an
+    import alias, as an attribute, or as a string — only inside `def
+    leadership_scope`.
+  - Every other module references it nowhere. The services `leadership_scope`
+    hands the scope to receive an `ActorScope`; they have no reason to name the
+    resolver, so "and the services it passes the scope to" adds no exemption.
+
+**The device** is `test_only_the_response_loop_service_names_the_staff_name_
+definer.py`'s, copied rather than shared (`docs/MISTAKES.md` entry 37): each
+module's syntax tree is walked; docstrings are not read; comments never reach the
+tree. **Disclosed limit** (`docs/MISTAKES.md` entry 14): a name assembled at run
+time is not matched; nor is anything outside `backend/app/` (scripts, migrations,
+tests).
+
+**Controlled in both directions** (`docs/MISTAKES.md` entries 3, 35 and 53): the
+matcher against planted references and near misses; the walk against a planted
+tree holding a second caller, an aliased caller in `api/deps.py` outside the
+dependency, and the allowed shape; and the real `api/deps.py` required to be
+*found* calling `resolve_scope` inside `leadership_scope`. A red in a control
+means this module is broken, not the code — except the real-tree control before
+E9-01 lands, which is red because `leadership_scope` does not exist yet.
+
+**The walk itself is a second door, and is held shut here too** (the E9-01
+privacy review). `resolve_scope` is reached by person; `transitive_purview` is
+reached by assignment id, and answers that assignment's whole purview. A route
+that called it with an assignment id read off the request would resolve somebody
+else's scope without ever naming `resolve_scope`, and the rule above would stay
+green. So the walk's names — `transitive_purview`, and the two private helpers
+that perform it, `_transitive_purview_of` and `_clamped_subtree` — are
+referenced nowhere under `backend/app/` but `services/authz.py`:
+
+  - `services/authz.py` defines the walk. It is the only sanctioned caller:
+    every other module gets a purview out of the `ActorScope` the
+    `leadership_scope` dependency hands it (E9-01: "no route takes a person,
+    assignment or scope id from the request to resolve a scope").
+  - `api/deps.py` gets **no** exemption for the walk. The dependency resolves a
+    scope by the session's person through `resolve_scope`; it has no reason to
+    hold an assignment id, and an exemption there would be the door this rule
+    closes.
+
+At the time this rule was written, nothing outside `services/authz.py` named any
+of the three, so the rule is a closed set of one module. It is controlled the
+same three ways: the matcher against planted references (an aliased import and a
+call through an aliased module among them — one level out, entry 53) and near
+misses; the walk over a planted tree; and the real `services/authz.py` required
+to be *found* referencing each guarded name, so a misspelt name cannot make the
+sweep vacuous (entry 35).
+"""
+
+import ast
+import re
+from pathlib import Path
+
+import pytest
+
+pytestmark = pytest.mark.invariant
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+APP_ROOT = REPO_ROOT / "backend" / "app"
+THE_CHOKEPOINT = Path("services/authz.py")
+THE_DEPENDENCY_MODULE = Path("api/deps.py")
+THE_DEPENDENCY = "leadership_scope"
+RESOLVER = "resolve_scope"
+# The walk's names: the public door by assignment id, and the two private
+# helpers that perform it. Each is a way to a purview without going through
+# `resolve_scope`.
+THE_WALK = ("transitive_purview", "_transitive_purview_of", "_clamped_subtree")
+
+
+def named(name: str) -> re.Pattern[str]:
+    """`name` as a whole identifier inside a string, not as part of a longer one."""
+    return re.compile(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])")
+
+
+def docstring_nodes(tree: ast.AST) -> set[int]:
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            body = node.body
+            if (
+                body
+                and isinstance(body[0], ast.Expr)
+                and isinstance(body[0].value, ast.Constant)
+                and isinstance(body[0].value.value, str)
+            ):
+                found.add(id(body[0].value))
+    return found
+
+
+def references(
+    source: str, where: str, name: str = RESOLVER
+) -> list[tuple[int, tuple[str, ...], bool]]:
+    """Every reference to `name`: (line, enclosing function names, is an import).
+
+    A reference is an imported name, a name bound to it by an import alias and
+    then used, an attribute access, or a non-docstring string naming it.
+    """
+    try:
+        tree = ast.parse(source, filename=where)
+    except SyntaxError as failure:  # pragma: no cover - a broken source tree
+        pytest.fail(f"{where} does not parse ({failure}); this sweep would report it clean.")
+    excused = docstring_nodes(tree)
+    pattern = named(name)
+    aliases = {name}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == name and alias.asname:
+                    aliases.add(alias.asname)
+
+    found: list[tuple[int, tuple[str, ...], bool]] = []
+
+    def visit(node: ast.AST, enclosing: tuple[str, ...]) -> None:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            enclosing = (*enclosing, node.name)
+        if isinstance(node, ast.ImportFrom) and any(a.name == name for a in node.names):
+            found.append((node.lineno, enclosing, True))
+        elif (
+            (isinstance(node, ast.Name) and node.id in aliases)
+            or (isinstance(node, ast.Attribute) and node.attr == name)
+            or (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in excused
+                and pattern.search(node.value) is not None
+            )
+        ):
+            found.append((node.lineno, enclosing, False))
+        for child in ast.iter_child_nodes(node):
+            visit(child, enclosing)
+
+    visit(tree, ())
+    return found
+
+
+def offending(relative: Path, source: str) -> list[int]:
+    """The lines of one module that reference the resolver where the rule forbids it."""
+    if relative == THE_CHOKEPOINT:
+        return []
+    found = references(source, str(relative))
+    if relative == THE_DEPENDENCY_MODULE:
+        return [
+            line
+            for line, enclosing, is_import in found
+            if not is_import and THE_DEPENDENCY not in enclosing
+        ]
+    return [line for line, _, _ in found]
+
+
+def offenders_under(root: Path) -> list[str]:
+    out: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        for line in offending(relative, path.read_text(encoding="utf-8")):
+            out.append(f"{relative}:{line}")
+    return out
+
+
+PLANTED_REFERENCES = {
+    "a direct import": "from app.services.authz import resolve_scope\n",
+    "an attribute call": (
+        "from app.services import authz\n\n\n"
+        "def read(session, person):\n"
+        "    return authz.resolve_scope(session, person_id=person)\n"
+    ),
+    "an aliased call": (
+        "from app.services.authz import resolve_scope as scope_of\n\n\n"
+        "def read(session, person):\n"
+        "    return scope_of(session, person_id=person)\n"
+    ),
+    "a getattr by string": (
+        "from app.services import authz\n\nRESOLVE = getattr(authz, 'resolve_scope')\n"
+    ),
+}
+
+PLANTED_NEAR_MISSES = {
+    "prose": (
+        '"""Scopes come from resolve_scope, through the dependency."""\n\n'
+        "# resolve_scope is called by leadership_scope only.\n\n\n"
+        "def ping():\n"
+        '    """This never calls resolve_scope."""\n'
+        "    return 'pong'\n"
+    ),
+    "a longer name": "resolve_scope_label = 'Scope'\nFLAG = 'resolve_scopes'\n",
+    "the scope it hands out": ("def read(scope):\n    return sorted(scope.purview.section_ids)\n"),
+}
+
+PLANTED_TREE = {
+    "services/authz.py": (
+        "def resolve_scope(session, *, person_id):\n    return None\n\n\n"
+        "def leadership_grant_covers(session, *, person_id):\n"
+        "    return resolve_scope(session, person_id=person_id)\n"
+    ),
+    "api/deps.py": (
+        "from app.services.authz import resolve_scope\n"
+        "from app.services.authz import resolve_scope as scope_of\n\n\n"
+        "def leadership_scope(session, person_id):\n"
+        "    return resolve_scope(session, person_id=person_id)\n\n\n"
+        "def another_dependency(session, person_id):\n"
+        "    return scope_of(session, person_id=person_id)\n"
+    ),
+    "services/rollups.py": (
+        "from app.services import authz\n\n\n"
+        "def tree(session, person_id):\n"
+        "    return authz.resolve_scope(session, person_id=person_id)\n"
+    ),
+    "api/leadership.py": ("def rollup(scope):\n    return scope.purview\n"),
+}
+
+
+def test_the_matcher_finds_planted_references_and_spares_its_near_misses() -> None:
+    """The instrument, both directions. **A red means this module is broken.**
+
+    **The mutations this kills:** a matcher reading `ast.Name` only (misses the
+    attribute call and the alias), one reading import statements only, a plain
+    substring search (flags the longer names), and the docstring exemption
+    dropped (flags prose).
+    """
+    found = {name: bool(references(source, name)) for name, source in PLANTED_REFERENCES.items()}
+    missed = sorted(name for name, hit in found.items() if not hit)
+    assert not missed, f"The matcher missed these planted references: {missed}."
+
+    spared = {name: references(source, name) for name, source in PLANTED_NEAR_MISSES.items()}
+    flagged = {name: hits for name, hits in spared.items() if hits}
+    assert not flagged, f"The matcher flagged these near misses: {flagged}."
+
+
+def test_the_walk_flags_a_second_caller_and_an_aliased_caller_and_spares_the_allowed_ones(
+    tmp_path: Path,
+) -> None:
+    """The control on the walk and the rule: a planted second caller goes red.
+
+    **The mutations this kills:** the walk narrowed to one directory; the
+    exemption written as the whole of `api/deps.py` (the aliased caller outside
+    the dependency walks free); the exemption written as `services/` (the planted
+    roll-up service walks free); an import alias not followed.
+    """
+    for name, source in PLANTED_TREE.items():
+        planted = tmp_path / name
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(source, encoding="utf-8")
+    assert offenders_under(tmp_path) == ["api/deps.py:10", "services/rollups.py:5"]
+
+
+def test_the_real_dependency_is_found_calling_the_resolver() -> None:
+    """The allowed caller, found: `api/deps.py` references `resolve_scope` inside `leadership_scope`.
+
+    `docs/MISTAKES.md` entry 35: a guard that only ever reports absence cannot
+    tell you what it can see. **Red before E9-01 lands**, because
+    `leadership_scope` does not exist; afterwards, a red means this sweep has
+    gone blind.
+    """
+    deps = APP_ROOT / THE_DEPENDENCY_MODULE
+    assert deps.is_file(), f"{deps.relative_to(REPO_ROOT)} does not exist."
+    inside = [
+        line
+        for line, enclosing, is_import in references(deps.read_text(encoding="utf-8"), str(deps))
+        if not is_import and THE_DEPENDENCY in enclosing
+    ]
+    assert inside, (
+        f"The sweep finds no reference to `{RESOLVER}` inside `def {THE_DEPENDENCY}` in "
+        f"{deps.relative_to(REPO_ROOT)}. E9-01: 'A new dependency in `api/deps.py`, "
+        "`leadership_scope`, resolves the scope from the verified session's own `person_id`.' "
+        "Either the dependency is missing, or it reaches the resolver some way this sweep cannot "
+        "see — and then the sweep below reports a clean tree it did not read."
+    )
+
+
+def test_no_module_but_the_leadership_scope_dependency_calls_resolve_scope() -> None:
+    """The rule over the real tree: no second caller of `resolve_scope` under `backend/app`.
+
+    **The mutation this kills:** a route, a service or a task calling
+    `resolve_scope` itself with a person id of its own choosing — which is the
+    one thing the chokepoint exists to prevent. **The non-emptiness control:** the
+    walk reads more than the two modules the rule names.
+    """
+    assert APP_ROOT.is_dir(), f"{APP_ROOT} is not a directory, so this sweep walked nothing."
+    swept = list(APP_ROOT.rglob("*.py"))
+    assert len(swept) > 2, f"{APP_ROOT} holds next to nothing to sweep."
+    offenders = offenders_under(APP_ROOT)
+    assert not offenders, (
+        f"`{RESOLVER}` is referenced outside `{THE_CHOKEPOINT}` and `{THE_DEPENDENCY}` in "
+        f"`{THE_DEPENDENCY_MODULE}`: {offenders}. E9-01: 'no route takes a person, assignment or "
+        "scope id from the request to resolve a scope'; take an `ActorScope` from the "
+        f"`{THE_DEPENDENCY}` dependency instead."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The walk: `transitive_purview` and the helpers that perform it.
+# ---------------------------------------------------------------------------
+
+
+def walk_offending(relative: Path, source: str) -> list[int]:
+    """The lines of one module that reference any of the walk's names where the rule forbids it.
+
+    The rule is a closed set of one module: `services/authz.py`. `api/deps.py` is
+    deliberately not exempt — see the module docstring.
+    """
+    if relative == THE_CHOKEPOINT:
+        return []
+    lines: set[int] = set()
+    for name in THE_WALK:
+        lines.update(line for line, _, _ in references(source, str(relative), name))
+    return sorted(lines)
+
+
+def walk_offenders_under(root: Path) -> list[str]:
+    out: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        for line in walk_offending(relative, path.read_text(encoding="utf-8")):
+            out.append(f"{relative}:{line}")
+    return out
+
+
+def walk_references(source: str, where: str) -> list[tuple[str, int]]:
+    """Every reference to any of the walk's names, as (name, line)."""
+    return [(name, line) for name in THE_WALK for line, _, _ in references(source, where, name)]
+
+
+PLANTED_WALK_REFERENCES = {
+    "an aliased import, called with an id off the request": (
+        "from app.services.authz import transitive_purview as walk\n\n\n"
+        "def read(session, request):\n"
+        "    return walk(session, assignment_id=request.query_params['assignment'])\n"
+    ),
+    "a call through an aliased module": (
+        "from app.services import authz as az\n\n\n"
+        "def read(session, assignment_id):\n"
+        "    return az.transitive_purview(session, assignment_id=assignment_id)\n"
+    ),
+    "the private door, through the dotted module path": (
+        "import app.services.authz\n\n\n"
+        "def read(session, row):\n"
+        "    return app.services.authz._transitive_purview_of(session, row)\n"
+    ),
+    "the subtree helper, by string": (
+        "from app.services import authz\n\nWALK = getattr(authz, '_clamped_subtree')\n"
+    ),
+}
+
+PLANTED_WALK_NEAR_MISSES = {
+    "prose": (
+        '"""A purview comes from transitive_purview, inside the authz module."""\n\n'
+        "# _clamped_subtree and _transitive_purview_of are private to authz.\n\n\n"
+        "def ping():\n"
+        '    """This never calls transitive_purview."""\n'
+        "    return 'pong'\n"
+    ),
+    "longer and shorter names": (
+        "transitive_purview_label = 'Purview'\n"
+        "FLAG = 'transitive_purviews'\n"
+        "OTHER = 'transitive_purview_of'\n"
+        "COUNT = '_clamped_subtree_count'\n"
+    ),
+    "the purview a scope carries": ("def read(scope):\n    return scope.purview.section_ids\n"),
+}
+
+PLANTED_WALK_TREE = {
+    "services/authz.py": (
+        "def _clamped_subtree(session, frontier):\n    return frontier\n\n\n"
+        "def _transitive_purview_of(session, root):\n"
+        "    return _clamped_subtree(session, [root])\n\n\n"
+        "def transitive_purview(session, *, assignment_id):\n"
+        "    return _transitive_purview_of(session, assignment_id)\n"
+    ),
+    "api/deps.py": (
+        "from app.services.authz import resolve_scope, transitive_purview\n\n\n"
+        "def leadership_scope(session, person_id, assignment_id):\n"
+        "    return transitive_purview(session, assignment_id=assignment_id)\n"
+    ),
+    "api/leadership.py": (
+        "from app.services import authz as az\n\n\n"
+        "def rollup(session, assignment_id):\n"
+        "    return az.transitive_purview(session, assignment_id=assignment_id)\n"
+    ),
+    "services/tree.py": (
+        "from app.services.authz import _transitive_purview_of as walk_from\n\n\n"
+        "def tree(session, row):\n"
+        "    return walk_from(session, row)\n"
+    ),
+    "services/rollups.py": ("def tree(scope):\n    return scope.purview\n"),
+}
+
+
+def test_the_walk_matcher_finds_planted_references_and_spares_its_near_misses() -> None:
+    """The instrument for the walk's names, both directions. **A red means this module is broken.**
+
+    **The mutations this kills:** a matcher reading `ast.Name` only (misses the
+    call through the aliased module and the dotted path); one that does not
+    follow an import alias (misses `walk(...)`); one guarding `transitive_purview`
+    only (misses both private helpers); one dropping the string branch (misses the
+    `getattr`). **The near misses it spares:** a plain substring search flags
+    `transitive_purview_label`, `transitive_purview_of` and
+    `_clamped_subtree_count`; a matcher that reads docstrings flags the prose.
+    """
+    found = {
+        name: walk_references(source, name) for name, source in PLANTED_WALK_REFERENCES.items()
+    }
+    missed = sorted(name for name, hits in found.items() if not hits)
+    assert not missed, f"The walk matcher missed these planted references: {missed}."
+
+    spared = {
+        name: walk_references(source, name) for name, source in PLANTED_WALK_NEAR_MISSES.items()
+    }
+    flagged = {name: hits for name, hits in spared.items() if hits}
+    assert not flagged, f"The walk matcher flagged these near misses: {flagged}."
+
+
+def test_the_walk_sweep_flags_every_caller_outside_authz_including_the_dependency(
+    tmp_path: Path,
+) -> None:
+    """The control on the walk rule over a planted tree: three callers go red, `authz` does not.
+
+    **The mutations this kills:** the walk rule given `api/deps.py`'s exemption
+    for `leadership_scope` (the planted dependency calling `transitive_purview`
+    with an assignment id walks free); the rule exempting all of `services/` (the
+    planted `services/tree.py` walks free); a module alias not followed one level
+    out (the planted `api/leadership.py` walks free — `docs/MISTAKES.md` entry 53).
+    **The near miss it spares:** `services/authz.py` defining and calling all
+    three names, and a service reading `scope.purview`.
+    """
+    for name, source in PLANTED_WALK_TREE.items():
+        planted = tmp_path / name
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(source, encoding="utf-8")
+    assert walk_offenders_under(tmp_path) == [
+        "api/deps.py:1",
+        "api/deps.py:5",
+        "api/leadership.py:5",
+        "services/tree.py:1",
+        "services/tree.py:5",
+    ]
+
+
+def test_the_real_authz_module_is_found_referencing_every_name_of_the_walk() -> None:
+    """The allowed caller, found: `services/authz.py` references each guarded name.
+
+    `docs/MISTAKES.md` entry 35. The rule below reports absence, and absence of a
+    misspelt name is guaranteed; so each name in `THE_WALK` is required to be
+    *found* in the one module that defines it. **A red here means a guarded name
+    is wrong or has been renamed, and the rule below has gone blind to it** —
+    update `THE_WALK`, never delete the name.
+    """
+    chokepoint = APP_ROOT / THE_CHOKEPOINT
+    assert chokepoint.is_file(), f"{chokepoint.relative_to(REPO_ROOT)} does not exist."
+    source = chokepoint.read_text(encoding="utf-8")
+    unseen = [name for name in THE_WALK if not references(source, str(chokepoint), name)]
+    assert not unseen, (
+        f"The sweep finds no reference to {unseen} in {chokepoint.relative_to(REPO_ROOT)}. Each "
+        "name in `THE_WALK` is a door to the purview walk; one the sweep cannot see in the module "
+        "that defines it is one it cannot see anywhere else either."
+    )
+
+
+def test_no_module_but_authz_reaches_the_purview_walk() -> None:
+    """The rule over the real tree: `transitive_purview` and its helpers are called from `authz` only.
+
+    **The mutation this kills:** a route or a service calling
+    `transitive_purview(session, assignment_id=…)` with an id read off the
+    request — the E9-01 privacy review's second door, which the `resolve_scope`
+    rule above does not see. **The non-emptiness control:** the walk reads more
+    than the one module the rule names.
+    """
+    assert APP_ROOT.is_dir(), f"{APP_ROOT} is not a directory, so this sweep walked nothing."
+    swept = list(APP_ROOT.rglob("*.py"))
+    assert len(swept) > 2, f"{APP_ROOT} holds next to nothing to sweep."
+    offenders = walk_offenders_under(APP_ROOT)
+    assert not offenders, (
+        f"The purview walk ({', '.join(THE_WALK)}) is referenced outside `{THE_CHOKEPOINT}`: "
+        f"{offenders}. E9-01: 'no route takes a person, assignment or scope id from the request "
+        f"to resolve a scope'; take an `ActorScope` from the `{THE_DEPENDENCY}` dependency instead."
+    )

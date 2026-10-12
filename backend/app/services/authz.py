@@ -2,39 +2,43 @@
 
 SPEC §13 puts it here: "`api/` routers stay thin and all real behavior lives in
 `services/`", with this module the single place an actor is turned into a scope
-and a scope is turned into a read. HTTP requests, Celery jobs and E9's MCP server
-all come through here or they do not read data.
+and a scope is turned into a read. HTTP requests, Celery jobs and the
+future MCP server (SPEC §7.5) all come through here or they do not read data.
 
-**SPEC §2.1 defines purview as a union, and this module builds only half of it.**
+**SPEC §2.1 defines purview as a union, and this module computes it.**
 "Purview(assignment) = own grant union the purviews of all assignments
 transitively reporting to it, with the own grant restricted by role grain." (The
 spec writes that union as the set-theory symbol; it is spelled out here and
 everywhere below, because a lone glyph in a docstring is one an editor, a
-terminal or a diff can render as something else.) The **own grant**
-is here and complete: a lead's led courses, a chair's department subtree, a
-dean's college, the VP of Academics' institution, an instructor's section. The
-**transitive union over the supervision graph is deliberately absent**, and
-`transitive_purview` below raises `NotImplementedError` naming **E9**, which is
-the epic SPEC §14.3 gives the DAG walk and its Hypothesis properties to.
+terminal or a diff can render as something else.) The **own grant** is
+`own_grant`: a lead's led courses, a chair's department subtree, a dean's
+college, the VP of Academics' institution, an instructor's section, and nothing
+for an assistant dean, whose authority comes from the graph. The **transitive
+union** is `transitive_purview`: a breadth-first walk down `reports_to`, by
+assignment id, one statement per level of the graph.
 
-**Why it raises rather than answering.** [ADR
-0003](../../../docs/adr/0003-deferred-authz-seams-fail-closed.md) settles this
-and is worth reading before changing it. Every value that could stand in for the
-missing union is a value a caller can act on and none of them is right. An empty
-`Purview` is the tempting one and the worst: an empty purview is a *legitimate*
-state — a lead faculty member with no reports has one — so nothing about it looks
-wrong, callers work, tests pass, and a dean silently sees nothing. The repair
-somebody then reaches for is to diagnose "the dean sees no data" as a scoping
-problem and widen access somewhere else, which is how a confidentiality invariant
-gets broken by a well-meant fix. Returning the own grant alone reads as a missing
-roster sync; returning the institution is the one direction §4.1 forbids
-absolutely. So the seam refuses, before it opens a session, and its message names
-the epic that lands it. The same rule is applied to `raw_comments_permitted`,
-whose suppression rules are **E4**'s: ADR 0003 generalises to *any* deferred
-authorization seam.
+**The lead clamp.** A `LEAD_FACULTY` assignment's purview is its own grant only,
+whatever reports to it, so the walk never passes through a lead. An instructor on
+a sibling lead's course who reports to a lead therefore adds nothing to that lead,
+nor to anyone above the lead through it. That is what §2.1's "never sibling
+leads' courses, at any point in the union" asks for.
 
-If you are here because something crashed on one of those raises, the seam is
-working. The fix is upstream — do not traverse it — not a value returned from
+**A leadership scope is the union over leadership assignments only.**
+`resolve_scope` unions the purviews of the person's `LEAD_FACULTY`, `CHAIR`,
+`ASSISTANT_DEAN`, `DEAN` and `VP_ACADEMICS` assignments, one `LeadershipGrant`
+each. An instructor hat is reached through an instructor session and never merged
+in, and `CARE` and `ADMIN` contribute nothing. The scope is asked for in one place,
+`app.api.deps.leadership_scope`, from the verified session's own person and
+nothing else. [ADR 0199](../../../docs/adr/0199-the-purview-walk-the-lead-clamp-and-its-chokepoint.md)
+records the walk, the clamp, the leadership-only union and the chokepoint.
+
+**Deferred seams fail closed.** [ADR
+0003](../../../docs/adr/0003-deferred-authz-seams-fail-closed.md) is why
+`raw_comments_permitted`, whose suppression rules are **E4**'s, raises rather
+than answering: every value that could stand in for a missing authorization
+decision is a value a caller can act on, and an empty answer is the worst of them
+because it is also a legitimate state. If you are here because something crashed
+on that raise, the seam is working; the fix is upstream, not a value returned from
 here.
 
 **Care is a capability beside the purview and never an element of one.** SPEC §2:
@@ -102,7 +106,7 @@ could choose the one that reaches identity.
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum, StrEnum, auto
-from typing import Final
+from typing import Final, NamedTuple
 from uuid import UUID
 
 from sqlalchemy import RowMapping, text
@@ -129,6 +133,7 @@ __all__ = [
     "CareIsNotComposableError",
     "Door",
     "LandingRole",
+    "LeadershipGrant",
     "LmsOwnedWriteRefused",
     "NoReportingPurviewError",
     "OutOfPurviewError",
@@ -170,7 +175,7 @@ class AuthzError(Exception):
     """The base of every refusal this chokepoint raises.
 
     One family on purpose. SPEC §13 makes this module the single chokepoint for
-    HTTP, for Celery and for E9's MCP server, and each of those has to turn a
+    HTTP, for Celery and for the future MCP server (§7.5), and each of those has to turn a
     refusal into something a caller sees. A refusal outside this family escapes
     the `except AuthzError` somebody wrote and reaches a user as a 500 with a
     stack trace — or, in a Celery task, as a retry loop over a decision that will
@@ -356,22 +361,39 @@ class Purview:
         )
 
 
+class LeadershipGrant(NamedTuple):
+    """One leadership assignment and the purview it reaches, as `resolve_scope` found it.
+
+    A named triple, so a caller may unpack it as `(assignment_id, role, purview)`
+    or read it by name. `purview` is that one assignment's `transitive_purview`,
+    so the roots of a leader's tree and which assignment reaches a node are
+    answered without walking the graph a second time.
+    """
+
+    assignment_id: UUID
+    role: AssignmentRole
+    purview: Purview
+
+
 @dataclass(frozen=True, slots=True)
 class ActorScope:
     """Everything a request needs to know about who is asking.
 
-    Four fields and each is a separate requirement: the person the scope was
-    resolved for, the purview SPEC §2.1 defines, Care as a capability of its own
-    so that no union operation can pick it up, and §4's n-threshold, which E4's
-    suppression rules read from here rather than fetching for themselves — a
-    caller that has to look the threshold up separately is a caller that can
-    forget to.
+    Five fields and each is a separate requirement: the person the scope was
+    resolved for; the leadership purview, which is the union of SPEC §2.1's
+    purviews over the person's leadership assignments only; `grants`, one
+    `LeadershipGrant` per such assignment, whose purviews union to `purview`;
+    Care as a capability of its own so that no union operation can pick it up;
+    and §4's n-threshold, which E4's suppression rules read from here rather than
+    fetching for themselves — a caller that has to look the threshold up
+    separately is a caller that can forget to.
     """
 
     person_id: UUID
     purview: Purview
     holds_care: bool
     n_threshold: int
+    grants: tuple[LeadershipGrant, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +407,18 @@ _ASSIGNMENT = text(
     " institution_id, college_id, department_id, course_id, section_id"
     " FROM public.assignment_scope"
     " WHERE assignment_id = :assignment_id"
+)
+
+# Every assignment that reports straight to one of a set of assignments: one level
+# of SPEC §2.1's supervision graph, read for a whole level at once. The edge is
+# `reports_to`, which joins assignment to assignment and never person to person
+# (§2.1: "`reportsTo` edges connect role assignments, not people or org nodes").
+_REPORTS_TO_ANY_OF = text(
+    "SELECT assignment_id, person_id, role,"
+    " institution_id, college_id, department_id, course_id, section_id"
+    " FROM public.assignment_scope"
+    " WHERE reports_to = ANY(:assignment_ids)"
+    " ORDER BY assignment_id"
 )
 
 # Every assignment one person holds. SPEC §2.1: "a person acting in any role but
@@ -401,7 +435,7 @@ _ASSIGNMENTS_OF_PERSON = text(
 # Whether this person holds a live `CARE` assignment at all, read here from
 # `public.assignment_scope`. E0-09's `role_assignment` carries no validity
 # dates, so "live" reads as "exists" today: a revoked assignment is a deleted
-# row. When E9 or E10 adds end-dating, this predicate gains it along with its
+# row. If end-dating is ever added, this predicate gains it along with its
 # three siblings — `app.services.safety`'s own copy, and the two inside
 # `public.record_identity_reveal` and `public.reveal_student_identity` — all
 # four statements of one rule, named together in `app.services.safety`, above
@@ -524,7 +558,14 @@ _SECTION_SCOPED_ASSIGNEES = text(
 # measured that `role_assignment` accepts two `LEAD_FACULTY` rows on one course
 # and a `LEAD_FACULTY` row on a course whose mapping names somebody else, so the
 # assignment's own `course_id` is not an answer to "which courses do they lead".
-_LED_COURSES = text("SELECT course_id FROM public.lead_faculty_course WHERE person_id = :person_id")
+#
+# Bound as a set of people so that a supervision walk reads every lead it reached
+# in one statement. The answer is the union of what each of them leads, which is
+# exactly the term a walk unions in; nothing asks it about two people and then
+# treats the answer as one person's.
+_LED_COURSES = text(
+    "SELECT course_id FROM public.lead_faculty_course WHERE person_id = ANY(:person_ids)"
+)
 
 # Which of a set of courses anybody leads — the other question the same mapping
 # answers. A chair reviews only the courses of their department that nobody
@@ -534,7 +575,10 @@ _COURSES_WITH_A_LEAD = text(
     "SELECT DISTINCT course_id FROM public.lead_faculty_course WHERE course_id = ANY(:course_ids)"
 )
 
-# Every node beneath one node, at every level. Built from one template over
+# Every node beneath a set of nodes of one level, at every level. Bound as a set
+# so that a supervision walk reads every chair's department (or every dean's
+# college) it reached in one statement rather than one per assignment. Built from
+# one template over
 # `CONTAINMENT_LEVELS` so the projection is written once; nothing a caller
 # supplies is interpolated — the level names are literals in this module and the
 # node key is always bound. `prefix` is in the mapping for completeness and is
@@ -543,7 +587,7 @@ _COURSES_WITH_A_LEAD = text(
 _DESCENDANTS_TEMPLATE = (
     "SELECT institution_id, college_id, department_id, prefix_id, course_id, section_id"
     " FROM public.containment_path"
-    " WHERE {level}_id = :node_id"
+    " WHERE {level}_id = ANY(:node_ids)"
 )
 
 _DESCENDANTS: Final[Mapping[str, TextClause]] = {
@@ -594,17 +638,15 @@ _OWN_GRANT_ROOT: Final[Mapping[AssignmentRole, str]] = {
 # So both terms of that union arrive from somewhere other than this assignment. The
 # led courses come from the person's own `LEAD_FACULTY` assignment, resolved as its
 # own row, because §2 keeps people and roles apart and a purview is computed per
-# assignment. The supervised chairs' departments come from the transitive walk,
-# which is E9's and which `transitive_purview` refuses to fake.
+# assignment. The supervised chairs' departments come from `transitive_purview`'s
+# walk down the supervision graph.
 #
 # **An empty answer here means "the graph supplies it", and for `CARE` an empty
 # answer would have meant "there is nothing to supply"** — which is why Care raises
 # instead of returning this. The two are opposite claims and must not share a
 # spelling; ADR 0046 records the distinction.
 #
-# Until E9 lands, an assistant dean therefore sees nothing, exactly as ADR 0003
-# says of every consumer of the deferred union: "Leadership landing views are empty
-# by design in E0." An earlier version of this module rooted the grant at the
+# An earlier version of this module rooted the grant at the
 # college, which made `ASSISTANT_DEAN` and `DEAN` identical, handed an assistant
 # dean every department in the college including those whose chairs report straight
 # to the dean, and contradicted the spec sentence quoted above. It was found by
@@ -676,19 +718,26 @@ def _scope_node(assignment: _Assignment, level: str) -> UUID | None:
     }[level]
 
 
-def _nodes_beneath(session: Session, level: str, node_id: UUID) -> Mapping[str, frozenset[UUID]]:
-    """Every node strictly below `node_id`, by level, out of `public.containment_path`.
+def _nodes_beneath(
+    session: Session, level: str, node_ids: Collection[UUID]
+) -> Mapping[str, frozenset[UUID]]:
+    """Every node strictly below any of `node_ids`, by level, out of `public.containment_path`.
 
     The view holds one row per org node with its ancestors filled in, so the rows
-    whose `<level>_id` is this node are the node itself and everything under it.
+    whose `<level>_id` is one of these nodes are those nodes and everything under
+    them. Every node in `node_ids` is at `level`; the answer is the union of their
+    subtrees, and no caller reads it as one node's.
     Only the levels *below* `level` are collected: an own grant is the scope node
     and its subtree, and a level above it is somebody else's grant. A chair who
     also held `college_ids` would hold every sibling department in that college,
     which is a widening nobody it happens to can detect.
     """
     below = CONTAINMENT_LEVELS[CONTAINMENT_LEVELS.index(level) + 1 :]
+    if not below or not node_ids:
+        # A section has nothing beneath it, and no nodes have no subtree.
+        return {name: frozenset() for name in below}
     found: dict[str, set[UUID]] = {name: set() for name in below}
-    rows = session.execute(_DESCENDANTS[level], {"node_id": node_id}).mappings()
+    rows = session.execute(_DESCENDANTS[level], {"node_ids": list(node_ids)}).mappings()
     for row in rows:
         for name in below:
             key: UUID | None = row[f"{name}_id"]
@@ -697,8 +746,11 @@ def _nodes_beneath(session: Session, level: str, node_id: UUID) -> Mapping[str, 
     return {name: frozenset(keys) for name, keys in found.items()}
 
 
-def _lead_faculty_grant(session: Session, person_id: UUID) -> Purview:
-    """The courses one lead leads, and their sections. SPEC §2.1's role grain for a lead.
+def _lead_faculty_grant(session: Session, person_ids: Collection[UUID]) -> Purview:
+    """The courses these leads lead, and their sections. SPEC §2.1's role grain for a lead.
+
+    A set of people because a supervision walk unions every lead it reaches; a
+    caller asking about one lead passes one person.
 
     "A Lead Faculty's grant is only the courses they lead (never sibling leads'
     courses, at any point in the union)." The courses come from
@@ -718,7 +770,9 @@ def _lead_faculty_grant(session: Session, person_id: UUID) -> Purview:
     A lead with no mapping rows holds nothing, which is a real state rather than a
     deferral: §2.1 says a course with no mapping "falls to its department chair".
     """
-    courses = frozenset(session.execute(_LED_COURSES, {"person_id": person_id}).scalars())
+    if not person_ids:
+        return Purview.empty()
+    courses = frozenset(session.execute(_LED_COURSES, {"person_ids": list(person_ids)}).scalars())
     if not courses:
         return Purview.empty()
     sections = frozenset(
@@ -730,42 +784,72 @@ def _lead_faculty_grant(session: Session, person_id: UUID) -> Purview:
 def _own_grant_of(session: Session, assignment: _Assignment) -> Purview:
     """One assignment's own grant, with the role grain already applied.
 
-    Split out from `own_grant` because `resolve_scope` has the rows in hand
-    already and re-reading each one by key would be a second answer to a question
-    just asked.
+    Split out from `own_grant` because callers that have the row in hand already
+    would otherwise re-read it by key, a second answer to a question just asked.
+    It is `_own_grants_of` over one row, so the role grain is written once.
     """
-    if assignment.role is AssignmentRole.CARE:
-        raise CareIsNotComposableError(
-            f"assignment {assignment.assignment_id} is a CARE assignment and has no reporting "
-            "purview. SPEC 2: Care is deliberately not composable with reporting roles — its sole "
-            "power is the threat queue, kept isolated so safety re-identification never rides "
-            "alongside routine oversight access. Ask holds_care() instead."
-        )
+    return _own_grants_of(session, (assignment,))
 
-    if assignment.role in _GRANT_ARRIVES_THROUGH_THE_GRAPH:
-        return Purview.empty()
 
-    level = _OWN_GRANT_ROOT.get(assignment.role)
-    if level is None:
-        raise NoReportingPurviewError(
-            f"assignment {assignment.assignment_id} holds the {assignment.role.value} role, which "
-            "SPEC 2.1's supervision chain does not contain and SPEC 2's table gives no reporting "
-            "access. A role with no grain written down holds nothing here until somebody writes "
-            "one, which is the same fail-closed choice as the scope grain rule's ELSE false."
-        )
+def _own_grants_of(session: Session, assignments: Collection[_Assignment]) -> Purview:
+    """The union of these assignments' own grants, with the role grain applied to each.
 
-    if assignment.role is AssignmentRole.LEAD_FACULTY:
-        return _lead_faculty_grant(session, assignment.person_id)
+    The one place SPEC §2.1's role grain is written. It reads in a number of
+    statements fixed by which grains are present — one per containment level that
+    some assignment is rooted at, and two for every lead together — and never one
+    per assignment, which is what lets `transitive_purview` read a whole level of
+    the supervision graph at once.
 
-    node_id = _scope_node(assignment, level)
-    if node_id is None:
-        raise UnknownAssignmentError(
-            f"assignment {assignment.assignment_id} holds the {assignment.role.value} role and "
-            f"carries no {level} scope reference. SPEC 2.1's scope table and the schema's scope "
-            "grain rule both say it must, so this row was written past the constraint that refuses "
-            "it."
-        )
-    return Purview.of({level: frozenset({node_id}), **_nodes_beneath(session, level, node_id)})
+    Every assignment is checked before anything is read, so a `CARE` or `ADMIN`
+    row anywhere in `assignments` refuses the whole question rather than a part of
+    it.
+    """
+    rooted: dict[str, set[UUID]] = {level: set() for level in CONTAINMENT_LEVELS}
+    leads: set[UUID] = set()
+    for assignment in assignments:
+        if assignment.role is AssignmentRole.CARE:
+            raise CareIsNotComposableError(
+                f"assignment {assignment.assignment_id} is a CARE assignment and has no reporting "
+                "purview. SPEC 2: Care is deliberately not composable with reporting roles — its "
+                "sole power is the threat queue, kept isolated so safety re-identification never "
+                "rides alongside routine oversight access. Ask holds_care() instead."
+            )
+
+        if assignment.role in _GRANT_ARRIVES_THROUGH_THE_GRAPH:
+            continue
+
+        level = _OWN_GRANT_ROOT.get(assignment.role)
+        if level is None:
+            raise NoReportingPurviewError(
+                f"assignment {assignment.assignment_id} holds the {assignment.role.value} role, "
+                "which SPEC 2.1's supervision chain does not contain and SPEC 2's table gives no "
+                "reporting access. A role with no grain written down holds nothing here until "
+                "somebody writes one, which is the same fail-closed choice as the scope grain "
+                "rule's ELSE false."
+            )
+
+        if assignment.role is AssignmentRole.LEAD_FACULTY:
+            leads.add(assignment.person_id)
+            continue
+
+        node_id = _scope_node(assignment, level)
+        if node_id is None:
+            raise UnknownAssignmentError(
+                f"assignment {assignment.assignment_id} holds the {assignment.role.value} role and "
+                f"carries no {level} scope reference. SPEC 2.1's scope table and the schema's "
+                "scope grain rule both say it must, so this row was written past the constraint "
+                "that refuses it."
+            )
+        rooted[level].add(node_id)
+
+    granted = _lead_faculty_grant(session, leads)
+    for level, node_ids in rooted.items():
+        if node_ids:
+            subtree = Purview.of(
+                {level: frozenset(node_ids), **_nodes_beneath(session, level, node_ids)}
+            )
+            granted = granted.union(subtree)
+    return granted
 
 
 def own_grant(session: Session, *, assignment_id: UUID) -> Purview:
@@ -776,9 +860,8 @@ def own_grant(session: Session, *, assignment_id: UUID) -> Purview:
     point in the union); a chair's is the department subtree; a dean's the
     college."
 
-    This is the half of §2.1's definition E0-11 builds. The other half — the union
-    over everything transitively reporting to the assignment — is
-    `transitive_purview`, which raises; see this module's docstring.
+    This is one term of §2.1's definition. The union over everything
+    transitively reporting to the assignment is `transitive_purview`.
     """
     row = session.execute(_ASSIGNMENT, {"assignment_id": assignment_id}).mappings().first()
     if row is None:
@@ -788,6 +871,38 @@ def own_grant(session: Session, *, assignment_id: UUID) -> Purview:
             "rather than answered."
         )
     return _own_grant_of(session, _Assignment.of(row))
+
+
+def _assignments_of(session: Session, person_id: UUID) -> list[_Assignment]:
+    """Every assignment one person holds, converted, in assignment-key order."""
+    return [
+        _Assignment.of(row)
+        for row in session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings()
+    ]
+
+
+def _chaired_courses_and_those_with_a_lead(
+    session: Session, assignments: Sequence[_Assignment]
+) -> tuple[frozenset[UUID], frozenset[UUID]]:
+    """The courses in the departments these `CHAIR` rows hold, and which of them have a lead.
+
+    The one statement of the chair's walk to a department's courses with a lead.
+    `lead_review_courses` keeps the first set less the second (the chair reviews
+    an unled course), and `chaired_courses_with_a_lead` answers the second (the
+    chair reads a led course's policy and cannot set it). Every other role is
+    ignored, and a chair row with no department is a row the scope grain rule
+    refuses, so it contributes nothing rather than raising.
+    """
+    departments = {
+        held.department_id
+        for held in assignments
+        if held.role is AssignmentRole.CHAIR and held.department_id is not None
+    }
+    chaired = _nodes_beneath(session, "department", departments)["course"]
+    if not chaired:
+        return frozenset(), frozenset()
+    led = frozenset(session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars())
+    return chaired, led
 
 
 def lead_review_courses(session: Session, *, person_id: UUID) -> Mapping[UUID, AssignmentRole]:
@@ -810,31 +925,20 @@ def lead_review_courses(session: Session, *, person_id: UUID) -> Mapping[UUID, A
     The two sets cannot overlap: a course is led or it is not. A person who both
     leads a course and chairs its department is answered `LEAD_FACULTY` for it.
 
-    **Leadership grants only, and only these two roles.** `resolve_scope` unions
-    an instructor's sections in, so a lead who also teaches a sibling section
-    would reach that sibling course through it (SPEC §4.1 item 2); every other
-    role is ignored here. An assistant dean's own grant is empty until E9's
-    supervision walk (ADR 0108), and a dean or vice president is not a reviewer
+    **Own grants of these two roles only, never the walk.** An instructor
+    assignment is ignored, so a lead who also teaches a sibling section never
+    reaches that sibling course through it (SPEC §4.1 item 2). An assistant
+    dean's own grant is empty, and a dean or vice president is not a reviewer
     §5.2 names, so each answers an empty mapping, which the caller refuses.
     """
-    assignments = [
-        _Assignment.of(row)
-        for row in session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings()
-    ]
+    assignments = _assignments_of(session, person_id)
     covered: dict[UUID, AssignmentRole] = {}
     if any(held.role is AssignmentRole.LEAD_FACULTY for held in assignments):
-        for course_id in _lead_faculty_grant(session, person_id).course_ids:
+        for course_id in _lead_faculty_grant(session, {person_id}).course_ids:
             covered[course_id] = AssignmentRole.LEAD_FACULTY
-    chaired: set[UUID] = set()
-    for held in assignments:
-        if held.role is AssignmentRole.CHAIR and held.department_id is not None:
-            chaired |= _nodes_beneath(session, "department", held.department_id)["course"]
-    if chaired:
-        led_by_somebody = set(
-            session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars()
-        )
-        for course_id in chaired - led_by_somebody:
-            covered[course_id] = AssignmentRole.CHAIR
+    chaired, led_by_somebody = _chaired_courses_and_those_with_a_lead(session, assignments)
+    for course_id in chaired - led_by_somebody:
+        covered[course_id] = AssignmentRole.CHAIR
     return covered
 
 
@@ -850,51 +954,125 @@ def chaired_courses_with_a_lead(session: Session, *, person_id: UUID) -> frozens
     leads a course of the department they chair; the caller treats a course it
     can set as settable.
 
-    The department walk is `lead_review_courses`' own, over the same
-    `CHAIR` assignments, kept beside it so the two cannot disagree about which
-    departments a person chairs.
+    The department walk is `_chaired_courses_and_those_with_a_lead`, the same
+    statement `lead_review_courses` uses, so the two cannot disagree about which
+    departments a person chairs or which of their courses have a lead.
     """
-    assignments = [
-        _Assignment.of(row)
-        for row in session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings()
-    ]
-    chaired: set[UUID] = set()
-    for held in assignments:
-        if held.role is AssignmentRole.CHAIR and held.department_id is not None:
-            chaired |= _nodes_beneath(session, "department", held.department_id)["course"]
-    if not chaired:
-        return frozenset()
-    return frozenset(session.execute(_COURSES_WITH_A_LEAD, {"course_ids": list(chaired)}).scalars())
+    _, led_by_somebody = _chaired_courses_and_those_with_a_lead(
+        session, _assignments_of(session, person_id)
+    )
+    return led_by_somebody
 
 
-def transitive_purview(session: Session | None, *, assignment_id: UUID) -> Purview:
-    """SPEC §2.1's full purview. **Not implemented: E9 lands it, and this raises.**
+# The most assignments one supervision chain can hold. The rank rule on
+# `role_assignment` lets an edge run only from a role to one strictly above it in
+# INSTRUCTOR, LEAD_FACULTY, CHAIR, ASSISTANT_DEAN, DEAN, VP_ACADEMICS (ADR 0044),
+# so no chain is longer than that list, and SPEC §2.1 says the graph is "at most
+# six assignments deep".
+_DEEPEST_CHAIN: Final[int] = 6
+
+
+def _clamped_subtree(session: Session, root: _Assignment) -> list[_Assignment]:
+    """`root` and every assignment its purview takes an own grant from, walked level by level.
+
+    Breadth-first down `reports_to`, one statement per level for the whole level.
+    **A `LEAD_FACULTY` assignment is reached and never walked through** — the
+    lead clamp: a lead's purview is its own grant only, so nothing that reports
+    to a lead reaches the lead or anyone above it through the lead. SPEC §2.1: a
+    Lead Faculty's grant is "only the courses they lead (never sibling leads'
+    courses, at any point in the union)", and an instructor assignment on a
+    sibling lead's course may legally report to a lead.
+
+    It walks assignment ids. A walk by person would merge a two-hat person's
+    instructor edge into their lead hat.
+
+    A chain deeper than the rank rule allows is refused rather than walked: it
+    means the rule that bounds the graph is gone, and a walk that kept going
+    would be a walk with no bound.
+    """
+    reached = [root]
+    frontier = [root]
+    levels_walked = 0
+    while parents := [
+        held.assignment_id for held in frontier if held.role is not AssignmentRole.LEAD_FACULTY
+    ]:
+        if levels_walked == _DEEPEST_CHAIN:
+            raise RuntimeError(
+                f"assignment {root.assignment_id} heads a supervision chain longer than "
+                f"{_DEEPEST_CHAIN} assignments. The supervision rank rule (ADR 0044) makes that "
+                "impossible, so the rule is not holding, and the walk stops rather than run "
+                "without a bound."
+            )
+        frontier = [
+            _Assignment.of(row)
+            for row in session.execute(_REPORTS_TO_ANY_OF, {"assignment_ids": parents}).mappings()
+        ]
+        reached.extend(frontier)
+        levels_walked += 1
+    return reached
+
+
+def _transitive_purview_of(session: Session, root: _Assignment) -> Purview:
+    """`transitive_purview` for a row already in hand. See there."""
+    return _own_grants_of(session, _clamped_subtree(session, root))
+
+
+def transitive_purview(session: Session, *, assignment_id: UUID) -> Purview:
+    """SPEC §2.1's full purview of one assignment, with the lead clamp.
 
     "Purview(assignment) = own grant union the purviews of all assignments
-    transitively reporting to it." The own grant is `own_grant` above; the walk over the
-    supervision graph is E9's, together with the Hypothesis properties over
-    generated graphs that SPEC §14.3 puts in the same epic and that are what would
-    make a union trustworthy.
+    transitively reporting to it." So it is the assignment's own grant
+    (`own_grant`) together with the purview of every assignment that reports to
+    it, recursively — and, because a union of unions is one union, that is the
+    union of the own grants of every assignment in its reporting subtree.
 
-    **It raises before it reads anything**, which is why `session` may be `None`.
-    A seam that connects first, walks half a graph and only then declines is a
-    seam that can be reached by half. ADR 0003 has the full argument and every
-    value it rejects; the module docstring says why an empty `Purview` is the
-    worst of them.
+    **The lead clamp.** A `LEAD_FACULTY` assignment's purview is its own grant
+    only, whatever reports to it. So the subtree stops at every lead: the lead's
+    own grant is in it and nothing beneath the lead is. An instructor on a
+    sibling lead's course who reports to lead A adds nothing to A, nor to A's
+    chair through A. The chair still reaches that section if it lies in the
+    chair's own department, through the department grant.
 
-    E0-18's leadership landing views are empty by design in E0 and must not
-    traverse this. If a smoke test reaches it, the test asserts more than E0
-    delivers — fix the test, do not soften the seam.
+    **The cost** is one statement per level of the graph, plus a fixed number
+    for the own grants of everything reached (`_own_grants_of`), so it grows with
+    depth and not with how many assignments a level holds.
+
+    Refuses a `CARE` or `ADMIN` assignment as `own_grant` does, and an unknown
+    key with `UnknownAssignmentError`: an empty purview is a real state, so a
+    missing row is reported rather than answered.
     """
-    raise NotImplementedError(
-        f"the transitive purview union over the supervision graph is E9's work, and assignment "
-        f"{assignment_id} cannot be resolved through it in E0. SPEC 2.1 defines purview as 'own "
-        "grant union the purviews of all assignments transitively reporting to it'; E0-11 ships "
-        "the own grant (own_grant) and leaves the union a named seam that raises rather than "
-        "returning a value a caller could act on. ADR 0003 rejects every stand-in, an empty "
-        "Purview above all: an empty purview is a legitimate state, so a caller would work, the "
-        "tests would pass, and a dean would silently see nothing."
+    row = session.execute(_ASSIGNMENT, {"assignment_id": assignment_id}).mappings().first()
+    if row is None:
+        raise UnknownAssignmentError(
+            f"no assignment {assignment_id} exists, so it grants nothing. An empty purview is a "
+            "real state — a lead with no mapped courses has one — so a missing row is reported "
+            "rather than answered."
+        )
+    return _transitive_purview_of(session, _Assignment.of(row))
+
+
+def _leadership_grants(session: Session, person_id: UUID) -> tuple[LeadershipGrant, ...]:
+    """One `LeadershipGrant` per leadership assignment this person holds, in key order.
+
+    Leadership assignments only: `LEAD_FACULTY`, `CHAIR`, `ASSISTANT_DEAN`,
+    `DEAN` and `VP_ACADEMICS` (`LEADERSHIP_ROLES`). An `INSTRUCTOR` assignment is
+    reached through an instructor session and never merged into a leadership
+    scope, and `CARE` and `ADMIN` hold no reporting purview at all. Each
+    assignment is walked on its own, by its id.
+    """
+    return tuple(
+        LeadershipGrant(held.assignment_id, held.role, _transitive_purview_of(session, held))
+        for held in _assignments_of(session, person_id)
+        if held.role in LEADERSHIP_ROLES
     )
+
+
+def _union_of(grants: Sequence[LeadershipGrant]) -> Purview:
+    """The union of the purviews these grants carry."""
+    union = Purview.empty()
+    for grant in grants:
+        union = union.union(grant.purview)
+    return union
 
 
 def holds_care(session: Session, *, person_id: UUID) -> bool:
@@ -982,8 +1160,10 @@ def leadership_grant_covers(
     words, "a Lead Faculty's grant is only the courses they lead (never sibling
     leads' courses, at any point in the union)".
 
-    **The answer is the union of the person's own grants, at the leadership
-    roles only**, and it is checked at three grains: the section this launch is
+    **The answer is the person's full leadership purview** — the union of
+    `transitive_purview` over their leadership assignments only (ADR 0199), so an
+    assistant dean's launch into a supervised chair's department binds — and it is
+    checked at three grains: the section this launch is
     bound to, the course its label names, or the prefix above that course. A
     `None` at either of the first two is a row that does not exist yet and never
     matches; the prefix always does exist, because a launch whose prefix the org
@@ -1006,13 +1186,9 @@ def leadership_grant_covers(
     would stop every real instructor Pulse holds no assignment for from
     discovering their own section — which is most of them.
 
-    **An assistant dean holding nothing else fails closed until E9**, and that is
-    a consequence rather than an oversight. §2.1 makes them the worked example of
-    a purview that comes from the supervision graph — "own led courses union
-    every supervised chair's department — a set no single containment node
-    holds" — so their own grant is empty (`_GRANT_ARRIVES_THROUGH_THE_GRAPH`
-    above) and `transitive_purview` is what would answer, which raises by design
-    until E9 (ADR 0003).
+    **The lead clamp holds here too.** A lead's purview is its own grant only, so
+    a lead's launch into a sibling lead's course is refused however the graph
+    beneath the lead is drawn.
 
     **Both directions cost something and they are not symmetric**, in the same
     direction §7.3's own cost argument runs. A false *no* is a section discovered
@@ -1026,16 +1202,10 @@ def leadership_grant_covers(
     **Here rather than at the caller**, for the reason every predicate in this
     section gives: `public.assignment_scope` is unfiltered, so every read of it
     lives in this module (`tests/unit/test_the_org_views_are_read_only_through_
-    the_grant.py`). It runs no new SQL — the statement and the grant rules are
-    the ones `resolve_scope` uses.
+    the_grant.py`). It runs no SQL of its own — it reads the leadership grants
+    `resolve_scope` reads.
     """
-    rows = session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings().all()
-    granted = Purview.empty()
-    for row in rows:
-        assignment = _Assignment.of(row)
-        if assignment.role not in LEADERSHIP_ROLES:
-            continue
-        granted = granted.union(_own_grant_of(session, assignment))
+    granted = _union_of(_leadership_grants(session, person_id))
     return (
         (section_id is not None and section_id in granted.section_ids)
         or (course_id is not None and course_id in granted.course_ids)
@@ -1236,19 +1406,30 @@ def resolve_scope(
     n_threshold: int | None = None,
     settings: Settings | None = None,
 ) -> ActorScope:
-    """Everything one person may reach, as one value every read path is handed.
+    """One person's leadership scope, as one value every leadership read is handed.
 
-    The purview is the union of the own grants of the person's **reporting**
-    assignments. SPEC §2.1 resolves a view "from an assignment (or a union of
-    them), never from a person type", and a person with two reporting hats — a
-    chair who also leads courses — gets both, which is what `Purview.union` is
-    for.
+    The purview is the union of `transitive_purview` over the person's
+    **leadership** assignments only — `LEAD_FACULTY`, `CHAIR`, `ASSISTANT_DEAN`,
+    `DEAN` and `VP_ACADEMICS` — and `grants` carries one `LeadershipGrant` per
+    such assignment (ADR 0199). SPEC §2.1 resolves a view "from an assignment (or
+    a union of them), never from a person type", and a person with two leadership
+    hats — a chair who also leads courses — gets both, each walked by its own
+    assignment id. A person holding no leadership assignment gets an empty scope.
+
+    **Its one caller is `app.api.deps.leadership_scope`**, which passes the
+    verified session's own person. This answers about any person it is given, so
+    a second caller would be a second place a request could name whose scope is
+    read.
+
+    **An instructor hat is never merged in.** It is reached through an instructor
+    session, so a chair who teaches a section in another department does not
+    find that section in their leadership tree.
 
     **Assignments with no reporting purview are skipped rather than raising**, and
     the difference from `own_grant` is deliberate. Asking `own_grant` for a `CARE`
     assignment is a caller mistake and is refused; asking what a *person* may see
-    is an ordinary question for somebody who holds a Care hat and a teaching hat,
-    and §2.1 calls that combination legal — "it is capabilities that do not
+    is an ordinary question for somebody who holds a Care hat and a leadership
+    hat, and §2.1 calls that combination legal — "it is capabilities that do not
     compose, not people". So the Care row contributes nothing to the purview and
     `holds_care` answers separately. `ADMIN` is skipped for the same reason and a
     different one: §2's table gives it no reporting access.
@@ -1272,21 +1453,7 @@ def resolve_scope(
     a process that read its configuration once at import time would fail on
     whichever variable the machine running the suite happens not to have set yet.
     """
-    rows = session.execute(_ASSIGNMENTS_OF_PERSON, {"person_id": person_id}).mappings().all()
-
-    purview = Purview.empty()
-    for row in rows:
-        assignment = _Assignment.of(row)
-        if (
-            assignment.role not in _OWN_GRANT_ROOT
-            and assignment.role not in _GRANT_ARRIVES_THROUGH_THE_GRAPH
-        ):
-            continue
-        # An assistant dean's row is unioned rather than skipped, though it
-        # contributes nothing today. Skipping would give the same answer and would
-        # go on giving it if `_own_grant_of` ever learned to answer for the role,
-        # which is a second place for the grain to live.
-        purview = purview.union(_own_grant_of(session, assignment))
+    grants = _leadership_grants(session, person_id)
 
     if n_threshold is None:
         configured = Settings() if settings is None else settings
@@ -1295,9 +1462,10 @@ def resolve_scope(
         threshold = n_threshold
     return ActorScope(
         person_id=person_id,
-        purview=purview,
+        purview=_union_of(grants),
         holds_care=holds_care(session, person_id=person_id),
         n_threshold=threshold,
+        grants=grants,
     )
 
 
@@ -1664,8 +1832,9 @@ class LandingRole(StrEnum):
     session in flight.
 
     **Five views and eight assignment roles**, which is what `LANDING_FOR_ROLE`
-    below is for: §2.1's five leadership roles differ in *purview*, which E9
-    computes over the supervision graph, and not in which screen they arrive at.
+    below is for: §2.1's five leadership roles differ in *purview*, which
+    `transitive_purview` computes over the supervision graph, and not in which
+    screen they arrive at.
     """
 
     STUDENT = "pulse-landing-student"
@@ -1678,7 +1847,7 @@ class LandingRole(StrEnum):
 # Which view each assignment role opens on. All eight members of `AssignmentRole`
 # are spelled out, and the five in `LEADERSHIP_ROLES` share one view because SPEC
 # §2 gives leadership one entry point: what separates a chair from a dean is the
-# purview E9 computes, not the screen they arrive at.
+# purview `transitive_purview` computes, not the screen they arrive at.
 #
 # **`STUDENT` is deliberately unreachable from here.** ADR 0028: "A student holds
 # no `role_assignment` row, and one cannot be written: the enum has no label for
@@ -1904,9 +2073,9 @@ def resolve_landing(
 
     **Only the session's own identity is ever resolved here.** Both ids come from
     `app.services.identity`, which resolved them out of the door's verified token,
-    and no router passes another person's. Whether a *caller* may ask this about
-    an arbitrary id is the rule `resolve_scope` still does not enforce, and E9
-    owns it (`docs/tickets/e1/carried-from-e0.md`).
+    and no router passes another person's. The leadership scope holds the same
+    rule structurally: `app.api.deps.leadership_scope` is the only caller of
+    `resolve_scope` and takes the person from the verified session (ADR 0199).
 
     **Each absent id skips its own read.** A launch by a student resolves no
     `person`, a web login resolves no `user` at all, and both absent is a session

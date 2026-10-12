@@ -227,6 +227,12 @@ complete.
     without deciding how they are built — two names spelled, the membership
     table found by its foreign keys, and the two seeding helpers four modules
     share.
+  - `fixtures/purview_walk.py` — E9-01: E0-09's `climbing_forest`, moved here so
+    the supervision-graph properties and the purview properties share one
+    generator; the `world_plans` strategy (a containment tree, an assignment
+    forest, people with several hats and a Lead Faculty mapping, as a pure value
+    `hypothesis.find` can interrogate); the writer that builds a plan; and the
+    purview computed from the plan alone, never from `authz`.
   - `fixtures/benchmark_history.py` — E5-12: `scripts/seed_benchmark_history.py`
     piped into an interpreter the way the runbook pipes it, the row counts a
     refused run is read by, the SPEC §2.2 reader that says which sections a

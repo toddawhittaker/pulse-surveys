@@ -1,6 +1,6 @@
 # 0046 — A purview is a materialised, downward-closed node set per containment level
 
-**Status:** Accepted
+**Status:** Accepted. Amended by [ADR 0199](0199-the-purview-walk-the-lead-clamp-and-its-chokepoint.md): the assistant dean's second term now arrives, because `transitive_purview` walks the graph, so "gets nothing at all until E9 lands" below is history; and `ActorScope` gains `grants`, one per leadership assignment, whose purviews union to its `purview`.
 **Date:** 2026-08-17
 **Tickets:** E0-11
 

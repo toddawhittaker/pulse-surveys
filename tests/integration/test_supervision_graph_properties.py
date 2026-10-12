@@ -69,6 +69,7 @@ runs (`docs/MISTAKES.md` entry 15):
 from typing import Any
 
 import pytest
+from fixtures.purview_walk import CLIMBING_CHAIN, FOREST_CHAIN, WIDEST_FOREST, climbing_forest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
@@ -82,12 +83,14 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 # writable at all. A second copy of the order lives in
 # `test_supervision_edges_run_up_the_role_ranks.py`, deliberately written out
 # there for the reason that file gives.
-CLIMBING_CHAIN = ("INSTRUCTOR", "LEAD_FACULTY", "CHAIR", "ASSISTANT_DEAN", "DEAN", "VP_ACADEMICS")
+#
+# **`CLIMBING_CHAIN`, `FOREST_CHAIN`, `WIDEST_FOREST` and `climbing_forest` now live
+# in `tests/fixtures/purview_walk.py`** (E9-01), which reuses this module's
+# generator for the purview properties and widens it there. They were moved
+# rather than copied, so one generator serves both modules.
 
 # Bounds on the generated shapes. See the module docstring for what they cost.
 LONGEST_CYCLE = len(CLIMBING_CHAIN)
-FOREST_CHAIN = CLIMBING_CHAIN[:-1]
-WIDEST_FOREST = 10
 
 DATABASE_BACKED = settings(
     max_examples=20,
@@ -98,37 +101,6 @@ DATABASE_BACKED = settings(
     # transaction", and this is that question asked twenty times.
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
-
-
-def climbing_forest(shape: list[tuple[int, int]]) -> tuple[list[int | None], list[str]]:
-    """Turn a generated shape into a parent per node and a role per node.
-
-    Two properties hold of everything this returns, and each is a rule the schema
-    enforces rather than a convenience:
-
-      - **it is acyclic**, because a node's parent is always a node created
-        earlier — SPEC §2.1: "the graph is a forest/DAG over assignments";
-      - **every edge climbs**, because a node's role is drawn strictly below its
-        parent's position in `FOREST_CHAIN` (ADR 0044). A node whose drawn parent
-        already sits at the bottom of the chain has nothing to climb to, so it
-        becomes a root instead — which is why the shapes stay a mixture of roots,
-        chains, branches and shared parents rather than collapsing to one ladder.
-
-    The role is drawn from the whole band below the parent rather than one step
-    below it, so the skips SPEC §2.1 requires are inside the space: "a course with
-    no mapping falls to its department chair" is `INSTRUCTOR → CHAIR`, two ranks
-    apart.
-    """
-    parents: list[int | None] = []
-    ranks: list[int] = []
-    for index, (raw_parent, raw_rank) in enumerate(shape):
-        parent = None if raw_parent < 0 or index == 0 else raw_parent % index
-        if parent is not None and ranks[parent] == 0:
-            parent = None
-        ceiling = len(FOREST_CHAIN) if parent is None else ranks[parent]
-        ranks.append(raw_rank % ceiling)
-        parents.append(parent)
-    return parents, [FOREST_CHAIN[rank] for rank in ranks]
 
 
 @DATABASE_BACKED
