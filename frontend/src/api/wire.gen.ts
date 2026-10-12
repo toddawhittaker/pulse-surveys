@@ -706,6 +706,36 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/comparison-sets/{set_id}/series": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * A comparison set's figures over my purview, one term
+         * @description One set's figures for the session's own reader, in the term asked for (E9-05).
+         *
+         *     **The reader's scope comes from `leadership_scope` and from nothing in the
+         *     request** (ADR 0199): a query string carrying another person's id is not
+         *     read, so it is answered with the session's own scope. The figures are
+         *     computed over the set's sections inside that purview, per start cohort, and
+         *     a set wholly outside it answers exactly what a thin set inside it does.
+         *
+         *     Two refusals past the gate, in order: a set id nothing defined is the 404
+         *     every keyed route here answers, and a term id no term carries is a 404 of its
+         *     own. A `term_id` that is absent or not a uuid is FastAPI's own 422.
+         */
+        readonly get: operations["read_set_series_leadership_comparison_sets__set_id__series_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/leadership/comparison-sets/{set_id}/preview": {
         readonly parameters: {
             readonly query?: never;
@@ -1366,6 +1396,49 @@ export interface components {
             readonly excerpt: string | null;
             /** Is Undo */
             readonly is_undo: boolean;
+        };
+        /**
+         * NamedSetCohort
+         * @description One start cohort of the reader's purview in the viewed term, and its published weeks.
+         */
+        readonly NamedSetCohort: {
+            /**
+             * Section Start Date
+             * Format: date
+             */
+            readonly section_start_date: string;
+            /** Weeks */
+            readonly weeks: readonly components["schemas"]["NamedSetWeek"][];
+        };
+        /**
+         * NamedSetSeries
+         * @description A named set's figures for one leadership reader in one term, one series per start cohort.
+         *
+         *     A set wholly outside the reader's purview answers exactly the shape a thin set
+         *     inside it does: the purview's cohorts, every figure suppressed (E9-05).
+         */
+        readonly NamedSetSeries: {
+            /** Cohorts */
+            readonly cohorts: readonly components["schemas"]["NamedSetCohort"][];
+        };
+        /**
+         * NamedSetWeek
+         * @description One course week of one start cohort, on both of SPEC §2.2's week axes, every figure sealed.
+         *
+         *     The two rating means and the workload mean and median, each suppressed or
+         *     shown on its own decision (§4.1 item 7 covers "a mean, a median, or any
+         *     other statistic"). One validator per member, so removing one seal is one
+         *     test going red.
+         */
+        readonly NamedSetWeek: {
+            /** Course Week */
+            readonly course_week: number;
+            /** Term Week */
+            readonly term_week: number;
+            readonly instructor_mean: components["schemas"]["ComparisonFigure"];
+            readonly course_mean: components["schemas"]["ComparisonFigure"];
+            readonly workload_mean: components["schemas"]["ComparisonFigure"];
+            readonly workload_median: components["schemas"]["ComparisonFigure"];
         };
         /**
          * OnBehalfStream
@@ -3181,6 +3254,39 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_set_series_leadership_comparison_sets__set_id__series_get: {
+        readonly parameters: {
+            readonly query: {
+                readonly term_id: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly set_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NamedSetSeries"];
+                };
             };
             /** @description Validation Error */
             readonly 422: {
