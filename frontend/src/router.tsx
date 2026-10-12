@@ -9,7 +9,8 @@ import {
 import type { JSX } from 'react';
 
 import { AppShell } from './components/AppShell';
-import { copy as rollupCopy } from './copy/leadershipRollupCopy';
+import { LiveStatus } from './components/LiveStatus';
+import { copy as landingCopy } from './copy/landings';
 import { UnknownAddress } from './components/UnknownAddress';
 import { CareLanding } from './routes/care';
 import { InstructorLanding } from './routes/instructor';
@@ -66,19 +67,15 @@ import { StudentResultsRoute } from './routes/student/StudentResults';
  */
 
 /**
- * What a lazily loaded leadership page shows while its code arrives: the
- * roll-up's own loading line, in a polite live region.
+ * What a lazily loaded page shows while its code arrives: one line, in a polite
+ * live region that mounts empty and is given its text a tick later.
  *
  * The leadership and admin pages are loaded on first visit rather than in the
  * first chunk (ci/bundle-budget.json): a student or instructor in the LMS
  * iframe never downloads them.
  */
-function LeadershipPending(): JSX.Element {
-  return (
-    <p className="pulse-rollup-status" role="status">
-      {rollupCopy('leadership_rollup.loading')}
-    </p>
-  );
+function RoutePending(): JSX.Element {
+  return <LiveStatus className="pulse-route-pending" text={landingCopy('landing.pending')} />;
 }
 
 // The root renders the app shell — SPEC §2's role switcher and logout — around
@@ -182,7 +179,7 @@ const leadershipRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/leadership',
   component: lazyRouteComponent(() => import('./routes/leadership'), 'LeadershipLanding'),
-  pendingComponent: LeadershipPending,
+  pendingComponent: RoutePending,
 });
 
 // SPEC §5.5's drill-down: one section's Monday report, read-only, for a leader.
@@ -194,7 +191,7 @@ const leadershipDrillDownRoute = createRoute({
   path: DRILL_DOWN_ROUTE,
   validateSearch: validateReportWeek,
   component: lazyRouteComponent(() => import('./routes/leadership/DrillDown'), 'DrillDownRoute'),
-  pendingComponent: LeadershipPending,
+  pendingComponent: RoutePending,
 });
 
 // SPEC §5.1's comparison sets, under the leadership area. Two addresses
@@ -263,6 +260,7 @@ const adminRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin',
   component: lazyRouteComponent(() => import('./routes/admin'), 'AdminLanding'),
+  pendingComponent: RoutePending,
 });
 
 // SPEC §6.3's two editors, under the admin area and flat off the root for the
@@ -272,12 +270,14 @@ const adminPeopleRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: PEOPLE_ROUTE,
   component: lazyRouteComponent(() => import('./routes/admin/People'), 'PeopleRoute'),
+  pendingComponent: RoutePending,
 });
 
 const adminMappingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: MAPPINGS_ROUTE,
   component: lazyRouteComponent(() => import('./routes/admin/Mappings'), 'MappingsRoute'),
+  pendingComponent: RoutePending,
 });
 
 /**

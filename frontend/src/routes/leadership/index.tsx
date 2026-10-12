@@ -23,6 +23,7 @@ import {
 import { AggregateHeader } from '../../components/AggregateHeader';
 import { AttentionList } from '../../components/AttentionList';
 import { HierarchyNav } from '../../components/HierarchyNav';
+import { LiveStatus } from '../../components/LiveStatus';
 import type { OverlaySeries, TrendPoint } from '../../components/PulseTrendChart';
 import { ResponseRateBar } from '../../components/ResponseRateBar';
 import { StatPair } from '../../components/StatPair';
@@ -61,8 +62,14 @@ import { COMPARISON_SETS_ROUTE, DRILL_DOWN_ROUTE, EXCLUSION_LOG_ROUTE, RESPONSES
  * **Polite live regions that exist before their text arrives.** The page's
  * region, present from the first render, carries the context's and the tree's
  * loading lines and refusals; the content pane's, mounted with the tree, carries
- * a node's; the named-set control's carries the set's. Choosing a node moves
- * focus to its heading, so a reader hears what was chosen.
+ * a node's, ending on "Showing {name}" once its figures arrive; the named-set
+ * control's carries the set's. Each mounts empty and is given its text a tick
+ * later (`LiveStatus`), so the first loading line is heard too.
+ *
+ * **Focus.** Pressing a tree row leaves focus on the row, so a reader moving
+ * through the tree keeps their place and hears the pane's status instead. A
+ * breadcrumb press moves focus to the node's heading, because the button
+ * pressed leaves the trail.
  *
  * **No comment appears here** (SPEC §5.5, settled at the E9 breakdown): the
  * roll-up carries figures and attention cards, and a section's comments are
@@ -115,9 +122,7 @@ export function LeadershipLanding(): JSX.Element {
       <h1 className="pulse-rollup-title" id={HEADING_ID}>
         {landingCopy(LANDINGS.leadership.heading)}
       </h1>
-      <p className="pulse-rollup-status" role="status">
-        {status}
-      </p>
+      <LiveStatus className="pulse-rollup-status" text={status} />
       {empty ? <p className="pulse-rollup-note">{landingCopy(LANDINGS.leadership.emptyState)}</p> : null}
       {terms.length > 0 && termId !== null ? (
         <div className="pulse-rollup-bar">
@@ -286,11 +291,11 @@ function Rollup({
     (first === undefined ? [] : [first]);
   const node = path.at(-1) ?? null;
 
-  // A choice moves focus to the chosen node's heading: a breadcrumb press
-  // unmounts the button pressed, and a tree press changes the whole pane.
+  // A breadcrumb press unmounts the button pressed, so focus moves to the
+  // chosen node's heading; a tree press leaves focus on its row.
   const focusTheHeading = useRef(false);
-  function choose(next: RollupNodeView): void {
-    focusTheHeading.current = true;
+  function choose(next: RollupNodeView, moveFocus: boolean): void {
+    focusTheHeading.current = moveFocus;
     setChosen({ kind: next.kind, id: next.id });
   }
   useEffect(() => {
@@ -347,7 +352,9 @@ function Rollup({
           key={mode}
           roots={roots}
           selectedId={node?.id ?? null}
-          onSelect={choose}
+          onSelect={(next) => {
+            choose(next, false);
+          }}
           sectionLink={(section, children) => (
             <Link
               className="pulse-hierarchy-link"
@@ -375,7 +382,7 @@ function Rollup({
                       type="button"
                       className="pulse-rollup-crumb-button"
                       onClick={() => {
-                        choose(step);
+                        choose(step, true);
                       }}
                     >
                       {step.name}
@@ -387,15 +394,18 @@ function Rollup({
             ))}
           </ol>
         </nav>
-        <p className="pulse-rollup-status" role="status">
-          {node === null
-            ? ''
-            : figures === null
-              ? copy('leadership_rollup.figures.loading')
-              : figures.kind === 'ok'
-                ? ''
-                : refusalLine(figures, 'leadership_rollup.figures.unavailable')}
-        </p>
+        <LiveStatus
+          className="pulse-rollup-status"
+          text={
+            node === null
+              ? ''
+              : figures === null
+                ? copy('leadership_rollup.figures.loading')
+                : figures.kind === 'ok'
+                  ? fillCopy('leadership_rollup.figures.showing', { name: node.name })
+                  : refusalLine(figures, 'leadership_rollup.figures.unavailable')
+          }
+        />
         {node === null ? null : (
           <NodeFigures
             key={`${node.kind}:${node.id}`}

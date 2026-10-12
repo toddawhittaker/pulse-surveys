@@ -315,16 +315,20 @@ describe('/leadership, the roll-up', () => {
     ]);
   });
 
-  it('puts focus on the chosen node’s heading, from the tree and from a breadcrumb', async () => {
+  it('keeps focus on a pressed tree row and says what is shown; a breadcrumb moves it to the heading', async () => {
     aRollup(A_LEADS_TREE);
     mount();
     await screen.findByRole('heading', { level: 2, name: 'MARS' });
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
-    fireEvent.click(screen.getByRole('button', { name: /^MARS 2210/ }));
+    const row = screen.getByRole('button', { name: /^MARS 2210/ });
+    row.focus();
+    fireEvent.click(row);
+    await screen.findByRole('heading', { level: 2, name: 'MARS 2210' });
+    const pane = document.querySelector('.pulse-rollup-content-pane > [role="status"]');
     await waitFor(() => {
-      expect(document.activeElement?.textContent).toBe('MARS 2210');
+      expect(pane?.textContent).toBe('Showing MARS 2210');
     });
-    expect(document.activeElement?.tagName).toBe('H2');
+    expect(document.activeElement).toBe(row);
 
     const crumbs = screen.getByRole('navigation', { name: 'Where you are in the tree' });
     fireEvent.click(within(crumbs).getByRole('button', { name: 'MARS' }));

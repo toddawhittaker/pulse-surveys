@@ -8,6 +8,7 @@ import {
   onBehalfPath,
   responsePolicyPrefixPath,
 } from '../../api/leadership';
+import { SESSION_LANDINGS_PATH } from '../../api/session';
 import { routeTree } from '../../router';
 import { RESPONSES_OWED_LIST_TESTID } from './ResponsesOwed';
 
@@ -47,6 +48,9 @@ function serving(answers: Record<string, () => Response>): Ask[] {
   const asked: Ask[] = [];
   vi.stubGlobal('fetch', (input: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET';
+    // The app shell asks for its landings on every page; these tests are about
+    // the page's own reads, so that one is answered "no session" and not recorded.
+    if (input === SESSION_LANDINGS_PATH) return Promise.resolve(new Response(null, { status: 401 }));
     asked.push({ path: input, method, body: typeof init?.body === 'string' ? init.body : null });
     const answer = answers[`${method} ${input}`];
     if (answer === undefined) {

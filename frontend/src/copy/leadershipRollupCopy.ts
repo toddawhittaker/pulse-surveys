@@ -50,6 +50,7 @@ export const LEADERSHIP_ROLLUP_COPY = {
 
   // One node's figures.
   'leadership_rollup.figures.loading': 'Opening this part of the tree…',
+  'leadership_rollup.figures.showing': 'Showing {name}',
   'leadership_rollup.figures.unavailable':
     'The figures for this part of the tree could not be loaded just now. Choose it again to retry.',
   'leadership_rollup.figures.no_cohorts':
