@@ -423,6 +423,51 @@ def test_a_drill_down_into_a_sibling_leads_section_answers_exactly_as_a_missing_
     assert not leaked, f"Lead A's drill-down of her own section carries B's course: {leaked}."
 
 
+def published_weeks_url(section_id: Any) -> str:
+    """E9-11's drill-down week list (its pull request and integration test spell it)."""
+    return f"/leadership/sections/{section_id}/published-weeks"
+
+
+def test_the_drill_downs_week_list_for_a_sibling_leads_section_answers_exactly_as_a_missing_one(
+    lead_review: LeadReviewWorld,
+) -> None:
+    """A asks B's section's published weeks and a random id's: one status, one body; B's own: 200.
+
+    B's section has a published week, so B's answer lists one and A's refusal is
+    the purview's, not an empty section's. **The present twin:** lead B, asking
+    for her own section's weeks, is answered 200. **The refusal guard:** A's
+    answer is a 4xx, so the equality is not two empty lists.
+
+    **The mutation it kills:** the week list checking that the section exists but
+    not that it is in the reader's purview (E9-12 privacy review, T2) — it then
+    answers A with B's weeks, which tells A which course weeks B's section ran and
+    published; a 403 or another sentence for a section that exists outside the
+    purview. **The near miss it spares:** whatever 404 and sentence the route
+    picks for both.
+    """
+    review = lead_review
+    assert review.lead is not None and review.sibling_lead is not None
+    a_published_week_in_the_sibling_section(review)
+    sibling = review.world.section_id(SIBLING_COHORT)
+
+    theirs = answer(get(review, review.sibling_lead, published_weeks_url(sibling)))
+    outside = answer(get(review, review.lead, published_weeks_url(sibling)))
+    missing = answer(get(review, review.lead, published_weeks_url(uuid4())))
+
+    assert theirs[0] == 200, (
+        f"The present twin failed: lead B's own week list answered {theirs[0]} "
+        f"{str(theirs[1])[:300]!r}."
+    )
+    assert 400 <= outside[0] < 500, (
+        f"Lead A asking for B's section's weeks answered {outside[0]} {str(outside[1])[:300]!r}; "
+        "a section outside the purview is refused (SPEC §4.1 item 2)."
+    )
+    assert outside == missing, (
+        f"B's section's week list answered A with {outside}; a section that does not exist "
+        f"answered {missing}. Done-when 1: the same refusal as a section that does not exist."
+    )
+
+
 # ---------------------------------------------------------------------------
 # One generated world.
 # ---------------------------------------------------------------------------

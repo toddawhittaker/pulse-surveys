@@ -154,6 +154,66 @@ def test_every_e9_read_route_answers_a_request_carrying_another_persons_ids_from
     )
 
 
+CONTEXT_PATH = "/leadership/context"
+
+
+def test_the_context_route_answers_a_request_carrying_the_chairs_ids_with_the_leads_own_roles(
+    lead_review: LeadReviewWorld,
+) -> None:
+    """Lead A's `GET /leadership/context`, carrying the chair's ids, answers A's own roles.
+
+    The chair is the other person here rather than lead B, because B holds the
+    same role as A and a context resolved from B's ids would look exactly like
+    A's. **The control:** the chair's own plain request is answered `CHAIR`, so a
+    context resolved from the chair's ids would be visibly the chair's; A's own
+    plain request is answered `LEAD_FACULTY` alone.
+
+    **The mutation it kills:** the context route (E9-11) resolving its roles from
+    a `person_id` (or `user_id`, `assignment_id`, `scope_id`) in the query string
+    or the body when one is present — "read the purview by person". **The near
+    miss it spares:** unknown query parameters and body members ignored, which
+    FastAPI does by default.
+    """
+    review = lead_review
+    assert review.lead is not None and review.chair is not None
+    assignments = review.graph.assignments_of(review.chair.person_id)
+    assert assignments, "The chair holds no assignment, so her assignment id cannot be sent."
+    chair = str(review.chair.person_id)
+    ids = {
+        "person_id": chair,
+        "user_id": chair,
+        "reader_id": chair,
+        "actor_id": chair,
+        "as_person": chair,
+        "assignment_id": str(assignments[0]),
+        "scope_id": str(review.department),
+    }
+
+    plain = answer(review.ask("GET", CONTEXT_PATH, token=review.lead.token))
+    chairs = answer(review.ask("GET", CONTEXT_PATH, token=review.chair.token))
+    by_query = answer(review.ask("GET", with_query(CONTEXT_PATH, ids), token=review.lead.token))
+    by_body = answer(review.ask("GET", CONTEXT_PATH, token=review.lead.token, json=ids))
+
+    assert plain[0] == 200 and plain[1].get("roles") == ["LEAD_FACULTY"], (
+        f"The control failed: lead A's plain context answered {plain}; she holds one Lead "
+        "Faculty assignment."
+    )
+    assert chairs[0] == 200 and chairs[1].get("roles") == ["CHAIR"], (
+        f"The control failed: the chair's plain context answered {chairs}, so a context resolved "
+        "from her ids would not be told apart from A's."
+    )
+    crossed = {
+        channel: got
+        for channel, got in (("query string", by_query), ("JSON body", by_body))
+        if canonical(got) != canonical(plain)
+    }
+    assert not crossed, (
+        f"Lead A's context requests carrying the chair's ids were answered otherwise than her "
+        f"plain one ({plain}): {crossed}. E9-01: the scope comes from the verified session's "
+        "own person and nothing else."
+    )
+
+
 def test_another_persons_id_in_a_path_slot_is_answered_as_an_id_nothing_holds(
     lead_review: LeadReviewWorld,
 ) -> None:
@@ -339,6 +399,7 @@ def test_no_route_behind_the_leadership_gate_declares_an_input_naming_another_pe
         "/leadership/rollup/{kind}/{node_id}",
         "/leadership/comparison-sets/{set_id}/series",
         "/leadership/sections/{section_id}/weeks/{course_week}/report",
+        "/leadership/context",
     )
     missing = [path for path in wanted if path not in paths]
     assert (
