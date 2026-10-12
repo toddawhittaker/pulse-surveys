@@ -150,15 +150,31 @@ def test_a_write_definer_refuses_a_key_with_no_live_admin_assignment_and_writes_
 # ---------------------------------------------------------------------------
 
 
-def forbidden_columns(metadata_tables: dict[str, Any]) -> set[str]:
-    """Every column name done-when 9 forbids in a read's answer, from the schema where it can be."""
+# Named outright by done-when 9 or the settled interface, whatever table holds them.
+EXPLICITLY_FORBIDDEN = frozenset({"user_id", "lms_user_id", "idp_subject"})
+
+
+def columns_only_user_identity_carries(metadata_tables: dict[str, Any]) -> set[str]:
+    """`user_identity`'s column names that no `person` column shares.
+
+    Narrowed by the ruling on `docs/disputes/E9-02-01.md`: a name is compared,
+    not a source, and ADR 0022 gives `person.identity_name` (a staff member's own
+    name, which the people read is settled to return) the same spelling as
+    `user_identity.identity_name` (a student's). So only a name `person` does not
+    also carry can say a column came from `user_identity`. The set is required
+    non-empty, so the check below is never asked of nothing.
+    """
     identity = metadata_tables.get("user_identity")
+    person = metadata_tables.get("person")
     assert (
-        identity is not None
-    ), "The model declares no `user_identity`; the sweep would read nothing."
-    named = {column.name for column in identity.columns}
-    assert named, "`user_identity` declares no column, so the forbidden set is empty."
-    return named | {"user_id", "lms_user_id", "idp_subject"}
+        identity is not None and person is not None
+    ), "The model declares no `user_identity` or no `person`; the sweep would read nothing."
+    only = {column.name for column in identity.columns} - {column.name for column in person.columns}
+    assert only, (
+        "Every `user_identity` column name is also a `person` column name, so the narrowed "
+        "forbidden set is empty and the check below would read nothing."
+    )
+    return only
 
 
 @pytest.mark.parametrize("function", list(READS))
@@ -201,9 +217,18 @@ def test_a_read_definer_answers_the_admin_exactly_its_allow_listed_columns(
     assert (
         tuple(keys) == READS[function]
     ), f"`{function}` answers the columns {keys}; the settled allow-list is {list(READS[function])}."
-    forbidden = forbidden_columns(metadata_tables)
-    named = sorted(name for name in keys if name in forbidden or "email" in name.lower())
-    assert not named, f"`{function}` answers {named}, which done-when 9 forbids."
+    explicit = sorted(
+        name for name in keys if name in EXPLICITLY_FORBIDDEN or "email" in name.lower()
+    )
+    assert not explicit, (
+        f"`{function}` answers {explicit}. Done-when 9 forbids a `user` key, `lms_user_id` and "
+        "any email, and the settled interface keeps `idp_subject` off the reads."
+    )
+    from_identity = sorted(set(keys) & columns_only_user_identity_carries(metadata_tables))
+    assert not from_identity, (
+        f"`{function}` answers {from_identity}, which only `user_identity` carries. Done-when 9 "
+        "forbids any `user_identity` column."
+    )
 
 
 @pytest.mark.parametrize("who", REFUSED_CALLERS)
@@ -217,8 +242,12 @@ def test_a_read_definer_answers_a_non_admin_nothing(
     staff name to any key `pulse_app` passes; a check admitting leadership or
     Care. **The near miss:** the admin's answer to the same read in the same
     world, required non-empty here so that "nothing" is not what everybody gets.
+    The world plants people and assignments but no mapping, so one is planted
+    here, as the allow-list test above does (the ruling on
+    `docs/disputes/E9-02-02.md`).
     """
     world = people_graph
+    world.a_mapping(person=world.admin, course=world.a_course())
 
     _keys, rows, failure = world.read(function, caller(world, who))
     _admin_keys, admin_rows, admin_failure = world.read(function, world.admin)
