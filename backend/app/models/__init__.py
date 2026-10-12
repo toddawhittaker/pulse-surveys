@@ -30,8 +30,9 @@ holds `threat_case`, the row a Care case opens with when the routing definer
 writes a threat or self-harm verdict (E6-01, ADR 0187); `ai` gained
 `moderation_attempt` beside `classification` in the same ticket. `loop` holds
 the response loop's two append-only records, `instructor_response` and
-`response_policy` (E7-01, ADR 0192). The other aggregates §13 lists arrive with
-the tickets that need them.
+`response_policy` (E7-01, ADR 0192). `session` holds `revoked_session`, the
+sessions ended before their tokens expired (E9-04, ADR 0202). The other
+aggregates §13 lists arrive with the tickets that need them.
 
 **Importing this package must import every model module.** `backend/migrations/
 env.py` autogenerates against `Base.metadata`, and a table whose module nobody
@@ -56,6 +57,7 @@ from app.models import (
     org,
     report,
     safety,
+    session,
     survey,
     term,
 )
@@ -77,6 +79,7 @@ __all__ = [
     "org",
     "report",
     "safety",
+    "session",
     "survey",
     "term",
 ]
