@@ -1,6 +1,6 @@
 # 0191 — A staff name reaches a reader through one definer that checks the reader itself
 
-**Status:** Accepted
+**Status:** Accepted. Superseded in part by [ADR 0201](0201-the-staff-name-channel-answers-a-set-of-sections.md): the door is set-based and asks the overload v002, which names lead, chair and dean rows, answers chair and above for any section passed, and takes the reader's date from the door. v001 and its rule stand.
 **Date:** 2026-10-11
 **Ticket:** [E7-01](../tickets/e7/E7-01-response-records-and-name-channel.md)
 

@@ -506,7 +506,17 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     `user_identity` stays unreachable from this role by every mechanism, and the
 #     owner, `pulse_staff_name_definer`, holds nothing on it
 #     (`test_the_staff_name_definer_answers_names_and_never_other_people.py`).
-#     The count moves from ten to eleven.
+#     The count moves from ten to eleven. **E9-03 adds a second function under
+#     this name**, the overload `section_staff_names(p_section_ids uuid[],
+#     p_reader_user_id, p_reader_person_id, p_reader_date) -> TABLE (section_id,
+#     role, person_id, display_name)`, with the same owner (ADR 0201). It answers
+#     a set of sections at once, with each name's role, and adds the course's
+#     lead, the department's chair and the college's dean to the names; a reader
+#     holding a live `CHAIR`, `ASSISTANT_DEAN`, `DEAN` or `VP_ACADEMICS`
+#     assignment is answered for any section passed, and the door narrows that
+#     to the reader's purview. Because this inventory is by name, the overload
+#     does not move the count; the count of functions under the name is held to
+#     two in `test_the_staff_name_channel_answers_a_set_of_sections.py`.
 #
 # What is *not* here is the point of the list: the functions of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a

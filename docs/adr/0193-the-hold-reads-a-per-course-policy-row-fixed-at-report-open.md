@@ -94,6 +94,9 @@ with one sentence, a section with no published week included.
   answer. The read raises in that case (a 500) rather than serving the response
   without its author. Kept simple on purpose; a role-only attribution is the
   alternative if it shows up in practice.
+  **Closed by E9-03** ([ADR 0201](0201-the-staff-name-channel-answers-a-set-of-sections.md)):
+  the door now hands the definer the institution's date from `services/clock`,
+  so the two agree.
 
 **Amended by E7-10 (the boundary review's records).**
 
