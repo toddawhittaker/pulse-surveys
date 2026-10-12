@@ -12,13 +12,16 @@ leaves:
     `ROLE_GRANTED`, `ROLE_REVOKED`, `REPORTS_TO_SET`, `LEAD_MAPPING_CHANGED` and
     `WEB_LOGIN_LINKAGE_CHANGED`. Added in an autocommit block, because
     PostgreSQL refuses to use an enum value in the transaction that added it;
-  - three nullable columns on `audit_log`: `subject_person_id` (a foreign key to
-    `person`, `RESTRICT`, indexed), `role` and `scope_node_id` (no foreign key:
-    `role` says which table the id names);
+  - four nullable columns on `audit_log`: `subject_person_id` (a foreign key to
+    `person`, `RESTRICT`, with no index of its own until something reads by it),
+    `role` and `scope_node_id` (no foreign key: `role` says which table the id
+    names), and `parent_assignment_id`, the new parent an edge write set (no
+    foreign key: the parent may be revoked later), held to `REPORTS_TO_SET` rows
+    by a check;
   - `subject_user_id` loses `NOT NULL`, as its own column comment said the
     ticket adding an action that names no student would do. Two checks keep the
-    two shapes of row apart: a reveal names its student, and an admin write names
-    its person;
+    two shapes of row apart, each in both directions: a row names a student if
+    and only if it is a reveal, and names a person if and only if it is not;
   - `people_graph_v001.sql`: the nine write and three read definers, their
     NOLOGIN owner `pulse_people_graph_definer` and its grants, and `EXECUTE` for
     `pulse_app`.
@@ -29,7 +32,8 @@ ruling makes the audit (every Care and Admin grant). So it raises `RuntimeError`
 before touching anything, as `20261011_2c3d5a0de424` does. Otherwise it drops the
 twelve functions, empties their owner (the role itself stays, inert, as every
 earlier definer owner does: `DROP ROLE` fails against any object elsewhere in the
-cluster), drops the checks, restores `NOT NULL`, and drops the columns. The five
+cluster), drops the three checks, restores `NOT NULL`, and drops the four
+columns and the foreign key. The five
 enum values stay: PostgreSQL cannot drop an enum value, and `ADD VALUE IF NOT
 EXISTS` makes the next upgrade a no-op for them.
 """
@@ -60,9 +64,11 @@ NEW_ACTIONS = (
 # Spelled out rather than read from `app.models.audit`: a migration records what
 # was applied on the day it ran (E6-01's reasoning).
 REVEAL_CHECK = "a_reveal_names_its_student"
-REVEAL_CHECK_RULE = "action <> 'IDENTITY_REVEAL' OR subject_user_id IS NOT NULL"
+REVEAL_CHECK_RULE = "(action = 'IDENTITY_REVEAL') = (subject_user_id IS NOT NULL)"
 ADMIN_WRITE_CHECK = "an_admin_write_names_its_person"
-ADMIN_WRITE_CHECK_RULE = "action = 'IDENTITY_REVEAL' OR subject_person_id IS NOT NULL"
+ADMIN_WRITE_CHECK_RULE = "(action = 'IDENTITY_REVEAL') = (subject_person_id IS NULL)"
+PARENT_CHECK = "only_an_edge_write_names_a_parent"
+PARENT_CHECK_RULE = "action = 'REPORTS_TO_SET' OR parent_assignment_id IS NULL"
 
 DROP_THE_DEFINERS = (
     "DROP FUNCTION public.admin_create_person(uuid, text, text)",
@@ -79,7 +85,7 @@ DROP_THE_DEFINERS = (
     "DROP FUNCTION public.admin_read_lead_mappings(uuid)",
 )
 
-# Dropping the three audit columns would take only the grants on those columns
+# Dropping the four audit columns would take only the grants on those columns
 # with it, so every grant the owner holds is revoked by name.
 EMPTY_THE_DEFINER_ROLE = """
 DO $$
@@ -102,7 +108,8 @@ BEGIN
         REVOKE SELECT, DELETE ON public.web_login_subject FROM pulse_people_graph_definer;
         REVOKE INSERT (idp_issuer, idp_subject, person_id)
             ON public.web_login_subject FROM pulse_people_graph_definer;
-        REVOKE INSERT (action, actor_person_id, subject_person_id, role, scope_node_id)
+        REVOKE INSERT (action, actor_person_id, subject_person_id, role, scope_node_id,
+                       parent_assignment_id)
             ON public.audit_log FROM pulse_people_graph_definer;
     END IF;
 END
@@ -126,6 +133,7 @@ def upgrade() -> None:
         ),
     )
     op.add_column(AUDIT_LOG, sa.Column("scope_node_id", sa.Uuid(), nullable=True))
+    op.add_column(AUDIT_LOG, sa.Column("parent_assignment_id", sa.Uuid(), nullable=True))
     op.create_foreign_key(
         op.f("fk_audit_log_subject_person_id_person"),
         AUDIT_LOG,
@@ -134,15 +142,13 @@ def upgrade() -> None:
         ["id"],
         ondelete="RESTRICT",
     )
-    op.create_index(
-        op.f("ix_audit_log_subject_person_id"), AUDIT_LOG, ["subject_person_id"], unique=False
-    )
 
     op.alter_column(AUDIT_LOG, "subject_user_id", existing_type=sa.Uuid(), nullable=True)
     op.create_check_constraint(op.f(f"ck_audit_log_{REVEAL_CHECK}"), AUDIT_LOG, REVEAL_CHECK_RULE)
     op.create_check_constraint(
         op.f(f"ck_audit_log_{ADMIN_WRITE_CHECK}"), AUDIT_LOG, ADMIN_WRITE_CHECK_RULE
     )
+    op.create_check_constraint(op.f(f"ck_audit_log_{PARENT_CHECK}"), AUDIT_LOG, PARENT_CHECK_RULE)
 
     op.execute(read_sql("people_graph_v001"))
 
@@ -178,14 +184,15 @@ def downgrade() -> None:
         op.execute(statement)
     op.execute(EMPTY_THE_DEFINER_ROLE)
 
+    op.drop_constraint(op.f(f"ck_audit_log_{PARENT_CHECK}"), AUDIT_LOG, type_="check")
     op.drop_constraint(op.f(f"ck_audit_log_{ADMIN_WRITE_CHECK}"), AUDIT_LOG, type_="check")
     op.drop_constraint(op.f(f"ck_audit_log_{REVEAL_CHECK}"), AUDIT_LOG, type_="check")
     op.alter_column(AUDIT_LOG, "subject_user_id", existing_type=sa.Uuid(), nullable=False)
 
-    op.drop_index(op.f("ix_audit_log_subject_person_id"), table_name=AUDIT_LOG)
     op.drop_constraint(
         op.f("fk_audit_log_subject_person_id_person"), AUDIT_LOG, type_="foreignkey"
     )
+    op.drop_column(AUDIT_LOG, "parent_assignment_id")
     op.drop_column(AUDIT_LOG, "scope_node_id")
     op.drop_column(AUDIT_LOG, "role")
     op.drop_column(AUDIT_LOG, "subject_person_id")
