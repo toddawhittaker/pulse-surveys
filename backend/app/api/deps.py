@@ -110,6 +110,7 @@ __all__ = [
     "csrf_verified_student",
     "ending_session",
     "landing_with_session",
+    "no_live_session",
     "no_access",
     "no_access_page",
     "no_account",
@@ -421,12 +422,22 @@ def require_session(request: Request, db: Session = Depends(get_session)) -> Ses
     """
     session = _unrevoked_session(request, db)
     if session is None:
-        raise HTTPException(
-            status_code=NOT_A_STUDENT_STATUS,
-            detail=NOT_A_STUDENT.text,
-            headers=NOT_A_STUDENT_CHALLENGE,
-        )
+        raise no_live_session()
     return session
+
+
+def no_live_session() -> HTTPException:
+    """`require_session`'s refusal, for a route that finds the session ended after the gate.
+
+    The role switch is the one caller: two switches with one token both pass
+    the gate, and the one whose revocation comes back empty answers this, the
+    answer an expired or revoked token gets at the same route (ruling G2).
+    """
+    return HTTPException(
+        status_code=NOT_A_STUDENT_STATUS,
+        detail=NOT_A_STUDENT.text,
+        headers=NOT_A_STUDENT_CHALLENGE,
+    )
 
 
 def person_of(claims: SessionClaims) -> UUID | None:

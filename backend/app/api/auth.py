@@ -139,6 +139,7 @@ from app.api.deps import (
     csrf_verified_session,
     ending_session,
     landing_with_session,
+    no_live_session,
     person_of,
     refused,
     require_session,
@@ -156,7 +157,7 @@ from app.schemas.session import (
 )
 from app.services import session as sessions
 from app.services.authz import Door, resolve_landings
-from app.services.session import SessionClaims
+from app.services.session import SessionAlreadyEndedError, SessionClaims
 from app.services.tokens import TokenVerificationError, same_opaque_value, verified_claims
 
 router = APIRouter(tags=["auth"])
@@ -674,12 +675,17 @@ def switch_session(
     `app.services.session.switch_session` re-reads the person's views at this
     door and decides. On success the new token is answered in the body, for the
     SPA's Bearer carrier, and set as the session cookie beside a fresh CSRF
-    token bound to it. A refusal sets no cookie and leaves the old session live.
+    token bound to it; it keeps the old token's expiry. A refusal, including a
+    switch to the session's own role, sets no cookie and leaves the old session
+    live. A token another switch spent first gets the expired-token 401.
     """
     settings: Settings = request.app.state.settings
     secret: bytes = request.app.state.session_secret
     role = landing_role(body.role)
-    token = sessions.switch_session(session, claims, to=role, secret=secret, settings=settings)
+    try:
+        token = sessions.switch_session(session, claims, to=role, secret=secret, settings=settings)
+    except SessionAlreadyEndedError:
+        raise no_live_session() from None
     if token is None:
         raise HTTPException(status_code=SWITCH_REFUSED_STATUS, detail=SWITCH_REFUSED.text)
     session.commit()

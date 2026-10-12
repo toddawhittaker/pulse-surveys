@@ -75,6 +75,7 @@ __all__ = [
     "SESSION_ALGORITHM",
     "SESSION_COOKIE",
     "SESSION_LIFETIME_SECONDS",
+    "SessionAlreadyEndedError",
     "SessionClaims",
     "bearer_token",
     "claim_key",
@@ -169,8 +170,14 @@ def issue_session(
     person_id: str | None = None,
     user_id: str | None = None,
     now: int | None = None,
+    expires_at: int | None = None,
 ) -> str:
     """One signed session token, expiring `SESSION_LIFETIME_SECONDS` after `now`.
+
+    **`expires_at`, when given, is the token's `exp` instead** (E9-04 fix round,
+    ruling G1); `iat` is still `now`. The role switch passes the old token's
+    `exp`, so a switch is never a refresh: a session lives no longer for having
+    changed role, however many times it does.
 
     `now` is injectable epoch seconds so expiry is testable at the boundary
     without a clock patch; it defaults to the wall clock. `jti` is generated
@@ -201,7 +208,7 @@ def issue_session(
         "user_id": user_id,
         "jti": uuid4().hex,
         "iat": issued_at,
-        "exp": issued_at + SESSION_LIFETIME_SECONDS,
+        "exp": issued_at + SESSION_LIFETIME_SECONDS if expires_at is None else expires_at,
     }
     return jwt.encode(payload, secret, algorithm=SESSION_ALGORITHM)
 
@@ -443,12 +450,18 @@ def purge_revoked_sessions(db: Session, now: datetime) -> int:
     return int(getattr(deleted, "rowcount", 0) or 0)
 
 
-def revoke_session(db: Session, claims: SessionClaims) -> None:
+def revoke_session(db: Session, claims: SessionClaims) -> bool:
     """End this session: record its `jti` until its token's own expiry, and purge the rest.
 
     **An insert that does nothing on conflict**, so revoking a session twice is
     not an error and leaves one row; a second logout with the same token
     answers exactly as the first did.
+
+    **Answers whether this call recorded the revocation** (`RETURNING jti`).
+    `False` means the session was already revoked, by a call whose transaction
+    committed first: a concurrent insert of the same `jti` waits on the other
+    transaction's row and then does nothing. Logout ignores the answer; the
+    switch refuses on `False`, so one token switches once (ruling G2).
 
     **The table purges itself here**, in the same transaction, so no scheduled
     job is needed. The purge reads the real clock and never
@@ -460,11 +473,13 @@ def revoke_session(db: Session, claims: SessionClaims) -> None:
     Does not commit; the caller owns the transaction.
     """
     purge_revoked_sessions(db, datetime.now(UTC))
-    db.execute(
+    recorded = db.execute(
         insert(RevokedSession)
         .values(jti=claims.jti, expires_at=datetime.fromtimestamp(claims.exp, UTC))
         .on_conflict_do_nothing(index_elements=[RevokedSession.jti])
-    )
+        .returning(RevokedSession.jti)
+    ).first()
+    return recorded is not None
 
 
 def claim_key(value: str | None) -> UUID | None:
@@ -480,6 +495,14 @@ def claim_key(value: str | None) -> UUID | None:
         return UUID(value)
     except ValueError:
         return None
+
+
+class SessionAlreadyEndedError(Exception):
+    """The session a switch was asked from was revoked by another request first (ruling G2).
+
+    Two switches with one token race to revoke it; the one whose insert comes
+    back empty lost. Its caller answers as for a revoked token at any gate.
+    """
 
 
 def switch_session(
@@ -503,10 +526,21 @@ def switch_session(
     the other door, and one whose assignment was deleted since the list was
     shown all answer `None`.
 
-    **Everything but the role is carried over**: the door, the subject, the
-    issuer and both row keys, so the new session is the one that door would
-    have issued for the same person in that role. The caller commits.
+    **A switch is not a refresh** (ruling G1). The session's own role is refused
+    like any role not held, and the new token keeps the old token's `exp`, so
+    no sequence of switches keeps a session alive past the hour it was issued
+    for.
+
+    **Everything but the role and `iat` is carried over**: the door, the
+    subject, the issuer, both row keys and the expiry.
+
+    **The old token is spent once** (ruling G2). It is revoked before the new
+    one is issued, in the caller's transaction; if the revocation insert comes
+    back empty, another request revoked it first, and this raises
+    `SessionAlreadyEndedError` having issued nothing. The caller commits.
     """
+    if to is claims.role:
+        return None
     held = resolve_landings(
         db,
         door=claims.door,
@@ -516,7 +550,9 @@ def switch_session(
     )
     if to not in held:
         return None
-    token = issue_session(
+    if not revoke_session(db, claims):
+        raise SessionAlreadyEndedError
+    return issue_session(
         door=claims.door,
         role=to,
         sub=claims.sub,
@@ -524,6 +560,5 @@ def switch_session(
         secret=secret,
         person_id=claims.person_id,
         user_id=claims.user_id,
+        expires_at=claims.exp,
     )
-    revoke_session(db, claims)
-    return token
