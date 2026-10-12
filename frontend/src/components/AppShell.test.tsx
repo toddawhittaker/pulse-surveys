@@ -174,12 +174,47 @@ describe('AppShell', () => {
     expect(sessionToken()).toBe('the-old-session');
   });
 
-  it('draws nothing and asks nothing in a tab with no session', () => {
+  it('asks for the landings in a tab holding no Bearer session, so a cookie session still gets logout', async () => {
     window.sessionStorage.clear();
-    const asked = serving({});
+    const asked = serving({ [`GET ${SESSION_LANDINGS_PATH}`]: () => json(200, TWO_VIEWS) });
     renderShell();
+    expect(await screen.findByRole('button', { name: 'Sign out' })).toBeTruthy();
+    expect(asked.map((ask) => `${ask.method} ${ask.path}`)).toEqual([`GET ${SESSION_LANDINGS_PATH}`]);
+    expect(asked[0]?.headers.has('Authorization')).toBe(false);
+  });
+
+  it('draws nothing when the server answers that there is no session', async () => {
+    window.sessionStorage.clear();
+    const asked = serving({ [`GET ${SESSION_LANDINGS_PATH}`]: () => json(401, { detail: 'No session.' }) });
+    renderShell();
+    await waitFor(() => {
+      expect(asked).toHaveLength(1);
+    });
+    await Promise.resolve();
     expect(screen.queryByTestId(SHELL_TESTID)).toBeNull();
     expect(screen.getByText('The page')).toBeTruthy();
-    expect(asked).toEqual([]);
+  });
+
+  it('draws nothing on a student page when the student has no other view', async () => {
+    const asked = serving({
+      [`GET ${SESSION_LANDINGS_PATH}`]: () => json(200, { current: 'student', landings: ['student'] }),
+    });
+    renderShell();
+    await waitFor(() => {
+      expect(asked).toHaveLength(1);
+    });
+    await Promise.resolve();
+    expect(screen.queryByTestId(SHELL_TESTID)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  });
+
+  it('draws the switcher on a student page when the person holds another view', async () => {
+    serving({
+      [`GET ${SESSION_LANDINGS_PATH}`]: () =>
+        json(200, { current: 'student', landings: ['instructor', 'student'] }),
+    });
+    renderShell();
+    expect(await screen.findByRole('combobox', { name: 'Switch view' })).toBeTruthy();
+    expect(screen.getByTestId(SHELL_TESTID)).toBeTruthy();
   });
 });
