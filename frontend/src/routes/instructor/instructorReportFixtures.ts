@@ -258,7 +258,7 @@ export const A_WORKLOAD_BENCHMARK: WorkloadBenchmarkView = {
  * `comparison` is present and suppressed, as every E4 payload's is.
  */
 export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
-  section: { code: 'R3WW', course_label: COURSE_LABEL, length_weeks: 12 },
+  section: { code: 'R3WW', course_label: COURSE_LABEL, length_weeks: 12, lead_name: null },
   week: {
     course_week: 4,
     term_week: 7,

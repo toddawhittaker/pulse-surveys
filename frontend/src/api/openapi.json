@@ -202,7 +202,7 @@
           "student"
         ],
         "summary": "One week's results for one of my sections",
-        "description": "The week's state and the response published to it, for one of this student's sections.\n\n**This route takes a section and a week, which the survey read refuses to,\nand the check is what makes that safe.** The student's results page is one\nweek of one course, so it has to be named. The section is then looked for\namong the session's own live enrollments, never read by its key, so a\nsection the student is not in is not found, exactly as one that does not\nexist is not (`app.services.response_loop.student_week_results`).\n\n**Every refusal is one 404 with one sentence**, byte-identical: not enrolled,\nan ended enrollment, a week whose report has not opened, and a week or a\nsection that does not exist. A session with no `user`, or a `user_id` claim\nthat is not a uuid, is answered the same way, as the submission route does,\nso this route says nothing about which door a session came through.\n\n`Cache-Control: no-store`, as the survey read: the answer is about this\nreader, and an edit changes it.",
+        "description": "The week's state and the response published to it, for one of this student's sections.\n\n**This route takes a section and a week, which the survey read refuses to,\nand the check is what makes that safe.** The student's results page is one\nweek of one course, so it has to be named. The section is then looked for\namong the session's own live enrollments, never read by its key, so a\nsection the student is not in is not found, exactly as one that does not\nexist is not (`app.services.student_results.student_week_results`).\n\n**Every refusal is one 404 with one sentence**, byte-identical: not enrolled,\nan ended enrollment, a week whose report has not opened, and a week or a\nsection that does not exist. A session with no `user`, or a `user_id` claim\nthat is not a uuid, is answered the same way, as the submission route does,\nso this route says nothing about which door a session came through.\n\n`Cache-Control: no-store`, as the survey read: the answer is about this\nreader, and an edit changes it.",
         "operationId": "student_week_results_read_student_sections__section_id__weeks__course_week__results_get",
         "parameters": [
           {
@@ -2587,13 +2587,26 @@
             "type": "integer",
             "title": "Length Weeks",
             "description": "How many weeks this section runs (SPEC \u00a72.2)."
+          },
+          "lead_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Name",
+            "description": "The Lead Faculty's name for the page header; null when nobody leads it."
           }
         },
         "type": "object",
         "required": [
           "code",
           "course_label",
-          "length_weeks"
+          "length_weeks",
+          "lead_name"
         ],
         "title": "SectionView",
         "description": "Which section this report is about, in the words its instructor knows it by."
@@ -3126,6 +3139,18 @@
             "title": "Course Label",
             "description": "The course's label, with its section code and term."
           },
+          "lead_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Name",
+            "description": "The Lead Faculty's name for the page header; null when nobody leads it."
+          },
           "state": {
             "type": "string",
             "enum": [
@@ -3214,6 +3239,7 @@
         "type": "object",
         "required": [
           "course_label",
+          "lead_name",
           "state",
           "response",
           "published_weeks",

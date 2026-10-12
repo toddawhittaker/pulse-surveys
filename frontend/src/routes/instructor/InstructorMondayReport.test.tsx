@@ -502,6 +502,29 @@ describe('a published week with data in it', () => {
   });
 });
 
+describe('the Lead Faculty in the header (SPEC §2.1)', () => {
+  const LEAD = 'Grace Hopper';
+
+  it('names the course’s lead under the heading', async () => {
+    servingWeeks({
+      4: { ...A_PUBLISHED_WEEK, section: { ...A_PUBLISHED_WEEK.section, lead_name: LEAD } },
+    });
+    open(4);
+
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe(COURSE_LABEL);
+    expect(screen.getByTestId('pulse-report-lead').textContent).toBe(`Lead Faculty: ${LEAD}`);
+  });
+
+  it('shows no Lead Faculty line for a course nobody leads', async () => {
+    servingWeeks({ 4: A_PUBLISHED_WEEK });
+    const { container } = open(4);
+
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe(COURSE_LABEL);
+    expect(screen.queryByTestId('pulse-report-lead')).toBeNull();
+    expect(container.textContent).not.toContain('Lead Faculty');
+  });
+});
+
 describe('a week nobody answered', () => {
   it('draws every figure’s absent treatment and no zero pretending to be one', async () => {
     servingWeeks({ 2: A_WEEK_NOBODY_ANSWERED });

@@ -345,7 +345,7 @@ export interface paths {
          *     week of one course, so it has to be named. The section is then looked for
          *     among the session's own live enrollments, never read by its key, so a
          *     section the student is not in is not found, exactly as one that does not
-         *     exist is not (`app.services.response_loop.student_week_results`).
+         *     exist is not (`app.services.student_results.student_week_results`).
          *
          *     **Every refusal is one 404 with one sentence**, byte-identical: not enrolled,
          *     an ended enrollment, a week whose report has not opened, and a week or a
@@ -1754,6 +1754,11 @@ export interface components {
              * @description How many weeks this section runs (SPEC §2.2).
              */
             readonly length_weeks: number;
+            /**
+             * Lead Name
+             * @description The Lead Faculty's name for the page header; null when nobody leads it.
+             */
+            readonly lead_name: string | null;
         };
         /**
          * SetDetail
@@ -2111,6 +2116,11 @@ export interface components {
              * @description The course's label, with its section code and term.
              */
             readonly course_label: string;
+            /**
+             * Lead Name
+             * @description The Lead Faculty's name for the page header; null when nobody leads it.
+             */
+            readonly lead_name: string | null;
             /**
              * State
              * @description Whether the week is held, answered, or neither.

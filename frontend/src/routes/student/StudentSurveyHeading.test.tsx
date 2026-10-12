@@ -85,7 +85,7 @@ describe('the lead for a section with no survey open', () => {
   const RESULTS_OF = (id: string) => `/student/sections/${id}/results`;
 
   function results(state: string, weeks: number[]) {
-    return { state, response: null, published_weeks: weeks };
+    return { state, response: null, published_weeks: weeks, lead_name: null };
   }
 
   async function landingWith(sections: StudentSurveyView['sections'], latest: () => Response) {
