@@ -666,7 +666,7 @@ SECTIONS: tuple[DemoSection, ...] = (
 # **What that opens, stated:** anyone who can reach the mock containers on a
 # development box can now enter as the demo assistant dean and read their purview
 # (Mathematics, Biology and PSYC 110). That is the trade ADR 0097 made for the
-# dean, made again for one more person; the data is fictional and the seed runs in
+# dean, made again for one more person (ADR 0208); the data is fictional and the seed runs in
 # development only (ADR 0063).
 MOCK_LMS_WORKED_EXAMPLE_USER_ID = "mock-lms-user-assistant-dean"
 MOCK_IDP_WORKED_EXAMPLE_SUBJECT = "mock-idp-user-assistant-dean"
