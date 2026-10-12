@@ -1,0 +1,37 @@
+-- What the application may do to the revoked-session ledger — ticket E9-04,
+-- ADR 0202, ADR 0089.
+--
+-- public.revoked_session holds the jti of every session ended before its token
+-- expired (a role switch revokes the old session, logout revokes its own), until
+-- that expiry. The tool runs on the connection pulse_app holds, and without
+-- these grants every gated request would be refused by Postgres with 42501.
+--
+-- **SELECT, INSERT and DELETE, and nothing else.**
+--
+--   - SELECT is the revocation check every gated request makes
+--     (`app.services.session.is_revoked`), and it is also what a DELETE with a
+--     WHERE clause needs to read the column it filters on.
+--   - INSERT is `revoke_session`, called by the switch and by logout. The insert
+--     does nothing on conflict, so a second logout with the same token is not
+--     an error.
+--   - DELETE is `purge_revoked_sessions`, which `revoke_session` runs in the same
+--     transaction, so the table purges itself.
+--   - UPDATE stays withheld. A revocation is never edited, and an expires_at
+--     moved earlier would let the purge bring an ended session back.
+--
+-- **A base table rather than a read view**, the exception the launch ledgers
+-- take (`lti_launch_nonce_grants_v001.sql`, `lti_launch_state_grants_v001.sql`).
+-- SPEC §4.1 routes an identity read path through a view; this table holds a
+-- random token id and two timestamps and no person.
+--
+-- **pulse_care is granted nothing.** Every gate reads the session over the
+-- request's pulse_app connection (`app.db.get_session`), and no Care route
+-- exists yet (E10). If a Care route comes to read its session over the Care
+-- connection, that ticket grants pulse_care SELECT here.
+--
+-- **USAGE ON SCHEMA public is not granted again here**, for the reason
+-- clock_override_grants_v001.sql gives.
+--
+-- **The downgrade drops the table**, so the privileges go with the relation.
+
+GRANT SELECT, INSERT, DELETE ON public.revoked_session TO pulse_app;

@@ -1591,6 +1591,10 @@ def _payload(
     """
     from app.schemas import report as schema
 
+    # Inside the function for the same reason: `response_loop` imports this
+    # module at its top.
+    from app.services.response_loop import section_lead_name
+
     responses, valid_responses = _response_counts(
         session, section_id=section.id, week_id=week.week_id
     )
@@ -1656,6 +1660,9 @@ def _payload(
             code=section.lms_section_code,
             course_label=_course_label(session, section),
             length_weeks=section.length_weeks,
+            lead_name=section_lead_name(
+                session, section_id=section.id, reader_person_id=reader, settings=settings
+            ),
         ),
         week=schema.WeekView(
             course_week=week.course_week,
@@ -2006,7 +2013,7 @@ def student_streams(
     no comment here whatever the caller passed.
 
     **Who may read, and which weeks, is the caller's.**
-    `app.services.response_loop.student_week_results` checks the reader, leaves
+    `app.services.student_results.student_week_results` checks the reader, leaves
     every `awaiting` week out of `trend`, and reads `comments` through the
     student comment reads (ADR 0197). Nothing here returns a count of anybody or
     a benchmark.

@@ -180,6 +180,9 @@ class StudentWeekResults(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     course_label: str = Field(description="The course's label, with its section code and term.")
+    lead_name: str | None = Field(
+        description="The Lead Faculty's name for the page header; null when nobody leads it."
+    )
     state: WeekState = Field(description="Whether the week is held, answered, or neither.")
     response: StudentResponse | None = Field(
         description="The published response; absent while awaiting and when unanswered."

@@ -203,6 +203,12 @@ boundary: `metadata_tables` is asked for by both.
     students, former teacher, two-hat person and response a test plants for
     itself.
 
+  - `fixtures/people_graph.py` — E9-02: the twelve people-graph definers called
+    as `pulse_app` under their settled names and signatures, a world of one admin
+    and three non-admins seeded committed, the rows read back on a second
+    connection, and the planted `audit_log` trigger done-when 5 fails an audit
+    insert with.
+
 Six modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
 `seed_row` already is. They are listed here because this docstring is the index
@@ -239,6 +245,10 @@ complete.
     sections, windows, rosters and enrollments four staff launches and a roster
     sync would have left, planted row by row out of the seeder's own refusals, so
     that its write path can be executed by a test at all.
+  - `fixtures/admin_gate.py` — E9-02: the admin gate asked over HTTP on a stub
+    route mounted on the built application (its real routes are E9-06's), and
+    the admin, Care and student sessions minted on `fixtures/lead_review.py`'s
+    world, an admin or Care session at the web door.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no
@@ -299,9 +309,12 @@ pytest_plugins = (
     "fixtures.instructor_decisions",
     "fixtures.lead_review",
     "fixtures.staff_names",
+    "fixtures.staff_names_for_sections",
     "fixtures.the_hold",
     "fixtures.response_draft",
     "fixtures.response_loop_doors",
+    "fixtures.session_switch",
+    "fixtures.people_graph",
 )
 
 

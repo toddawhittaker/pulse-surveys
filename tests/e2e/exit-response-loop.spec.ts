@@ -234,7 +234,11 @@ test('in the required week the student reads the closed door and nothing else', 
   await expect(results.locator(CARD)).toHaveCount(0);
   const text = (await results.textContent()) ?? '';
   expect(text).not.toContain(INSTRUCTOR_NAME);
-  expect(text).not.toContain(LEAD_NAME);
+  // Since E9-08 the page header carries the course's Lead Faculty name in every
+  // state, the closed door included (SPEC §2.1: course-level pages carry it), so
+  // the lead's bare name may appear. What the closed door must not show is a
+  // response attributed to anybody: no byline.
+  expect(text).not.toContain(LEADS_BYLINE);
 });
 
 test('the instructor drafts, checks and publishes; the student reads it by name, and after an edit the new text', async ({

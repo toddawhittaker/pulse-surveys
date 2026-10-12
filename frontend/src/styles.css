@@ -705,6 +705,13 @@
     font-weight: 500;
   }
 
+  /* The course's Lead Faculty under the course label (design/StudentResults.dc.html). */
+  .pulse-results-lead {
+    margin: 2px 0 0;
+    font-size: var(--text-1);
+    color: var(--spruce-60);
+  }
+
   .pulse-results-figures {
     display: flex;
     flex-direction: column;

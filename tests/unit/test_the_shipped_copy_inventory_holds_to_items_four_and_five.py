@@ -81,7 +81,15 @@ refusals make it seven:
     to it. **Since E8-01 it carries item 5's line** (its done-when 10): the page
     now shows what classmates wrote and how they rated the week, so it says once
     what happens to a student's identity, as the survey and the report do. The
-    line is `student_results.confidentiality`, in `studentResults.ts`.
+    line is `student_results.confidentiality`, in `studentResults.ts`;
+  - `landing`, E9-04's: the landing views' sentences, moved out of
+    `frontend/src/lib/landings.ts` into `frontend/src/copy/landings.ts`, with the
+    role switcher's and logout's labels and refusals. It shows nobody's
+    response, so it owes item 5 no line (the E9 breakdown's decision 15).
+  - `admin_people`, E9-02's: the named refusals the admin's people-graph writes
+    answer with, registered in `app/copy/admin_people.py`, to which E9-06's
+    routes and E9-10's editor screens add their sentences. Staff records only,
+    so it owes item 5 no line (E9 README decision 15).
 
 `GOVERNED_SURFACES` is the whole of that governance, asserted in both directions:
 a key whose prefix no surface governs is red, and a governed prefix that collects
@@ -223,6 +231,32 @@ ENTRY = "entry"
 LEADERSHIP_MODERATION = "leadership_moderation"
 LEADERSHIP_RESPONSE = "leadership_response"
 STUDENT_RESULTS = "student_results"
+LANDING = "landing"
+ADMIN_PEOPLE = "admin_people"
+
+# E9-02's settled interface (§3): the people-graph definers' thirteen named
+# refusals and the admin gate's two sentences, every one in
+# `app/copy/admin_people.py`. Keys only, never the words (`docs/MISTAKES.md`
+# entry 19).
+ADMIN_PEOPLE_SETTLED_KEYS = frozenset(
+    {
+        "admin_people.actor_not_an_admin",
+        "admin_people.no_such_person",
+        "admin_people.no_such_assignment",
+        "admin_people.instructor_is_lms_owned",
+        "admin_people.scope_is_not_the_roles_node",
+        "admin_people.assignment_has_reports",
+        "admin_people.edge_does_not_climb",
+        "admin_people.no_such_course",
+        "admin_people.course_already_led",
+        "admin_people.course_not_led",
+        "admin_people.subject_linked_to_another",
+        "admin_people.person_already_linked",
+        "admin_people.person_not_linked",
+        "admin_people.not_an_admin_session",
+        "admin_people.not_your_role",
+    }
+)
 
 # `student_survey` is E2-10's frontend copy module; `submit` and `student` are
 # E2-08's and E2-09's registry modules, whose strings are the refusals and the
@@ -315,6 +349,29 @@ GOVERNED_SURFACES = {
     # sentence added to the results page would read as the survey's second line —
     # or the survey's own line, moved there, as satisfying both.
     "student_results": STUDENT_RESULTS,
+    # E9-04's landing surface (the E9 breakdown's decision 15): the landing
+    # views' sentences, moved out of `frontend/src/lib/landings.ts` — where no
+    # sweep read them, the carried E4 entry — into `frontend/src/copy/landings.ts`,
+    # beside the role switcher's and logout's labels and refusal sentences.
+    #
+    # **The mutation this row kills** is the move done halfway: the sentences
+    # filed in the new copy module under a prefix no row claims (red in
+    # `test_every_collected_key_belongs_to_a_governed_surface`), or the row
+    # written and the module never shipped (red in
+    # `test_every_governed_surface_collects_at_least_one_string`).
+    "landing": LANDING,
+    # E9-02's People & reporting editor and Lead Faculty mapping table (SPEC
+    # §6.3): the admin definers' named refusals, registered in
+    # `app/copy/admin_people.py` (README decision 15). E9-06 adds the routes'
+    # sentences and E9-10 the screens' copy under the same prefix, so it is one
+    # surface from both sources, as `leadership_comparison_sets` is.
+    #
+    # **The mutation this row kills** is the refusals filed under an existing
+    # prefix to turn the totality rule green, which would count the admin's
+    # screens toward a surface a student or a leader reads. With this row, a
+    # module that registers nothing under `admin_people.` is red in
+    # `test_every_governed_surface_collects_at_least_one_string`.
+    "admin_people": ADMIN_PEOPLE,
 }
 
 # Item 5: "Confidentiality copy appears exactly once per surface (survey: once
@@ -398,6 +455,23 @@ SURFACES_WITH_NO_CONFIDENTIALITY_LINE = {
         "E6-05-02 placement for backend refusals alone: whether E7-07's policy, owed and "
         "on-behalf pages owe item 5 a line is that ticket's question, and the on-behalf "
         "composer shows stored summaries, so it is asked again there (MISTAKES entry 22)."
+    ),
+    LANDING: (
+        "E9-04's landing surface: the headings and sentences of the landing views a door "
+        "sends a person to, and the role switcher's and logout's labels and refusals. Each "
+        "says which view this is, which roles a person may switch to, or that a switch or "
+        "a logout did not happen; none renders a response, comment or rating of anybody's, "
+        "so item 5's sentence would have no subject. Figures shown to leaders are the "
+        "`leadership_rollup` surface's question, not this one's (the E9 breakdown's "
+        "decision 15)."
+    ),
+    ADMIN_PEOPLE: (
+        "SPEC §6.3's People & reporting editor and Lead Faculty mapping table, and the named "
+        "refusals the admin's people-graph writes answer with. Everything on them is a staff "
+        "record: a person's name and category, their role assignments, who each reports to, "
+        "which courses each leads, and whether a web login is linked. No student, no response, "
+        "comment or rating of anybody's is shown, so item 5's sentence would have no subject "
+        "(E9 README decision 15)."
     ),
 }
 
@@ -551,6 +625,18 @@ NOT_AN_INSTRUCTOR_KEY = "instructor_report.not_an_instructor"
 # by filename, so the canary below can require strings *from that file* rather
 # than from the prefix, which the backend refusals share.
 MODERATION_PAGES_COPY_FILENAME = "leadershipModerationCopy.ts"
+
+# E9-04's landing copy module, by its path under the copy directory (the ticket's
+# "Owns": `frontend/src/copy/landings.ts`). Compared as a path suffix rather than
+# a bare filename because `frontend/src/lib/landings.ts`, the file the sentences
+# move out of, carries the same name.
+LANDING_COPY_PATH_SUFFIX = "copy/landings.ts"
+
+# How many strings that module must contribute at the least: the ticket moves
+# "the four landing views' sentences" into it, unchanged, so a module holding
+# fewer than four has not received them all. The switcher's and logout's labels
+# come on top. A floor, not a count, so adding a label never reddens this.
+LANDING_VIEWS_MOVED = 4
 
 # The word SPEC §4.1 item 4 forbids by name ("'needs attention,' never
 # 'underperforming'"), appended to one entry's text by the planted-word test
@@ -2808,6 +2894,115 @@ def test_a_forbidden_word_planted_in_an_entry_sentence_turns_the_item_four_sweep
 
 
 # ---------------------------------------------------------------------------
+# E9-04's canary and its planted word. The landing views' sentences sat in
+# `frontend/src/lib/landings.ts`, outside the copy directory, where neither this
+# module nor the component sweep read them (the carried E4 entry). The ticket
+# moves them into `frontend/src/copy/landings.ts` under `landing.`; these say the
+# inventory sees them and that the sweep over them can go red.
+# ---------------------------------------------------------------------------
+
+
+def landing_strings_from_the_copy_module(inventory: tuple[CopyString, ...]) -> list[CopyString]:
+    """Every collected string read from `frontend/src/copy/landings.ts`, any prefix.
+
+    Read by source rather than by prefix, so a string the module files under some
+    other prefix is still returned and the caller can say so by name.
+    """
+    return [
+        string
+        for string in inventory
+        if string.source.replace("\\", "/").endswith(LANDING_COPY_PATH_SUFFIX)
+    ]
+
+
+def test_the_collector_reads_the_landing_copy_module_under_the_landing_prefix() -> None:
+    """E9-04 done-when 9: the inventory collects the landing sentences under `landing`.
+
+    The new module is required to be read by the frontend collector, to hold at
+    least the four landing views' sentences the ticket moves into it, and to file
+    every one of them under `landing.`.
+
+    **The mutations it kills:** the module never written (the sentences left in
+    `lib/landings.ts`); the module written outside the copy directory, where the
+    collector does not walk; the strings filed under another surface's prefix
+    (`entry.`, say), which counts them on the wrong surface; and a move that
+    brought only some of the four views across. **The near miss it spares:** a
+    module with more than four strings, since the switcher's and logout's labels
+    are added to it. **A red here before E9-04 is the expected red**: the module
+    does not exist yet.
+    """
+    from_the_module = landing_strings_from_the_copy_module(
+        collect_frontend_copy(FRONTEND_COPY_DIRECTORY)
+    )
+    keys = sorted(string.key for string in from_the_module)
+    assert len(keys) >= LANDING_VIEWS_MOVED, (
+        f"The frontend collector read {len(keys)} string(s) from `{LANDING_COPY_PATH_SUFFIX}` "
+        f"({keys}). E9-04 moves the four landing views' sentences out of "
+        "`frontend/src/lib/landings.ts` into that module, unchanged, so the inventory sweeps them."
+    )
+    elsewhere = [key for key in keys if prefix_of(key) != LANDING]
+    assert not elsewhere, (
+        f"`{LANDING_COPY_PATH_SUFFIX}` files {elsewhere} under a prefix other than `{LANDING}.`. "
+        "The ticket places the landing views' sentences on the `landing` surface (the E9 "
+        "breakdown's decision 15)."
+    )
+    blank = [string.key for string in from_the_module if not string.text.strip()]
+    assert not blank, (
+        f"The collector read {blank} as empty strings. An empty text satisfies every vocabulary "
+        "rule in this module."
+    )
+
+
+def test_a_forbidden_word_planted_in_a_landing_sentence_turns_the_item_four_sweep_red() -> None:
+    """E9-04 done-when 9: "a planted shame word in one goes red".
+
+    The shipped inventory is collected, one string read from the landing copy
+    module has item 4's own word appended to it, and the very function the marked
+    rule below calls (`offenders`, over `UNDERPERFORMING_VOCABULARY`) is required
+    to name that key. The planted string is the first in key order, not a named
+    key: which keys the module uses is the builder's choice.
+
+    **The pair.** The same inventory unplanted must name no `landing.` key, so a
+    red after the plant cannot be explained by a sweep that flags everything.
+
+    **The mutations it kills:** the landing module left out of what the collector
+    reads, which leaves nothing to plant into; and a collection change that drops
+    the prefix from what the rule sweeps. **A red here before E9-04 is the
+    expected red**: there is no landing string to plant into.
+    """
+    inventory = collect_shipped_copy()
+    from_the_module = sorted(
+        landing_strings_from_the_copy_module(inventory), key=lambda string: string.key
+    )
+    assert from_the_module, (
+        f"The inventory holds no string read from `{LANDING_COPY_PATH_SUFFIX}`, so there is no "
+        "landing sentence to plant a word into. E9-04 moves the landing views' sentences there."
+    )
+    target = from_the_module[0]
+
+    before = offenders(inventory, UNDERPERFORMING_VOCABULARY)
+    clean = [key for key in before if prefix_of(key) == LANDING]
+    assert clean == [], (
+        f"Before anything was planted, the sweep already named {clean} on the landing surface. "
+        "Either a shipped landing sentence breaks item 4, which the marked rule below reports on "
+        "its own, or the sweep flags everything and a red after the plant would mean nothing."
+    )
+
+    planted = tuple(
+        CopyString(string.key, f"{string.text} {A_FORBIDDEN_WORD}", string.source)
+        if string == target
+        else string
+        for string in inventory
+    )
+    found = offenders(planted, UNDERPERFORMING_VOCABULARY)
+    assert target.key in found, (
+        f"With {A_FORBIDDEN_WORD!r} appended to `{target.key}`, the item 4 sweep named "
+        f"{sorted(found)}. The sweep that guards every shipped sentence has to reach the landing "
+        "views' sentences, or a forbidden word on a landing ships with this module green."
+    )
+
+
+# ---------------------------------------------------------------------------
 # The rules. Every one of these is marked, and every docstring names the item it
 # asserts.
 # ---------------------------------------------------------------------------
@@ -3174,6 +3369,129 @@ def test_the_entry_surface_owes_no_line_and_collects_from_the_registry() -> None
         f"The {ENTRY} surface owes item 5 no line and carries {carrying}.\n"
         "\n"
         f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[ENTRY]}"
+    )
+
+
+@pytest.mark.invariant
+def test_the_landing_surface_owes_no_line_and_collects_from_its_copy_module() -> None:
+    """SPEC §4.1 item 5's answer for E9-04's landing surface, asserted as a named fact.
+
+    The ticket's "Owns": "the copy inventory places `landing` in
+    `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason". The general rule
+    above already holds every no-line surface to zero; this is here because zero
+    is satisfied perfectly by a surface that collects nothing (`docs/MISTAKES.md`
+    entry 3), so the landing surface is required to collect from its copy module
+    before its zero is believed.
+
+    **The mutations it kills:** the surface moved into
+    `CONFIDENTIALITY_KEY_OF_SURFACE`; the row's reason emptied, which turns a
+    decision back into an omission; the landing module dropping out of the
+    collector, which makes the zero meaningless; and an identity promise added
+    to a landing view or to the switcher. **A red here before E9-04 is the
+    expected red**: the copy module does not exist yet, so the surface collects
+    nothing.
+    """
+    assert LANDING in SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
+        f"The {LANDING} surface is not recorded as owing item 5 no line. That answer is a row in "
+        "`SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason written out."
+    )
+    assert SURFACES_WITH_NO_CONFIDENTIALITY_LINE[LANDING].strip(), (
+        f"The {LANDING} row records no reason. A row with no argument in it is an omission that "
+        "reads like a decision (ADR 0158)."
+    )
+    assert LANDING not in CONFIDENTIALITY_KEY_OF_SURFACE, (
+        f"The {LANDING} surface is in both line maps: one demands exactly one confidentiality "
+        "string and the other forbids any."
+    )
+
+    inventory = collect_shipped_copy()
+    assert inventory, "The inventory is empty, so this rule passed over nothing."
+    from_the_module = [
+        string.key
+        for string in landing_strings_from_the_copy_module(inventory)
+        if prefix_of(string.key) == LANDING
+    ]
+    assert from_the_module, (
+        f"No string under `{LANDING}.` is collected from `{LANDING_COPY_PATH_SUFFIX}`. That module "
+        "is this surface's source, so a zero counted over it is not an answer to item 5."
+    )
+
+    carrying = sorted(string.key for string in confidentiality_strings(inventory, LANDING))
+    assert not carrying, (
+        f"The {LANDING} surface owes item 5 no line and carries {carrying}.\n"
+        "\n"
+        f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[LANDING]}"
+    )
+
+
+@pytest.mark.invariant
+def test_the_admin_people_surface_owes_no_line_and_collects_its_refusals_from_the_registry() -> (
+    None
+):
+    """SPEC §4.1 item 5's answer for E9-02's `admin_people` surface, asserted as a named fact.
+
+    E9-02's done-when 11: "The copy inventory places `admin_people` in
+    `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason, and collects the
+    refusal sentences under it." The people pages show staff records and no
+    student's data (README decision 15), so item 5's sentence would have no
+    subject. The general rule above holds every no-line surface to zero; this is
+    here because zero is satisfied perfectly by a surface that collects nothing
+    (`docs/MISTAKES.md` entry 3), and E9-02 ships this surface's backend half
+    only — the definers' refusals in `app/copy/admin_people.py` — so that half is
+    required to collect before the zero is believed. E9-10's screen copy joins
+    the prefix later and changes nothing here.
+
+    **The mutations it kills:** the surface moved into
+    `CONFIDENTIALITY_KEY_OF_SURFACE`; the row's reason emptied; the refusals
+    written inline in SQL or filed under another prefix, so nothing is collected
+    under `admin_people.`; a reassuring identity sentence added to an admin
+    refusal. **Expected red before E9-02 lands:** a FAILED on the collection
+    assertion — no module registers anything under the prefix yet.
+    """
+    assert ADMIN_PEOPLE in SURFACES_WITH_NO_CONFIDENTIALITY_LINE, (
+        f"The {ADMIN_PEOPLE} surface is not recorded as owing item 5 no line. That answer is a "
+        "row in `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason written out."
+    )
+    assert SURFACES_WITH_NO_CONFIDENTIALITY_LINE[ADMIN_PEOPLE].strip(), (
+        f"The {ADMIN_PEOPLE} row records no reason. A row with no argument in it is an omission "
+        "that reads like a decision (ADR 0158)."
+    )
+    assert ADMIN_PEOPLE not in CONFIDENTIALITY_KEY_OF_SURFACE, (
+        f"The {ADMIN_PEOPLE} surface is in both line maps: one demands exactly one "
+        "confidentiality string and the other forbids any."
+    )
+    prefixes = sorted(
+        prefix for prefix, surface in GOVERNED_SURFACES.items() if surface == ADMIN_PEOPLE
+    )
+    assert prefixes == [ADMIN_PEOPLE], (
+        f"The {ADMIN_PEOPLE} surface is governed under {prefixes}; E9-02 places it under the one "
+        f"prefix `{ADMIN_PEOPLE}.`."
+    )
+
+    backend = [
+        string.key for string in collect_backend_copy() if prefix_of(string.key) == ADMIN_PEOPLE
+    ]
+    assert backend, (
+        f"No string under `{ADMIN_PEOPLE}.` is collected from `{COPY_PACKAGE}`. E9-02's 'Owns': "
+        "`backend/app/copy/admin_people.py` holds the definers' named refusals as governed "
+        "sentences, and a zero counted over a surface that collects nothing is not an answer to "
+        "item 5."
+    )
+    missing = sorted(ADMIN_PEOPLE_SETTLED_KEYS - set(backend))
+    assert not missing, (
+        f"These settled `{ADMIN_PEOPLE}.` keys are not collected from `{COPY_PACKAGE}`: {missing}. "
+        "E9-02's settled interface names thirteen definer refusals and the gate's two sentences, "
+        "all in `app/copy/admin_people.py`; a refusal the inventory cannot see is one item 4's "
+        "sweep never reads."
+    )
+
+    inventory = collect_shipped_copy()
+    assert inventory, "The inventory is empty, so this rule passed over nothing."
+    carrying = sorted(string.key for string in confidentiality_strings(inventory, ADMIN_PEOPLE))
+    assert not carrying, (
+        f"The {ADMIN_PEOPLE} surface owes item 5 no line and carries {carrying}.\n"
+        "\n"
+        f"The reason it owes none: {SURFACES_WITH_NO_CONFIDENTIALITY_LINE[ADMIN_PEOPLE]}"
     )
 
 

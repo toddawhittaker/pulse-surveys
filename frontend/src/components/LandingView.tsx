@@ -1,5 +1,6 @@
 import type { JSX, ReactNode } from 'react';
 
+import { copy } from '../copy/landings';
 import type { Landing } from '../lib/landings';
 
 /**
@@ -41,7 +42,7 @@ export function LandingView({
 }): JSX.Element {
   return (
     <main className="pulse-landing" data-testid={landing.testid} aria-labelledby={HEADING_ID}>
-      <h1 id={HEADING_ID}>{landing.heading}</h1>
+      <h1 id={HEADING_ID}>{copy(landing.heading)}</h1>
       <svg
         className="pulse-line"
         width="120"
@@ -55,7 +56,7 @@ export function LandingView({
       >
         <path d="M2 4 H118" />
       </svg>
-      <p>{landing.emptyState}</p>
+      <p>{copy(landing.emptyState)}</p>
       {children}
     </main>
   );

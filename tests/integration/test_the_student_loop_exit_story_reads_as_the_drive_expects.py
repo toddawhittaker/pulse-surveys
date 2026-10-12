@@ -6,7 +6,7 @@ shows: in the exit week, both streams' distributions, the workload median, the
 instructor stream's comments and the course stream held; in the week before, both
 streams' ratings held. Those are claims about what the seeded rows add up to under
 SPEC §4's threshold, so this module checks them where they are decided, through
-`response_loop.student_week_results` (the read behind the results route), and
+`student_results.student_week_results` (the read behind the results route), and
 never through the seeder's own count (`docs/MISTAKES.md` entry 58).
 
 **The world is a launched `MATH-140-E1FF`, planted** as the staff launch and
@@ -115,7 +115,7 @@ def story(
         from app.ai.contracts import ModerationVerdict
         from app.config import Settings
         from app.services.moderation import SEED_MODEL_ID, SEED_PROMPT_VERSION, route_verdict
-        from app.services.response_loop import student_week_results
+        from app.services.student_results import student_week_results
 
         engine = create_engine(demo.database.application_url)
         try:
