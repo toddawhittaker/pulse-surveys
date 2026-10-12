@@ -7,8 +7,6 @@ import { copy } from '../../copy/leadershipModerationCopy';
 import './leadershipComparisonSets.css';
 import './leadershipModeration.css';
 
-/** The address of the exclusion log, under the leadership area. */
-export const EXCLUSION_LOG_ROUTE = '/leadership/exclusion-log';
 
 /** Where a spec finds the page. */
 export const EXCLUSION_LOG_TESTID = 'pulse-leadership-exclusion-log';

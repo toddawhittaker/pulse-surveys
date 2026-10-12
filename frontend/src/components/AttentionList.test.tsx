@@ -28,7 +28,7 @@ function card(
 
 /** Three cards in the server's order: by course, then section, then rule. */
 const CARDS: AttentionCardView[] = [
-  card('response_owed', 'Response required and delinquent', null, 'U2WW', 'CHEM 1210'),
+  card('response_owed', 'Response required, not yet published after 48 hours', null, 'U2WW', 'CHEM 1210'),
   card('instructor_trend_down', 'Instructor trend down', 'INSTRUCTOR', 'R1WW', 'BIOL 3200'),
   card('response_rate_low', 'Response rate under 40%', null, 'R2WW', 'BIOL 2150'),
 ];

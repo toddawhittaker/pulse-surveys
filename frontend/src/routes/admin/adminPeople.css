@@ -240,6 +240,12 @@
   font-size: var(--text-1);
 }
 
+/* A control's refusal paragraph is always in the document, so the control's
+ * `aria-describedby` never names a missing node; it takes no room while empty. */
+.pulse-admin-refusal:empty {
+  display: none;
+}
+
 /* ---- The import's diff ---------------------------------------------------- */
 
 .pulse-admin-diff {

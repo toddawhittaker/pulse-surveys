@@ -115,8 +115,11 @@ async function chooseTheRootHoldingTheCard(page: Page): Promise<void> {
   const count = await roots.count();
   expect(count, 'The by-lead tree has no root.').toBeGreaterThan(0);
   for (let index = 0; index < count; index += 1) {
+    const name = (await roots.nth(index).locator('.pulse-hierarchy-name').textContent()) ?? '';
     await roots.nth(index).click();
-    await expect(page.locator('.pulse-rollup-content-pane > [role="status"]')).toHaveText('');
+    await expect(page.locator('.pulse-rollup-content-pane > [role="status"]')).toHaveText(
+      `Showing ${name}`,
+    );
     if ((await attentionLinkTo(page).count()) > 0) return;
   }
   throw new Error(`No root of the chair's by-lead tree carries the card for ${BIOL.label}.`);
@@ -136,12 +139,19 @@ test('a chair reads the roll-up by lead, opens an attention card, and reads the 
   await expect(rollup.locator('article.pulse-rollup-article h2')).toBeVisible();
   await expectNoAxeViolations(page, 'The roll-up');
 
-  // Keyboard: open the first root, choose its first child, then press the
-  // root's breadcrumb with Enter; focus lands on the root's heading.
+  // Keyboard: open the first root, choose its first child (focus stays on the
+  // row, and the pane says what it shows), then press the root's breadcrumb
+  // with Enter; focus lands on the root's heading.
   const firstRoot = rollup.locator('nav.pulse-hierarchy > ul > li').first();
   const rootName = (await firstRoot.locator('.pulse-hierarchy-select .pulse-hierarchy-name').first().textContent()) ?? '';
   await firstRoot.locator('button.pulse-hierarchy-toggle').first().press('Enter');
-  await firstRoot.locator('ul button.pulse-hierarchy-select').first().press('Enter');
+  const child = firstRoot.locator('ul button.pulse-hierarchy-select').first();
+  const childName = (await child.locator('.pulse-hierarchy-name').textContent()) ?? '';
+  await child.press('Enter');
+  await expect(rollup.locator('.pulse-rollup-content-pane > [role="status"]')).toHaveText(
+    `Showing ${childName}`,
+  );
+  await expect(child).toBeFocused();
   const crumb = rollup
     .getByRole('navigation', { name: 'Where you are in the tree' })
     .getByRole('button', { name: rootName, exact: true });

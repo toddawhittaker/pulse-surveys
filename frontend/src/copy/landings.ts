@@ -45,6 +45,9 @@ export const LANDING_COPY = {
   // through. The session is still live then, so it asks for another try.
   'landing.logout.label': 'Sign out',
   'landing.logout.refused': 'Signing out did not go through. Please try again.',
+  // What a page loaded on first visit says while its code arrives.
+  'landing.pending': 'Opening the page…',
+
   // What the app shows once a sign-out has gone through: the session is gone,
   // so nothing behind it can be read, and the way back in is the usual door.
   'landing.signed_out.heading': 'You are signed out',

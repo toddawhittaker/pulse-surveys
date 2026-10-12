@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -144,7 +148,11 @@ describe('AppShell', () => {
     expect(await screen.findByTestId(SIGNED_OUT_TESTID)).toBeTruthy();
     const heading = screen.getByRole('heading', { level: 1 });
     expect(heading.textContent).toBe('You are signed out');
-    expect(document.activeElement).toBe(heading);
+    // The focus is moved by an effect, which can run a little after the state
+    // that drew the heading is on screen.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(heading);
+    });
     expect(screen.queryByText('The page')).toBeNull();
     expect(sessionToken()).toBeNull();
     const sent = asked.find((ask) => ask.method === 'POST');
@@ -174,12 +182,55 @@ describe('AppShell', () => {
     expect(sessionToken()).toBe('the-old-session');
   });
 
-  it('draws nothing and asks nothing in a tab with no session', () => {
+  it('asks for the landings in a tab holding no Bearer session, so a cookie session still gets logout', async () => {
     window.sessionStorage.clear();
-    const asked = serving({});
+    const asked = serving({ [`GET ${SESSION_LANDINGS_PATH}`]: () => json(200, TWO_VIEWS) });
     renderShell();
+    expect(await screen.findByRole('button', { name: 'Sign out' })).toBeTruthy();
+    expect(asked.map((ask) => `${ask.method} ${ask.path}`)).toEqual([`GET ${SESSION_LANDINGS_PATH}`]);
+    expect(asked[0]?.headers.has('Authorization')).toBe(false);
+  });
+
+  it('draws nothing when the server answers that there is no session', async () => {
+    window.sessionStorage.clear();
+    const asked = serving({ [`GET ${SESSION_LANDINGS_PATH}`]: () => json(401, { detail: 'No session.' }) });
+    renderShell();
+    await waitFor(() => {
+      expect(asked).toHaveLength(1);
+    });
+    await Promise.resolve();
     expect(screen.queryByTestId(SHELL_TESTID)).toBeNull();
     expect(screen.getByText('The page')).toBeTruthy();
-    expect(asked).toEqual([]);
+  });
+
+  it('draws nothing on a student page when the student has no other view', async () => {
+    const asked = serving({
+      [`GET ${SESSION_LANDINGS_PATH}`]: () => json(200, { current: 'student', landings: ['student'] }),
+    });
+    renderShell();
+    await waitFor(() => {
+      expect(asked).toHaveLength(1);
+    });
+    await Promise.resolve();
+    expect(screen.queryByTestId(SHELL_TESTID)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  });
+
+  it('draws the switcher on a student page when the person holds another view', async () => {
+    serving({
+      [`GET ${SESSION_LANDINGS_PATH}`]: () =>
+        json(200, { current: 'student', landings: ['instructor', 'student'] }),
+    });
+    renderShell();
+    expect(await screen.findByRole('combobox', { name: 'Switch view' })).toBeTruthy();
+    expect(screen.getByTestId(SHELL_TESTID)).toBeTruthy();
+  });
+});
+
+describe('the shell’s stylesheet', () => {
+  it('is its own, so a page with the shell does not load the roll-up’s', () => {
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'AppShell.tsx'), 'utf8');
+    const sheets = [...source.matchAll(/^import '(\.[^']*\.css)';$/gm)].map((match) => match[1]);
+    expect(sheets).toEqual(['./appShell.css']);
   });
 });

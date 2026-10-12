@@ -170,6 +170,99 @@
     animation-delay: 1160ms;
   }
 
+  /* An aggregate page's start cohorts (SPEC §2.2), one line each. The first
+   * takes the hero's ink; the next two take spruce and spruce-60, the two inks
+   * this file already holds to the non-text contrast floor; past the third the
+   * same three repeat dashed, and past the sixth dotted. A patterned line
+   * cannot draw on (the draw is itself a dash), so it fades in as the dot does. Each dot and legend swatch takes
+   * its line's ink, so the legend names the line it shows. */
+  .pulse-trend-line.pulse-trend-cohort-1,
+  .pulse-trend-line.pulse-trend-cohort-4,
+  .pulse-trend-legend-line.pulse-trend-cohort-1,
+  .pulse-trend-legend-line.pulse-trend-cohort-4 {
+    stroke: var(--spruce);
+  }
+
+  .pulse-trend-dot.pulse-trend-cohort-1,
+  .pulse-trend-dot.pulse-trend-cohort-4,
+  .pulse-trend-legend-dot.pulse-trend-cohort-1,
+  .pulse-trend-legend-dot.pulse-trend-cohort-4 {
+    fill: var(--spruce);
+  }
+
+  .pulse-trend-line.pulse-trend-cohort-2,
+  .pulse-trend-line.pulse-trend-cohort-5,
+  .pulse-trend-legend-line.pulse-trend-cohort-2,
+  .pulse-trend-legend-line.pulse-trend-cohort-5 {
+    stroke: var(--spruce-60);
+  }
+
+  .pulse-trend-dot.pulse-trend-cohort-2,
+  .pulse-trend-dot.pulse-trend-cohort-5,
+  .pulse-trend-legend-dot.pulse-trend-cohort-2,
+  .pulse-trend-legend-dot.pulse-trend-cohort-5 {
+    fill: var(--spruce-60);
+  }
+
+  .pulse-trend-line.pulse-trend-cohort-3,
+  .pulse-trend-line.pulse-trend-cohort-4,
+  .pulse-trend-line.pulse-trend-cohort-5 {
+    stroke-dasharray: 6 4;
+    animation: pulse-trend-fade-in 150ms ease-out 560ms both;
+  }
+
+  .pulse-trend-legend-line.pulse-trend-cohort-3,
+  .pulse-trend-legend-line.pulse-trend-cohort-4,
+  .pulse-trend-legend-line.pulse-trend-cohort-5 {
+    stroke-dasharray: 4 3;
+  }
+
+  /* Past the sixth, the three inks repeat dotted. */
+  .pulse-trend-line.pulse-trend-cohort-7,
+  .pulse-trend-legend-line.pulse-trend-cohort-7 {
+    stroke: var(--spruce);
+  }
+
+  .pulse-trend-dot.pulse-trend-cohort-7,
+  .pulse-trend-legend-dot.pulse-trend-cohort-7 {
+    fill: var(--spruce);
+  }
+
+  .pulse-trend-line.pulse-trend-cohort-8,
+  .pulse-trend-legend-line.pulse-trend-cohort-8 {
+    stroke: var(--spruce-60);
+  }
+
+  .pulse-trend-dot.pulse-trend-cohort-8,
+  .pulse-trend-legend-dot.pulse-trend-cohort-8 {
+    fill: var(--spruce-60);
+  }
+
+  .pulse-trend-line.pulse-trend-cohort-6,
+  .pulse-trend-line.pulse-trend-cohort-7,
+  .pulse-trend-line.pulse-trend-cohort-8,
+  .pulse-trend-legend-line.pulse-trend-cohort-6,
+  .pulse-trend-legend-line.pulse-trend-cohort-7,
+  .pulse-trend-legend-line.pulse-trend-cohort-8 {
+    stroke-dasharray: 2 4;
+  }
+
+  .pulse-trend-line.pulse-trend-cohort-6,
+  .pulse-trend-line.pulse-trend-cohort-7,
+  .pulse-trend-line.pulse-trend-cohort-8 {
+    animation: pulse-trend-fade-in 150ms ease-out 560ms both;
+  }
+
+  /* The lower panel's patterned lines keep the panel's delay. */
+  .pulse-trend-plot-delayed .pulse-trend-line.pulse-trend-cohort-3,
+  .pulse-trend-plot-delayed .pulse-trend-line.pulse-trend-cohort-4,
+  .pulse-trend-plot-delayed .pulse-trend-line.pulse-trend-cohort-5,
+  .pulse-trend-plot-delayed .pulse-trend-line.pulse-trend-cohort-6,
+  .pulse-trend-plot-delayed .pulse-trend-line.pulse-trend-cohort-7,
+  .pulse-trend-plot-delayed .pulse-trend-line.pulse-trend-cohort-8 {
+    animation-delay: 1160ms;
+  }
+
   /* The comparison-set line — ticket E5-07. Dashed, half the hero's weight, and
    * ink rather than the accent; the colour paragraph at the top of this file
    * has the measurement behind spruce-60 and the departure from the brief it

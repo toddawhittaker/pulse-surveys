@@ -242,31 +242,53 @@ describe('/leadership, the roll-up', () => {
     const chips = within(await screen.findByRole('group', { name: 'Start cohort' }))
       .getAllByRole('button')
       .map((chip) => chip.textContent);
-    expect(chips).toEqual(['U sections · started 8/17', 'R sections · started 9/7']);
+    expect(chips).toEqual(['All starts', 'U sections · started 8/17', 'R sections · started 9/7']);
   });
 
-  it('plots the term axis, one start cohort at a time, switched by the cohort selector', async () => {
+  it('plots every start cohort on the one term axis by default, each with its own table', async () => {
     aRollup(A_LEADS_TREE);
     mount();
     await screen.findByRole('group', { name: 'Start cohort' });
+    expect(screen.getByRole('button', { name: 'All starts' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.getAllByRole('columnheader', { name: 'Term week' }).length).toBeGreaterThan(0);
-    expect(tableWeeks('Instructor')).toEqual(['TERM 01', 'TERM 02', 'TERM 03']);
+    expect(tableWeeks('Instructor, U sections · started 8/17')).toEqual(['TERM 01', 'TERM 02', 'TERM 03']);
+    expect(tableWeeks('Instructor, R sections · started 9/7')).toEqual(['TERM 04']);
+    expect(tableWeeks('Course, R sections · started 9/7')).toEqual(['TERM 04']);
+    // One line per cohort in each of the two panels, and the legend names each cohort.
+    expect(document.querySelectorAll('path.pulse-trend-line').length).toBe(4);
+    const legend = document.querySelector('.pulse-trend-legend');
+    expect(legend?.textContent).toContain('U sections · started 8/17');
+    expect(legend?.textContent).toContain('R sections · started 9/7');
     // The axis is the term's 18 weeks, labelled from TERM 01.
     expect(screen.getAllByText('TERM 01').length).toBeGreaterThan(0);
     expect(document.querySelectorAll('.pulse-trend-tick').length).toBe(2 * 9);
+    // Workload and participation follow the chips: one block per cohort, named.
+    expect(screen.getAllByRole('heading', { level: 4, name: 'R sections · started 9/7' })).toHaveLength(2);
+  });
 
+  it('draws one cohort alone when its chip is chosen, and all of them again from All starts', async () => {
+    aRollup(A_LEADS_TREE);
+    mount();
+    await screen.findByRole('group', { name: 'Start cohort' });
     fireEvent.click(screen.getByRole('button', { name: 'R sections · started 9/7' }));
     expect(tableWeeks('Instructor')).toEqual(['TERM 04']);
     expect(
       screen.getByRole('button', { name: 'R sections · started 9/7' }).getAttribute('aria-pressed'),
     ).toBe('true');
+    expect(screen.getByRole('button', { name: 'All starts' }).getAttribute('aria-pressed')).toBe('false');
+    expect(document.querySelectorAll('path.pulse-trend-line').length).toBe(2);
+    expect(screen.queryByRole('heading', { level: 4 })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'All starts' }));
+    expect(tableWeeks('Instructor, U sections · started 8/17')).toEqual(['TERM 01', 'TERM 02', 'TERM 03']);
   });
 
-  it('draws a named set’s line beside the node’s, under the set’s own name', async () => {
+  it('draws a named set’s line beside one chosen cohort, under the set’s own name', async () => {
     const asked = aRollup(A_LEADS_TREE);
     mount();
     const choice = await screen.findByRole('combobox', { name: 'Compare with a named set' });
     await screen.findByRole('option', { name: A_SET_SUMMARY.name });
+    fireEvent.click(screen.getByRole('button', { name: 'U sections · started 8/17' }));
     fireEvent.change(choice, { target: { value: A_SET_SUMMARY.id } });
     await waitFor(() => {
       expect(screen.getAllByTestId('trend-line-comparison').length).toBe(2);
@@ -275,11 +297,24 @@ describe('/leadership, the roll-up', () => {
     expect(screen.getByTestId('trend-legend-comparison').textContent).toContain(A_SET_SUMMARY.name);
   });
 
+  it('asks for one start cohort before drawing a named set’s line beside all of them', async () => {
+    aRollup(A_LEADS_TREE);
+    mount();
+    const choice = await screen.findByRole('combobox', { name: 'Compare with a named set' });
+    await screen.findByRole('option', { name: A_SET_SUMMARY.name });
+    fireEvent.change(choice, { target: { value: A_SET_SUMMARY.id } });
+    expect(
+      await screen.findByText(`Choose one start cohort to see the ${A_SET_SUMMARY.name} line beside it.`),
+    ).toBeTruthy();
+    expect(screen.queryByTestId('trend-line-comparison')).toBeNull();
+  });
+
   it('says the named set’s line is withheld when the payload withholds every week of it', async () => {
     aRollup(A_LEADS_TREE, A_WITHHELD_SERIES);
     mount();
     const choice = await screen.findByRole('combobox', { name: 'Compare with a named set' });
     await screen.findByRole('option', { name: A_SET_SUMMARY.name });
+    fireEvent.click(screen.getByRole('button', { name: 'U sections · started 8/17' }));
     fireEvent.change(choice, { target: { value: A_SET_SUMMARY.id } });
     const notices = await screen.findAllByText(
       `The ${A_SET_SUMMARY.name} line is withheld: too few sections or respondents in your purview stand behind it this term.`,
@@ -315,16 +350,20 @@ describe('/leadership, the roll-up', () => {
     ]);
   });
 
-  it('puts focus on the chosen node’s heading, from the tree and from a breadcrumb', async () => {
+  it('keeps focus on a pressed tree row and says what is shown; a breadcrumb moves it to the heading', async () => {
     aRollup(A_LEADS_TREE);
     mount();
     await screen.findByRole('heading', { level: 2, name: 'MARS' });
     fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
-    fireEvent.click(screen.getByRole('button', { name: /^MARS 2210/ }));
+    const row = screen.getByRole('button', { name: /^MARS 2210/ });
+    row.focus();
+    fireEvent.click(row);
+    await screen.findByRole('heading', { level: 2, name: 'MARS 2210' });
+    const pane = document.querySelector('.pulse-rollup-content-pane > [role="status"]');
     await waitFor(() => {
-      expect(document.activeElement?.textContent).toBe('MARS 2210');
+      expect(pane?.textContent).toBe('Showing MARS 2210');
     });
-    expect(document.activeElement?.tagName).toBe('H2');
+    expect(document.activeElement).toBe(row);
 
     const crumbs = screen.getByRole('navigation', { name: 'Where you are in the tree' });
     fireEvent.click(within(crumbs).getByRole('button', { name: 'MARS' }));
