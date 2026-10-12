@@ -59,7 +59,6 @@ from fixtures.e9_invariant_pass import (
     answer,
     body_of,
     cohort_letters,
-    column,
     descendants,
     drill_down_url,
     figures_url,
@@ -301,6 +300,49 @@ def test_a_leads_node_figures_and_attention_cards_carry_nothing_of_a_sibling_lea
     )
 
 
+def test_a_leads_figures_read_of_a_sibling_leads_course_answers_exactly_as_a_missing_node(
+    lead_review: LeadReviewWorld,
+) -> None:
+    """Lead A asks the figures route for B's course and for a random id: one status, one body.
+
+    **The present twin:** lead B, asking the same URL, is answered 200 — so the
+    refusal is A's purview and not a URL nothing answers. **The refusal guard:**
+    A's answer is a 4xx, so the equality is not two empty 200s.
+
+    B's course shares A's prefix in this world, so there is no separate prefix
+    node of B's to ask for; a lead is offered no by-lead group (E9-07 done-when
+    3), so there is no group id of B's either. Both are recorded here rather than
+    left unasked.
+
+    **The mutation it kills:** the figures route answering any course id without
+    the purview check (E9-12 battery row 1, the lead clamp dropped, reaches it
+    this way too); a 403 or another sentence for a node that exists outside the
+    purview, which tells the reader the id is real. **The near miss it spares:**
+    whatever 404 and sentence the route picks for both.
+    """
+    review = lead_review
+    assert review.lead is not None and review.sibling_lead is not None
+    term = term_of(review)
+    url = figures_url("course", review.sibling_course, term)
+
+    theirs = answer(get(review, review.sibling_lead, url))
+    outside = answer(get(review, review.lead, url))
+    missing = answer(get(review, review.lead, figures_url("course", uuid4(), term)))
+
+    assert theirs[0] == 200, (
+        f"The present twin failed: lead B asking for her own course's figures answered {theirs[0]} "
+        f"{str(theirs[1])[:300]!r}."
+    )
+    assert 400 <= outside[0] < 500, (
+        f"Lead A asking for B's course's figures answered {outside[0]} {str(outside[1])[:300]!r}; "
+        "a course outside the purview is refused (SPEC §4.1 item 2)."
+    )
+    assert outside == missing, (
+        f"B's course answered A with {outside}; a course that does not exist answered {missing}. "
+        "E9-07 done-when 11: the two are answered exactly alike."
+    )
+
+
 def test_a_leads_named_set_series_carries_nothing_of_a_sibling_leads_course(
     lead_review: LeadReviewWorld,
 ) -> None:
@@ -405,7 +447,7 @@ def a_plan_with_the_sibling_gadget() -> Any:
 def test_on_a_generated_world_a_lead_is_shown_nothing_of_a_sibling_leads_course(
     lead_review: LeadReviewWorld, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The generated world: A's tree, figures, cards, series and drill-down hold no sibling course.
+    """The generated world: A's tree, figures, cards and drill-down hold no sibling course.
 
     The plan's lead A holds one `LEAD_FACULTY` assignment and is mapped to her own
     course; every course mapped to anybody else is a sibling's; an instructor on
@@ -473,11 +515,12 @@ def test_on_a_generated_world_a_lead_is_shown_nothing_of_a_sibling_leads_course(
                 get(review, lead_a, url), f"Generated lead A's figures for {node['kind']}"
             )
 
-    lengths = column(session, "SELECT length_weeks FROM section WHERE id = :s", s=own_sections[0])
-    all_courses = list(ids["course"])
-    length = int(lengths[0]) if lengths and lengths[0] is not None else SIX_WEEKS
-    named = a_named_set(review, *all_courses, length=length, level_of=own_course_keys[0])
-    answers["series"] = body_of(get(review, lead_a, series_url(named, term)), "A's series")
+    # No named-set series here: a series carries no ids or names, and this world
+    # has no figure planted that would make a sibling's section visible in one,
+    # so an absence check over it would have no present twin and prove nothing
+    # (E9-12 privacy review, T3). The lead-review world's eight- and six-week
+    # pair (`test_a_leads_named_set_series_carries_nothing_of_a_sibling_leads_
+    # course`) is the series check.
 
     some_sibling = next(iter(sibling_ids.values()))[0]
     outside = answer(get(review, lead_a, drill_down_url(some_sibling, 1)))

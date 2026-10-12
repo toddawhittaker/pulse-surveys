@@ -41,6 +41,7 @@ from typing import Any
 
 import pytest
 from fixtures.e9_invariant_pass import (
+    BY_LEAD_KINDS,
     FIGURE_KINDS,
     a_named_set,
     body_of,
@@ -125,9 +126,10 @@ def test_no_rollup_tree_figures_card_or_series_response_carries_a_comment(
 
     **The mutation it kills:** a `summary`, `themes`, `comments` or
     `comment_count` member put on the roll-up schema (even left null — the key
-    alone is caught); comments pooled at a course or prefix node; a card that
-    quotes a comment. **The near miss it spares:** section counts, rates, means
-    and labels.
+    alone is caught); comments pooled at a course or prefix node, or at a by-lead
+    group (whose figures are read for the chair and the dean too, and at least
+    one is required to have been read); a card that quotes a comment. **The near
+    miss it spares:** section counts, rates, means and labels.
     """
     review = lead_review
     assert review.lead is not None and review.chair is not None
@@ -141,7 +143,7 @@ def test_no_rollup_tree_figures_card_or_series_response_carries_a_comment(
         tree = body_of(review.ask("GET", tree_url(term), token=reader.token), f"{reader.label}")
         answers[f"{reader.label}'s tree"] = tree
         for node in tree_nodes(tree):
-            if node.get("kind") in FIGURE_KINDS:
+            if node.get("kind") in (*FIGURE_KINDS, *BY_LEAD_KINDS):
                 url = figures_url(node["kind"], node["id"], term)
                 answers[f"{reader.label}'s {node['kind']} {node.get('name')}"] = body_of(
                     review.ask("GET", url, token=reader.token), f"{reader.label}'s figures"
@@ -159,6 +161,11 @@ def test_no_rollup_tree_figures_card_or_series_response_carries_a_comment(
     assert any(
         "attention" in str(body) for body in answers.values()
     ), "No figures answer was read, so the cards were never looked at."
+    by_lead = [where for where in answers if any(f"'s {kind} " in where for kind in BY_LEAD_KINDS)]
+    assert by_lead, (
+        f"No by-lead group's figures were read; the reads were {sorted(answers)}. The chair and "
+        "the dean are offered by-lead mode (E9-07), and its groups are roll-up responses too."
+    )
     texts = {where: found_in(body, every_planted_comment()) for where, body in answers.items()}
     texts = {where: found for where, found in texts.items() if found}
     keys = {where: comment_shaped_keys(body) for where, body in answers.items()}

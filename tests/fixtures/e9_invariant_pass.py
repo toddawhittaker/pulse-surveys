@@ -47,6 +47,10 @@ TREE_PATH = "/leadership/rollup"
 # section. A section has no figures route of its own in E9-07's pull request.
 FIGURE_KINDS = ("college", "department", "prefix", "course")
 
+# The by-lead groups a chair's tree offers (E9-07: `by_lead` holds `lead` and
+# `no_lead` groups), which the figures route also answers for chair and above.
+BY_LEAD_KINDS = ("lead", "no_lead")
+
 # The owed card's rule token (E9-07's attention test spells it).
 OWED_RULE = "response_owed"
 
