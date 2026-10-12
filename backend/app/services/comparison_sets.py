@@ -89,7 +89,7 @@ from app.copy.leadership_sets import (
     MEMBER_NOT_AT_THE_SETS_LEVEL,
     NAME_ALREADY_USED,
 )
-from app.models.benchmark import ComparisonSet, ComparisonSetMember
+from app.models.benchmark import NORMALIZED_NAME_INDEX, ComparisonSet, ComparisonSetMember
 from app.models.org import Course, CourseLevel, Prefix, Section
 from app.models.survey import REPORT_STREAMS
 from app.models.term import Term
@@ -222,6 +222,9 @@ REFUSAL_BY_CONSTRAINT = {
         LENGTH_NOT_A_CALENDAR_LENGTH,
     ),
     _unique_over(_SET_TABLE, ("name",)): (NAME_CONFLICT_STATUS, NAME_ALREADY_USED),
+    # E9-05: the same name but for capitals or spacing. Both uniques answer one
+    # sentence, so it does not matter which of the two Postgres checks first.
+    NORMALIZED_NAME_INDEX: (NAME_CONFLICT_STATUS, NAME_ALREADY_USED),
     _check_ending(_MEMBER_TABLE, "the_levels_agree"): (
         REFUSED_VALUE_STATUS,
         MEMBER_NOT_AT_THE_SETS_LEVEL,
