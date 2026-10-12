@@ -29,7 +29,7 @@ so `threat-model` ran.
 | `a11y-copy` | 464f9773 | 3 MED, 2 LOW, and a note |
 | `lti-oidc` | 464f9773 | 2 LOW |
 | `threat-model` | 464f9773 | 1 MED, 1 LOW |
-| `epic-exit` | | Runs on this ticket's head; its verdict goes under "CI on the exit commit" |
+| `epic-exit` | a46471c9 | Exit clause met on both halves (below); two LOW: the ticket table's rows had an extra cell (fixed in 6332d9f9), and done-when 4's "green twice on one stack" is argued, not run |
 
 ## The findings, and where each went
 
@@ -146,7 +146,7 @@ a mock-world copy with no edges. `scripts/seed.py` now links the provider's
 
 Every page each drive reaches is scanned with axe. No instant is a literal: the
 clock is the demo term's last day, or an hour after a window's report opens,
-both read from rows. CI run 38300480435 on 9531ff04 passed both drives.
+both read from rows. CI run 38315396736 on a46471c9, the exit head carrying every boundary fix, passed all three exit drives (the earlier run 38300480435 on 9531ff04 predates E9-14, E9-15 and E9-16). The exact purview the drive's root names rely on is proved by `tests/integration/test_the_worked_example_resolves_on_the_seeded_graph.py`.
 
 **Green twice on one stack, shown by structure.** No stack built from this
 branch was available locally. The assistant-dean drive adds no row (the
@@ -232,4 +232,11 @@ tests the pass collects on this branch.
 
 ## CI on the exit commit
 
-To be filled with `epic-exit`'s verdict and the CI run on the final head.
+`epic-exit` ran on a46471c9 against main 40d3e24b and found the exit clause met on both halves:
+
+- **The worked example from either door.** `test_the_worked_example_resolves_on_the_seeded_graph.py` proves the assistant dean's exact purview (PSYC 110 plus the whole Mathematics and Biology subtrees; Psychology and PSYC 545 absent) through `pulse_app`; `test_the_worked_example_from_both_doors_on_the_seeded_institution.py` proves one person behind both doors and the roll-up's roots (Biology, Mathematics, PSYC; PSYC holding only PSYC 110); `tests/e2e/exit-assistant-dean.spec.ts` drives both doors in the browser, asserts the two roll-up answers equal and one person behind both sessions, and runs the switch and logout inside the launch frame with every replaced or signed-out token then refused.
+- **Generated-graph properties.** `test_the_purview_walk_holds_over_generated_forests.py` (sibling isolation, every parent covering its child, every purview equal to an independently computed union, Care and Admin changing no scope, over generators that draw instructor edges into a lead, assistant-dean insertions and two-hat people), with E9-05's named-set properties and the multi-level chain test. All are `invariant`.
+
+The reviewer ran those six modules locally: 22 passed, none skipped.
+
+CI on the exit head: run 38315396736 on a46471c9. Its "Test · Playwright e2e" job passed 132 tests, among them `exit-university-line-withheld.spec.ts:200`, `exit-assistant-dean.spec.ts:213` and `exit-assistant-dean.spec.ts:253`. The epic pull request's own CI is the run on the final merge.
