@@ -150,6 +150,7 @@ __all__ = [
     "chaired_courses_with_a_lead",
     "lead_review_courses",
     "leadership_grant_covers",
+    "leadership_section_ids",
     "own_grant",
     "raw_comments_permitted",
     "resolve_landing",
@@ -1336,6 +1337,27 @@ def teaching_instructors_of(session: Session, *, section_id: UUID) -> set[UUID]:
             {"role": LMS_OWNED_ASSIGNMENT_ROLE.value, "section_id": section_id},
         ).scalars()
     )
+
+
+def leadership_section_ids(session: Session, *, person_id: UUID) -> frozenset[UUID]:
+    """Every section in this person's leadership purview, or nothing if she holds no such hat. (E9-05)
+
+    The section level of the purview `resolve_scope` answers for the same person,
+    computed by the same two steps (`_leadership_grants`, then `_union_of`), so
+    the two cannot disagree. `app.services.benchmarks` asks it to seal a
+    section's figures against an instructor who also holds a leadership
+    assignment: she can read every section in that purview, so she can subtract
+    those sections too (SPEC §5.1).
+
+    **Here rather than in the benchmark service** because E9-01's sweep keeps
+    `resolve_scope` to this module and to `app.api.deps.leadership_scope`, and
+    `public.assignment_scope` is read only through this module.
+
+    **Not an authorization decision.** It opens nothing; it only tells the seal
+    what one person already knows. A person with no leadership assignment answers
+    the empty set, so her seal is exactly what it was before E9.
+    """
+    return _union_of(_leadership_grants(session, person_id)).section_ids
 
 
 def teaching_instructor_grants(session: Session, *, section_id: UUID) -> dict[UUID, UUID]:

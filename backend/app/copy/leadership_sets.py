@@ -115,12 +115,17 @@ _NOT_THE_SETS_DEFINER = CopyEntry(
     ),
 )
 
-# The 409 the unique on `comparison_set.name` produces. A name is what a set is
-# picked by on every later surface, so two cohorts sharing one cannot be told
-# apart by the person choosing between them.
+# The 409 the unique on `comparison_set.name` produces, and since E9-05 the
+# unique index on the normalized name too (trimmed, inner spaces collapsed,
+# case-folded). A name is what a set is picked by on every later surface, so two
+# cohorts sharing one, or sharing it but for capitals and spacing, cannot be
+# told apart by the person choosing between them.
 _NAME_ALREADY_USED = CopyEntry(
     key="leadership_comparison_sets.name_already_used",
-    text="Another comparison set already uses this name, and a set is named once.",
+    text=(
+        "Another comparison set already uses this name, or the same name with different "
+        "capitals or spacing, and a set is named once."
+    ),
 )
 
 # The 422 the `length_weeks_is_at_least_one` check produces — a length of zero

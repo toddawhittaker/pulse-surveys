@@ -45,6 +45,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     Text,
     UniqueConstraint,
@@ -69,6 +70,14 @@ LENGTH_IS_AT_LEAST_ONE_WEEK = "length_weeks >= 1"
 # schema strips the spaces before the write; this is the rule underneath it.
 NAME_IS_NOT_BLANK = "btrim(name) <> ''"
 
+# A name with its spaces trimmed, every inner run of whitespace collapsed to one
+# space, and its case folded (E9-05). Two sets whose names differ only in
+# capitals or spacing are one cohort to the person choosing between them, so a
+# unique index over this expression refuses the second. Postgres' own `lower`
+# and `regexp_replace`, so the rule is the database's and no writer can skip it.
+NORMALIZED_NAME = r"lower(btrim(regexp_replace(name, '\s+', ' ', 'g')))"
+NORMALIZED_NAME_INDEX = "uq_comparison_set_normalized_name"
+
 
 class ComparisonSet(UuidPrimaryKey, Base):
     """A named cohort: one declared length, one declared level, and a list of courses.
@@ -76,6 +85,8 @@ class ComparisonSet(UuidPrimaryKey, Base):
     **The name is unique across the table** rather than per anything. A
     deployment serves exactly one institution (SPEC §8), and two sets sharing a
     name are two cohorts nobody can tell apart in E5-06's list or E5-09's form.
+    **So is its normalized form** (E9-05, `NORMALIZED_NAME`): "Nursing core" and
+    "nursing  core" are the same name to a reader, and the second is refused.
 
     **`(id, level)` is unique too**, which reads redundantly and is not: it is
     what `comparison_set_member`'s composite key references, and a composite
@@ -104,6 +115,7 @@ class ComparisonSet(UuidPrimaryKey, Base):
         UniqueConstraint("id", "level"),
         CheckConstraint(LENGTH_IS_AT_LEAST_ONE_WEEK, name="length_weeks_is_at_least_one"),
         CheckConstraint(NAME_IS_NOT_BLANK, name="name_is_not_blank"),
+        Index(NORMALIZED_NAME_INDEX, text(NORMALIZED_NAME), unique=True),
     )
 
     # What leadership calls the cohort — "College of Nursing, 6-week

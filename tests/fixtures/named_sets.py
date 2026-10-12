@@ -193,6 +193,16 @@ def preview_path(set_id: Any) -> str:
     return f"{set_path(set_id)}/preview"
 
 
+def series_path(set_id: Any) -> str:
+    """`/leadership/comparison-sets/{set_id}/series` — E9-05's `SET_SERIES_PATH`.
+
+    E9-05's interface settles it as `f"{SET_PATH}/series"`, read with a required
+    `term_id` query parameter; the set's figures for the viewed term over the
+    reader's purview.
+    """
+    return f"{set_path(set_id)}/series"
+
+
 # The wire members, member by member, from the contract block.
 SETS_MEMBER = "sets"
 ID_FIELD = "id"
@@ -271,7 +281,8 @@ ROUTER_IS_OWED = (
     f"seven routes — `GET {SETS_PATH}`, `POST {SETS_PATH}`, `GET {OPTIONS_PATH}`, `GET "
     f"{SETS_PATH}/{{set_id}}`, `PUT {SETS_PATH}/{{set_id}}`, `DELETE {SETS_PATH}/{{set_id}}` and "
     f"`GET {SETS_PATH}/{{set_id}}/preview`. Reads carry `{REQUIRE_LEADERSHIP}` and writes carry "
-    f"`{CSRF_VERIFIED_LEADERSHIP}`; a router nothing registers serves nothing."
+    f"`{CSRF_VERIFIED_LEADERSHIP}`; a router nothing registers serves nothing. E9-05 adds an "
+    f"eighth, `GET {SETS_PATH}/{{set_id}}/series?term_id=…`, resolved through `leadership_scope`."
 )
 
 DEPENDENCIES_ARE_OWED = (
@@ -653,6 +664,16 @@ class NamedSetDoor:
     def preview(self, set_id: Any, *, token: Any = NOT_GIVEN) -> Any:
         return self._ask("GET", preview_path(set_id), token=self._token(token))
 
+    def series(self, set_id: Any, *, term_id: Any = NOT_GIVEN, token: Any = NOT_GIVEN) -> Any:
+        """E9-05's eighth route: one set's series for a term, over the session's purview.
+
+        `term_id` defaults to the term this world's sections are in, so an
+        admitted call names a real term and a refused one is refused for its
+        session rather than for a term that is not there.
+        """
+        term = self.world.term_id() if term_id is NOT_GIVEN else term_id
+        return self._ask("GET", f"{series_path(set_id)}?term_id={term}", token=self._token(token))
+
     def _token(self, given: Any) -> Any:
         """The caller's token, or this door's leadership one when none was named."""
         return self.door.token if given is NOT_GIVEN else given
@@ -787,6 +808,11 @@ class NamedSetWorld:
 
     def course_id(self, which: str) -> Any:
         return self.courses[which][self.world.key_of(COURSE_TABLE)]
+
+    def term_id(self) -> Any:
+        """The key of the term this world's sections are in (E9-05's series route reads it)."""
+        term = self.world.calendar.term
+        return term[single_primary_key(require_table(self.tables, TERM_TABLE))]
 
     def refresh(self) -> None:
         """End this session's transaction, so a read after an HTTP call sees the database."""

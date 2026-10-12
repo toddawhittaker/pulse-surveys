@@ -203,6 +203,12 @@ boundary: `metadata_tables` is asked for by both.
     students, former teacher, two-hat person and response a test plants for
     itself.
 
+  - `fixtures/named_set_figures.py` — E9-05: E5-03's benchmark world given named
+    departments, courses with several sections, and the people and assignments
+    E9-01's purview is resolved from (`purview_world`, unbuilt); the reads E9-05's
+    interface settles — `named_set_series` and `section_benchmarks` with the
+    reader's scope — reached inside a test body; and the readers for one week of
+    a series, a figure's state, and any answer as plain data for equality.
   - `fixtures/people_graph.py` — E9-02: the twelve people-graph definers called
     as `pulse_app` under their settled names and signatures, a world of one admin
     and three non-admins seeded committed, the rows read back on a second
@@ -313,6 +319,7 @@ pytest_plugins = (
     "fixtures.the_hold",
     "fixtures.response_draft",
     "fixtures.response_loop_doors",
+    "fixtures.named_set_figures",
     "fixtures.session_switch",
     "fixtures.people_graph",
 )

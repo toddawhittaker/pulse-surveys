@@ -1051,6 +1051,60 @@
         }
       }
     },
+    "/leadership/comparison-sets/{set_id}/series": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "A comparison set's figures over my purview, one term",
+        "description": "One set's figures for the session's own reader, in the term asked for (E9-05).\n\n**The reader's scope comes from `leadership_scope` and from nothing in the\nrequest** (ADR 0199): a query string carrying another person's id is not\nread, so it is answered with the session's own scope. The figures are\ncomputed over the set's sections inside that purview, per start cohort, and\na set wholly outside it answers exactly what a thin set inside it does.\n\nTwo refusals past the gate, in order: a set id nothing defined is the 404\nevery keyed route here answers, and a term id no term carries is a 404 of its\nown. A `term_id` that is absent or not a uuid is FastAPI's own 422.",
+        "operationId": "read_set_series_leadership_comparison_sets__set_id__series_get",
+        "parameters": [
+          {
+            "name": "set_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Set Id"
+            }
+          },
+          {
+            "name": "term_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Term Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NamedSetSeries"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/leadership/comparison-sets/{set_id}/preview": {
       "get": {
         "tags": [
@@ -2131,6 +2185,81 @@
         ],
         "title": "LogRow",
         "description": "One decision a person made about a comment inside the reader's own grant."
+      },
+      "NamedSetCohort": {
+        "properties": {
+          "section_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Section Start Date"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/NamedSetWeek"
+            },
+            "type": "array",
+            "title": "Weeks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "section_start_date",
+          "weeks"
+        ],
+        "title": "NamedSetCohort",
+        "description": "One start cohort of the reader's purview in the viewed term, and its published weeks."
+      },
+      "NamedSetSeries": {
+        "properties": {
+          "cohorts": {
+            "items": {
+              "$ref": "#/components/schemas/NamedSetCohort"
+            },
+            "type": "array",
+            "title": "Cohorts"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cohorts"
+        ],
+        "title": "NamedSetSeries",
+        "description": "A named set's figures for one leadership reader in one term, one series per start cohort.\n\nA set wholly outside the reader's purview answers exactly the shape a thin set\ninside it does: the purview's cohorts, every figure suppressed (E9-05)."
+      },
+      "NamedSetWeek": {
+        "properties": {
+          "course_week": {
+            "type": "integer",
+            "title": "Course Week"
+          },
+          "term_week": {
+            "type": "integer",
+            "title": "Term Week"
+          },
+          "instructor_mean": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "course_mean": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "workload_mean": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          },
+          "workload_median": {
+            "$ref": "#/components/schemas/ComparisonFigure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "course_week",
+          "term_week",
+          "instructor_mean",
+          "course_mean",
+          "workload_mean",
+          "workload_median"
+        ],
+        "title": "NamedSetWeek",
+        "description": "One course week of one start cohort, on both of SPEC \u00a72.2's week axes, every figure sealed.\n\nThe two rating means and the workload mean and median, each suppressed or\nshown on its own decision (\u00a74.1 item 7 covers \"a mean, a median, or any\nother statistic\"). One validator per member, so removing one seal is one\ntest going red."
       },
       "OnBehalfStream": {
         "properties": {

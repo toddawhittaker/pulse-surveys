@@ -12,7 +12,9 @@ sealed against a count of something other than what the figure is about.**
     (ADR 0165's decision keeps the row when nobody reports any), and they were
     sealed with counts of every responder. Hours from two students could be shown
     as a figure over fifteen.
-  - The term axis carried the same divergence a third time.
+  - The term axis carried the same divergence a third time. (Its door,
+    `named_set_term_axis`, was deleted by E9-05, and its test with it; see the
+    note where that test stood.)
 
 **The rule these tests bind to, and it is about behaviour rather than columns.**
 Every figure is sealed with the counts of its own **contributors**: the distinct
@@ -55,22 +57,16 @@ from fixtures.benchmark_views import (
     COURSE_STREAM,
     DEFAULT_SET_POPULATION,
     INSTRUCTOR_STREAM,
-    NAMED_SET_TERM_AXIS,
     UG,
     BenchmarkWorld,
     a_population,
     benchmarks_api,
     carries,
     cutoffs_after_every_window,
-    figures_in,
     mean_and_median,
     points_by_week,
-    reporting_symbol,
     serialized_figure,
     spread,
-)
-from fixtures.benchmark_views import (
-    COMPARISON_FIGURE_TYPE as FIGURE_TYPE_NAME,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.invariant]
@@ -79,7 +75,6 @@ HERO = "hero"
 THE_LEAD = "the-lead"
 COHORT = "U"
 LEVEL = UG
-TWELVE_WEEKS = 12
 THE_COURSE_WEEK = 2
 
 # The two ratings, one per stream. Different values, so a suppressed point cannot
@@ -509,95 +504,14 @@ def test_a_workload_comparison_at_the_hours_minimum_is_shown(
     )
 
 
-def test_a_term_axis_figure_suppresses_when_too_few_students_reported_hours_for_it(
-    benchmark_world: BenchmarkWorld, report_api_contract: Any, pinned_benchmark_clock: Any
-) -> None:
-    """The same divergence on the second axis, through the door E5-06 and E9 read.
-
-    The term axis carries the review's third instance, and it is the one no
-    screen draws yet — which is why it is worth a test of its own rather than a
-    line in someone's fix: a figure that leaves this module unsealed leaves it
-    towards a surface nobody has written.
-
-    **Two start cohorts in one named set**, so the control is a figure in the
-    same answer rather than in another world. The first cohort's hours come from
-    one person fewer than the minimum; the second's come from exactly the
-    minimum, across exactly the section minimum's worth of sections. Each cohort
-    carries its own hours value, so which figure is which is legible without this
-    test knowing the row's shape — the shape is the implementer's, and a reader
-    keyed on a member name would assert nothing the day it changed.
-
-    **The mutation it kills:** the term-axis rows sealed with the cohort's
-    overall counts, which is the third face of one defect. **The near miss:** a
-    fix applied to the two set functions and not to the term-axis read, which
-    leaves this test red alone and is exactly the shape of "fixed where the
-    review pointed".
-    """
-    minimums = report_api_contract.minimums()
-    sections = minimums[report_api_contract.minimum_sections]
-    respondents = minimums[report_api_contract.minimum_respondents]
-
-    thin_labels = set_labels(sections, prefix="thin")
-    full_labels = set_labels(sections, prefix="full")
-
-    world = benchmark_world.build()
-    for label in thin_labels:
-        world.plant_section(label, cohort=COHORT, level=LEVEL)
-    for label in full_labels:
-        # A second start cohort of the same length and level: a different start
-        # date, so it is a different row on the term axis and the same population
-        # on the course-week one.
-        world.plant_section(label, cohort="R", level=LEVEL)
-    world.comparison_set(
-        "named",
-        length_weeks=TWELVE_WEEKS,
-        level=LEVEL,
-        courses_of=thin_labels + full_labels,
-    )
-
-    world.answer_the_plan(
-        dict(spread(thin_labels, respondents=respondents - ONE, subject_prefix="e5-04-axis-thin")),
-        course_week=THE_COURSE_WEEK,
-        workload=HOURS,
-        instructor_rating=INSTRUCTOR_RATING,
-    )
-    world.answer_the_plan(
-        dict(spread(thin_labels[:1], respondents=ONE, subject_prefix="e5-04-axis-thin-last")),
-        course_week=THE_COURSE_WEEK,
-        instructor_rating=INSTRUCTOR_RATING,
-    )
-    world.answer_the_plan(
-        dict(spread(full_labels, respondents=respondents, subject_prefix="e5-04-axis-full")),
-        course_week=THE_COURSE_WEEK,
-        workload=LOW_HOURS,
-        instructor_rating=INSTRUCTOR_RATING,
-    )
-    world.session.flush()
-
-    api = benchmarks_api()
-    figure_type = reporting_symbol(FIGURE_TYPE_NAME)
-    answered = api[NAMED_SET_TERM_AXIS](world.session, set_id=world.comparison_set_id("named"))
-    figures = figures_in(answered, figure_type)
-
-    assert figures, (
-        f"The term axis answered {answered!r}, which holds no figure at all. Both start cohorts "
-        "were answered at course week 2, so there is something to answer and the suppression "
-        "asserted below would otherwise be a statement about an empty result."
-    )
-    assert any(carries(figure, LOW_HOURS) for figure in figures), (
-        f"The control failed before the assertion it protects: no figure in the term axis carries "
-        f"{LOW_HOURS}, which exactly {respondents} people reported across exactly {sections} "
-        f"sections of the second start cohort — both counts at their configured minimums. What it "
-        f"answered: {answered!r}."
-    )
-    assert not any(carries(figure, HOURS) for figure in figures), (
-        f"A term-axis figure carries {HOURS}: {answered!r}. In that start cohort "
-        f"{respondents - ONE} people reported hours — one below the configured minimum — while a "
-        f"{respondents}th answered the ratings and left the hours blank, so the cohort's overall "
-        "respondent count reaches the minimum and the hours' own does not. The axis is a second "
-        "read of the same figures and takes the same rule: a figure is sealed against the people "
-        "it was computed from."
-    )
+# E5-14's term-axis case stood here: a term-axis figure sealed against the hours'
+# own contributors, read through `named_set_term_axis`. E9-05 deleted that door
+# (it answered a set's declared length and level institution-wide and could not
+# be narrowed to a reader), so the case went with it. The same rule on the term
+# axis now holds through `named_set_series`, whose figures come from the two set
+# functions this module's other tests already drive, and whose per-cohort weeks
+# `tests/integration/test_a_named_set_figure_meets_both_minimums_inside_the_purview.py`
+# holds to both minimums.
 
 
 def test_every_figure_shows_when_each_one_s_own_contributors_clear_both_minimums(
@@ -609,9 +523,9 @@ def test_every_figure_shows_when_each_one_s_own_contributors_clear_both_minimums
     stands at exactly both minimums. All four figures — the two streams' points,
     the workload mean and the workload median — are shown.
 
-    **This is the whole of the guard against the bad fix.** Six tests in this
+    **This is the whole of the guard against the bad fix.** Four tests in this
     module say "suppress", and a service that suppressed everything would pass
-    all six. This one says what must still be visible, and it is the test to read
+    all four. This one says what must still be visible, and it is the test to read
     first if the fix round turns the report into a page of notices.
 
     **Mean and median are different numbers here**, which the mutation battery

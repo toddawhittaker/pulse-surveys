@@ -6,10 +6,12 @@ keeps it thin: a handler here resolves the session, hands the work to
 Every decision — who may change which set, what a set may be, how wide one is —
 is in that service, and the payload's shape is `app.schemas.comparison_sets`.
 
-**Seven named-set routes.** The institution's sets, one set, the choices a
+**Eight named-set routes.** The institution's sets, one set, the choices a
 set is defined out of, and the three writes; plus the preview, which is how a
 definer sees what a set reaches before anything renders a figure over it. E5-09
-consumes all seven.
+consumes those seven. The eighth (E9-05) is a set's figures for one leader:
+the only one scoped to the reader's purview, through `leadership_scope`, and the
+only one serving a figure (E9-11 draws it).
 
 **Three moderation review routes** (E6-05), after the sets: the
 reader's review queue, a decision on one queued comment, and the exclusion log.
@@ -97,7 +99,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.ai.gateway import AIGatewayError
-from app.api.deps import csrf_verified_leadership, person_of, require_leadership
+from app.api.deps import (
+    csrf_verified_leadership,
+    leadership_scope,
+    person_of,
+    require_leadership,
+)
 from app.api.instructor import assistant_busy, assistant_unusable
 from app.config import Settings
 from app.copy.leadership_moderation import (
@@ -106,10 +113,12 @@ from app.copy.leadership_moderation import (
     REASON_BLANK,
     REASON_TOO_LONG,
 )
+from app.copy.leadership_rollup import TERM_UNAVAILABLE
 from app.copy.leadership_sets import NOT_THE_SETS_DEFINER, SET_UNAVAILABLE
 from app.copy.response_loop import NO_POLICY_TO_SET, ON_BEHALF_UNAVAILABLE
 from app.db import get_session
 from app.schemas.comparison_sets import (
+    NamedSetSeries,
     SetDetail,
     SetList,
     SetOptions,
@@ -126,15 +135,18 @@ from app.schemas.response_loop import (
     ResponseWrite,
     WeekResponseView,
 )
+from app.services.authz import ActorScope
 from app.services.comparison_sets import (
     NotTheSetsDefinerError,
     SetUnavailableError,
+    TermUnavailableError,
     WriteRefusedError,
     create_set,
     definition_options,
     delete_set,
     edit_set,
     listed_sets,
+    named_set_figures,
     preview_of,
     read_set,
 )
@@ -183,6 +195,8 @@ OPTIONS_PATH = f"{SETS_PATH}/options"
 # One set, and what it reaches.
 SET_PATH = f"{SETS_PATH}/{{set_id}}"
 PREVIEW_PATH = f"{SET_PATH}/preview"
+# One set's figures for the reader, in the term named by the `term_id` query.
+SET_SERIES_PATH = f"{SET_PATH}/series"
 
 # The statuses the three keyed refusals answer with. 404 for an id nothing
 # defined and 403 for another leader's set: the two are different facts and a
@@ -190,6 +204,8 @@ PREVIEW_PATH = f"{SET_PATH}/preview"
 # the list does not already show.
 SET_UNAVAILABLE_STATUS = 404
 NOT_THE_SETS_DEFINER_STATUS = 403
+# A term id no term carries, on the series route. Terms are no secret.
+TERM_UNAVAILABLE_STATUS = 404
 
 CREATED = 201
 NO_CONTENT = 204
@@ -332,6 +348,41 @@ def remove_set(
         raise _unavailable() from None
     except NotTheSetsDefinerError:
         raise _not_the_definer() from None
+
+
+@router.get(SET_SERIES_PATH, summary="A comparison set's figures over my purview, one term")
+def read_set_series(
+    set_id: UUID,
+    term_id: UUID,
+    request: Request,
+    response: Response,
+    scope: ActorScope = Depends(leadership_scope),
+    session: Session = Depends(get_session),
+) -> NamedSetSeries:
+    """One set's figures for the session's own reader, in the term asked for (E9-05).
+
+    **The reader's scope comes from `leadership_scope` and from nothing in the
+    request** (ADR 0199): a query string carrying another person's id is not
+    read, so it is answered with the session's own scope. The figures are
+    computed over the set's sections inside that purview, per start cohort, and
+    a set wholly outside it answers exactly what a thin set inside it does.
+
+    Two refusals past the gate, in order: a set id nothing defined is the 404
+    every keyed route here answers, and a term id no term carries is a 404 of its
+    own. A `term_id` that is absent or not a uuid is FastAPI's own 422.
+    """
+    settings: Settings = request.app.state.settings
+    response.headers["Cache-Control"] = NO_STORE
+    try:
+        return named_set_figures(
+            session, set_id=set_id, scope=scope, term_id=term_id, settings=settings
+        )
+    except SetUnavailableError:
+        raise _unavailable() from None
+    except TermUnavailableError:
+        raise HTTPException(
+            status_code=TERM_UNAVAILABLE_STATUS, detail=TERM_UNAVAILABLE.text
+        ) from None
 
 
 @router.get(PREVIEW_PATH, summary="How many courses and sections a set reaches")
