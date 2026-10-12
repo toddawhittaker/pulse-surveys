@@ -42,9 +42,9 @@ the same shape, so their counts are comparable.
 course week 2, cut off after every window (`tests/fixtures/named_set_figures.py`
 says why).
 
-**Which failure a red is, before E9-05 lands:** every read that names a reader
-FAILS naming the missing `scope` parameter of `section_benchmarks`; the
-instructor-only controls run and pass.
+**Which failure a red is, before E9-05 lands:** every read FAILS naming the
+missing `scope` parameter of `section_benchmarks` — the instructor-only reads
+too, since they pass `scope=None` explicitly (E9-05's fix round, P2).
 """
 
 from decimal import Decimal

@@ -15,9 +15,11 @@ before the index is built, the rows are grouped by the normalized name and
 ordered by `(created_at, id)`: the first row of each group keeps its name, and
 each later one is renamed to its own name followed by ` (n)`, with the smallest
 `n` from 2 up whose normalized form no row holds at that moment. The renames are
-done one at a time in that order, so a rename sees the ones before it. The table
-is locked against writes first, so no row can arrive between the renames and
-the index.
+done one at a time in that order, so a rename sees the ones before it, and each
+renamed row's `updated_at` is stamped, since a rename is an edit. A row that
+keeps its name is not touched. The table is locked against writes first, so no
+row can arrive between the renames and the index; the wait for that lock is
+bounded at ten seconds, after which the upgrade fails and changes nothing.
 
 The renames run in one PL/pgSQL block, so the normalization is Postgres' own
 (the expression the index is built on) and `alembic upgrade --sql` emits a script
@@ -76,7 +78,9 @@ BEGIN
             );
             suffix := suffix + 1;
         END LOOP;
-        UPDATE public.comparison_set SET name = candidate WHERE id = duplicate.id;
+        UPDATE public.comparison_set
+        SET name = candidate, updated_at = now()
+        WHERE id = duplicate.id;
     END LOOP;
 END
 $$
@@ -85,6 +89,9 @@ $$
 
 def upgrade() -> None:
     """Rename near-duplicate set names, then refuse new ones with a unique index."""
+    # Wait at most ten seconds for the lock, then fail, rather than queue every
+    # later reader of the table behind a long transaction.
+    op.execute("SET LOCAL lock_timeout = '10s'")
     op.execute("LOCK TABLE public.comparison_set IN SHARE ROW EXCLUSIVE MODE")
     op.execute(RENAME_NEAR_DUPLICATES)
     op.execute(f"CREATE UNIQUE INDEX {INDEX} ON public.comparison_set ({NORMALIZED.format('name')})")

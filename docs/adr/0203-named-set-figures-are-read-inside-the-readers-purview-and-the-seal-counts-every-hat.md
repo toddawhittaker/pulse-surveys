@@ -76,8 +76,12 @@ names that differ only in case or spacing that already exist.
 
 - The four cohort views have no reader under `backend/app/`; E9-12 drops them.
   E9-05's sweep checks Python only, because the view files still name them.
-- For a reader whose purview is a college, the university seal resolves one
-  default set per alike section in her purview. That cost lands on E9-09's
-  drill-down, which passes the reader.
+- The seal resolves the default set of every one of a reader's sections that
+  matches the reported section's term, length and level in one statement, and
+  asks the set functions once per distinct remainder. So the statements a
+  report read sends do not grow with the number of sections in the reader's
+  purview; they grow only with the number of distinct lead sets among them (two
+  aggregates each), and the one default-set statement answers more rows. E9-09's
+  drill-down, which passes the reader, carries that cost.
 - An instructor with no leadership assignment is sealed exactly as before.
 - A renamed set keeps its new name after a downgrade; the old names are not kept.

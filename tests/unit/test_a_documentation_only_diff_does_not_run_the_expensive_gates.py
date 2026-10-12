@@ -2864,6 +2864,14 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
     "tests/unit/test_only_the_leadership_scope_dependency_calls_resolve_scope.py": (
         "sweeps *.py under backend/app, and a .py change is never inert"
     ),
+    # E9-05's sweep that every `section_benchmarks` call writes `scope=`: the
+    # same device. Its walker takes `root` and is called with `APP_ROOT`
+    # (`backend/app`) and with pytest's `tmp_path` for its planted control, and it
+    # reads `*.py` only. If it is ever taught to read anything else, it belongs in
+    # the unconditional job instead.
+    "tests/unit/test_every_section_benchmarks_caller_names_the_reader.py": (
+        "sweeps *.py under backend/app, and a .py change is never inert"
+    ),
 }
 
 UNCONDITIONAL_SWEEP_JOB = "lint-python"
