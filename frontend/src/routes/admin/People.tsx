@@ -11,8 +11,6 @@ import { Field, PersonPanel, roleLabel } from './PersonPanel';
 import { settle } from './outcome';
 import { Pager, SortHeader, nextOrder, sortedBy } from './tableParts';
 
-/** The address of the People & reporting table, under the admin area. */
-export const PEOPLE_ROUTE = '/admin/people';
 
 /** Where a spec finds the page, and its table. */
 export const PEOPLE_TESTID = 'pulse-admin-people';

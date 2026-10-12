@@ -6,7 +6,8 @@ import { readTaughtSections, type TaughtSectionView } from '../../api/instructor
 import { StateNotice } from '../../components/StateNotice';
 import { copy } from '../../copy/instructorReportPageCopy';
 import './instructorReportPage.css';
-import { INSTRUCTOR_LANDING_TESTID, REPORT_ROUTE } from './InstructorMondayReport';
+import { INSTRUCTOR_LANDING_TESTID } from './InstructorMondayReport';
+import { REPORT_ROUTE } from '../paths';
 
 /**
  * The instructor area's front door — SPEC §13's `routes/instructor/`, E4-11.

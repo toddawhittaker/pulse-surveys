@@ -5,9 +5,8 @@ import { Link } from '@tanstack/react-router';
 import { LandingView } from '../../components/LandingView';
 import { copy } from '../../copy/adminPeople';
 import { LANDINGS } from '../../lib/landings';
-import { MAPPINGS_ROUTE } from './Mappings';
-import { PEOPLE_ROUTE } from './People';
 import './adminPeople.css';
+import { MAPPINGS_ROUTE, PEOPLE_ROUTE } from '../paths';
 
 /**
  * The admin area's landing view — SPEC §13's `routes/admin/`.

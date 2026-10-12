@@ -19,17 +19,13 @@ import '@fontsource/schibsted-grotesk/latin-500.css';
 import '@fontsource/spline-sans-mono/latin-400.css';
 import '@fontsource/spline-sans-mono/latin-500.css';
 
-// **The application's stylesheet is imported before the router, and the order is
-// load-bearing.** It is the file that pulls in `design/tokens.css` and Tailwind,
-// and Tailwind's `@layer` names take their precedence from the order they first
-// appear in the emitted bundle — `theme`, `base`, `components`, `utilities`.
-// Vite emits stylesheets in module-graph order, so importing the router first
-// put the report surface's component stylesheets ahead of this one: the
-// application's own `@layer components` block was then declared *before*
-// Tailwind's `base`, which made preflight win over it, and every heading on the
-// student survey fell back to body size. Measured on the built bundle while
-// E4-11 was wiring the report in, which is the ticket that first imported a
-// component stylesheet from the route graph.
+// **The cascade layer order is decided by `public/layer-order.css`**, which
+// `index.html` links before any other stylesheet and which names every layer
+// once: a layer's precedence is the order it is first named, and the build
+// splits the stylesheet per page, so a lazily loaded page's sheet can be linked
+// ahead of this one. That file is the place to change the order. Importing the
+// application's stylesheet (which pulls in `design/tokens.css` and Tailwind)
+// before the router still keeps the entry chunk's own sheets in a readable order.
 import './styles.css';
 
 import { captureSessionFromFragment } from './lib/session';
@@ -38,15 +34,14 @@ import { router } from './router';
 /**
  * The entry point — SPEC §13's `main.tsx`.
  *
- * **There is still no generated client and no query cache.** E1 had nothing to
- * fetch and left the question to E2's first real screen; E2-10 answered it in
- * ADR 0117, and ADR 0185 superseded that in part: each screen's calls are
+ * **There is no generated client and no query cache.** ADR 0117 settled
+ * this, and ADR 0185 superseded it in part: each screen's calls are
  * written by hand in `api/`, and only their wire types are generated from the
  * backend's OpenAPI document. TanStack Query is not in the closure. What is
  * here is the fetch each screen makes for itself.
  *
  * The one thing that happens before the router mounts is capturing the session
- * an entry door handed over in the URL fragment (E1-08): it is lifted into
+ * an entry door handed over in the URL fragment: it is lifted into
  * `sessionStorage` and stripped from the address bar first, so the token is out
  * of the history entry the router then reads. See `lib/session.ts`.
  */

@@ -15,6 +15,7 @@ import {
 import { StateNotice } from '../../components/StateNotice';
 import { copy, fillCopy } from '../../copy/leadershipComparisonSetCopy';
 import './leadershipComparisonSets.css';
+import { COMPARISON_SETS_ROUTE, COMPARISON_SET_EDIT_ROUTE } from '../paths';
 
 /**
  * The set-definition form, and the address that opens one set in it — E5-09.
@@ -59,9 +60,6 @@ import './leadershipComparisonSets.css';
  * a focus on nothing.
  */
 
-/** The list this form returns to, and the address that opens one set in it. */
-export const COMPARISON_SETS_ROUTE = '/leadership/comparison-sets';
-export const COMPARISON_SET_EDIT_ROUTE = '/leadership/comparison-sets/$setId';
 
 /**
  * The landmark testid both leadership set addresses carry.

@@ -12,9 +12,8 @@ import {
 import { copy, fillCopy } from '../../copy/leadershipRollupCopy';
 import { InstructorMondayReport, type ReportSource } from '../instructor/InstructorMondayReport';
 import '../../components/leadershipRollup.css';
+import { DRILL_DOWN_ROUTE } from '../paths';
 
-/** The drill-down's address: one section, and the course week as a search parameter. */
-export const DRILL_DOWN_ROUTE = '/leadership/sections/$sectionId';
 
 /** Where a spec finds the drill-down, as opposed to the roll-up it was opened from. */
 export const DRILL_DOWN_TESTID = 'pulse-leadership-drill-down';

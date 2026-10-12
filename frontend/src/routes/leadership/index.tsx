@@ -34,13 +34,8 @@ import { copy as responseCopy } from '../../copy/leadershipResponseCopy';
 import { copy, fillCopy } from '../../copy/leadershipRollupCopy';
 import { LANDINGS } from '../../lib/landings';
 import '../../components/leadershipRollup.css';
-import { COMPARISON_SETS_ROUTE } from './ComparisonSetForm';
-import { DRILL_DOWN_ROUTE } from './DrillDown';
-import { EXCLUSION_LOG_ROUTE } from './ExclusionLog';
-import { RESPONSE_POLICY_ROUTE } from './ResponsePolicy';
-import { RESPONSES_OWED_ROUTE } from './ResponsesOwed';
-import { REVIEW_QUEUE_ROUTE } from './ReviewQueue';
 import './leadershipComparisonSets.css';
+import { COMPARISON_SETS_ROUTE, DRILL_DOWN_ROUTE, EXCLUSION_LOG_ROUTE, RESPONSES_OWED_ROUTE, RESPONSE_POLICY_ROUTE, REVIEW_QUEUE_ROUTE } from '../paths';
 
 /**
  * The leadership landing: SPEC §5.5's roll-up, one template for every

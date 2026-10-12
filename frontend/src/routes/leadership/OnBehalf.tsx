@@ -17,10 +17,10 @@ import { RatingHistogram, type RatingDistribution } from '../../components/Ratin
 import { StateNotice } from '../../components/StateNotice';
 import { copy as statCopy } from '../../copy/instructorReportStatCopy';
 import { copy, fillCopy } from '../../copy/leadershipResponseCopy';
-import { ON_BEHALF_ROUTE, RESPONSES_OWED_ROUTE } from './ResponsesOwed';
 import { ResponseRefusal } from './ResponseRefusal';
 import './leadershipComparisonSets.css';
 import './leadershipResponse.css';
+import { ON_BEHALF_ROUTE, RESPONSES_OWED_ROUTE } from '../paths';
 
 /** Where a spec finds the page. */
 export const ON_BEHALF_TESTID = 'pulse-leadership-on-behalf';
