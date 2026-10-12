@@ -101,3 +101,20 @@ describe('ResponseRateBar', () => {
     expect(container.innerHTML).not.toContain('0%');
   });
 });
+
+describe('ResponseRateBar, for an aggregate rate sent without its counts', () => {
+  it('states the percent alone, with no count beside it', () => {
+    const { container } = render(
+      <ResponseRateBar response={{ rate: 0.62 }} validity={{ rate: 0.9 }} />,
+    );
+    expect(screen.getByRole('img', { name: 'Response rate: 62%.' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Validity rate: 90%.' })).toBeTruthy();
+    expect(container.textContent).not.toContain('/');
+    expect(container.textContent).not.toContain(' of ');
+  });
+
+  it('withholds a rate that is not a finite number', () => {
+    render(<ResponseRateBar response={{ rate: Number.NaN }} />);
+    expect(screen.getByRole('img', { name: 'Response rate: no responses yet this week.' })).toBeTruthy();
+  });
+});

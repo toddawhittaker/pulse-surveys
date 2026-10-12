@@ -840,6 +840,29 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/context": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * My leadership roles, the terms, and the current term
+         * @description What the roll-up pages read first: which term to open, and the reader's own roles.
+         *
+         *     The roles are the session's own (ADR 0199); the terms are every term, which
+         *     is no secret.
+         */
+        readonly get: operations["read_leadership_context_leadership_context_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/leadership/rollup": {
         readonly parameters: {
             readonly query?: never;
@@ -1126,6 +1149,29 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/sections/{section_id}/published-weeks": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The course weeks of a section in my purview with a report
+         * @description The published course weeks of one section, for the drill-down to open its latest.
+         *
+         *     Behind the same purview as the drill-down itself, with the same 404 and
+         *     sentence for a section outside it and a section that does not exist.
+         */
+        readonly get: operations["read_drill_down_weeks_leadership_sections__section_id__published_weeks_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/admin/people": {
         readonly parameters: {
             readonly query?: never;
@@ -1404,6 +1450,26 @@ export interface paths {
         readonly put?: never;
         /** Apply a mapping file its dry run approved */
         readonly post: operations["apply_mappings_admin_lead_mappings_import_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/org-nodes": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The organization nodes a role may be granted at
+         * @description Only nodes at the level `role` is granted at, sorted by name.
+         */
+        readonly get: operations["read_org_nodes_admin_org_nodes_get"];
+        readonly put?: never;
+        readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1927,6 +1993,23 @@ export interface components {
             readonly reason?: string | null;
         };
         /**
+         * LeadershipContext
+         * @description What the leadership pages need before their first read (SPEC §5.5).
+         *
+         *     `roles` is every leadership role the reader holds, highest first, so a
+         *     read-only context bar can name the reader's role. `terms` is every term,
+         *     oldest first; `current_term_id` is the term whose dates contain the
+         *     institution's today, absent between terms. Terms are no secret.
+         */
+        readonly LeadershipContext: {
+            /** Roles */
+            readonly roles: readonly ("VP_ACADEMICS" | "DEAN" | "ASSISTANT_DEAN" | "CHAIR" | "LEAD_FACULTY")[];
+            /** Terms */
+            readonly terms: readonly components["schemas"]["RollupTerm"][];
+            /** Current Term Id */
+            readonly current_term_id: string | null;
+        };
+        /**
          * LogRow
          * @description One decision a person made about a comment inside the reader's own grant.
          */
@@ -2181,6 +2264,26 @@ export interface components {
             readonly questions: readonly components["schemas"]["SurveyQuestion"][];
             /** @description What this reader has already submitted for this week, or null. */
             readonly submission: components["schemas"]["OwnSubmission"] | null;
+        };
+        /**
+         * OrgNode
+         * @description One organization node a role may be granted at, with its parent's name to tell namesakes apart.
+         */
+        readonly OrgNode: {
+            /**
+             * Node Id
+             * Format: uuid
+             */
+            readonly node_id: string;
+            /** Label */
+            readonly label: string;
+            /** Parent Label */
+            readonly parent_label: string | null;
+        };
+        /** OrgNodes */
+        readonly OrgNodes: {
+            /** Nodes */
+            readonly nodes: readonly components["schemas"]["OrgNode"][];
         };
         /**
          * OwedWeek
@@ -2642,6 +2745,31 @@ export interface components {
             readonly response_rate: number | null;
             /** Validity Rate */
             readonly validity_rate: number | null;
+        };
+        /**
+         * RollupTerm
+         * @description One term a roll-up may be read for: its name, its dates and its length in weeks.
+         */
+        readonly RollupTerm: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Name */
+            readonly name: string;
+            /**
+             * Start Date
+             * Format: date
+             */
+            readonly start_date: string;
+            /**
+             * End Date
+             * Format: date
+             */
+            readonly end_date: string;
+            /** Length Weeks */
+            readonly length_weeks: number;
         };
         /**
          * RollupTree
@@ -4353,6 +4481,26 @@ export interface operations {
             };
         };
     };
+    readonly read_leadership_context_leadership_context_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["LeadershipContext"];
+                };
+            };
+        };
+    };
     readonly read_rollup_tree_leadership_rollup_get: {
         readonly parameters: {
             readonly query: {
@@ -4757,6 +4905,37 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["InstructorReport"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_drill_down_weeks_leadership_sections__section_id__published_weeks_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PublishedWeeks"];
                 };
             };
             /** @description Validation Error */
@@ -5315,6 +5494,37 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["MappingDiff"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_org_nodes_admin_org_nodes_get: {
+        readonly parameters: {
+            readonly query: {
+                readonly role: components["schemas"]["AssignmentRole"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OrgNodes"];
                 };
             };
             /** @description Validation Error */

@@ -1260,6 +1260,26 @@ def published_course_weeks(
     ]
 
 
+def leadership_published_course_weeks(
+    session: Session, *, scope: ActorScope, section_id: UUID, settings: Settings
+) -> list[int]:
+    """The published course weeks of one section in the reader's leadership purview.
+
+    The drill-down's week list: the section is found inside `scope`'s purview
+    exactly as `leadership_report` finds it, so a section outside it and one
+    that does not exist both raise `SectionUnavailableError`, and the weeks are
+    `_published_weeks`'s, the list the report itself pages across.
+    """
+    if section_id not in scope.purview.section_ids:
+        raise SectionUnavailableError
+    section = session.get(Section, section_id)
+    if section is None:  # pragma: no cover - the purview is read from existing sections
+        raise SectionUnavailableError
+    return [
+        week.course_week for week in _published_weeks(session, section=section, settings=settings)
+    ]
+
+
 def _published_weeks(
     session: Session, *, section: Section, settings: Settings
 ) -> list[_SectionWeek]:

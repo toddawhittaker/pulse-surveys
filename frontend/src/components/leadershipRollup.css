@@ -1,0 +1,509 @@
+/* The leadership roll-up's components: HierarchyNav, AggregateHeader and
+ * AttentionList (SPEC §7.6), and the roll-up page's two-pane frame.
+ *
+ * Tokens only. `design/HierarchyNav.dc.html`, `design/AggregateHeader.dc.html`,
+ * `design/AttentionList.dc.html` and `design/LeadershipRollup.dc.html` are the
+ * contract; where a prototype writes a bare pixel value off the token ramp (the
+ * 36px row, the 280px pane) it is kept as written; type stays on the ramp. The one
+ * motion is the tree's 150ms caret turn, which the token file's reduced-motion
+ * rule removes.
+ */
+
+/* ---- The page's frame: two panes that stack at tablet width ---------------- */
+
+.pulse-rollup {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-5);
+  box-sizing: border-box;
+  font-family: var(--font-body);
+  color: var(--spruce);
+}
+
+.pulse-rollup-title {
+  margin: 0 0 var(--space-2);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-4);
+}
+
+.pulse-rollup-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  letter-spacing: 0.08em;
+  color: var(--spruce-60);
+}
+
+.pulse-rollup-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pulse-rollup-select {
+  min-height: 32px;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--input-edge);
+  border-radius: var(--radius-input);
+  background: var(--paper);
+  color: var(--spruce);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+}
+
+.pulse-rollup-panes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+
+.pulse-rollup-tree-pane {
+  flex: 0 1 280px;
+  min-width: 240px;
+}
+
+.pulse-rollup-content-pane {
+  flex: 1 1 560px;
+  min-width: 0;
+}
+
+.pulse-rollup-article {
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: var(--space-6);
+  box-sizing: border-box;
+}
+
+.pulse-rollup-heading {
+  margin: var(--space-7) 0 var(--space-4);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-3);
+}
+
+.pulse-rollup-note {
+  margin: 0;
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+.pulse-rollup-status {
+  min-height: 1em;
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+.pulse-rollup-more {
+  margin-top: var(--space-7);
+  font-size: var(--text-1);
+}
+
+.pulse-rollup-more ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pulse-rollup-link {
+  color: var(--marigold-deep);
+  text-decoration: underline;
+}
+
+.pulse-rollup-link:hover {
+  color: var(--spruce);
+}
+
+/* The mode toggle: a segmented pair above the tree, as the mockup draws it. */
+.pulse-rollup-modes {
+  display: flex;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-3);
+  padding: var(--space-1);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-input);
+  background: var(--paper);
+}
+
+.pulse-rollup-mode {
+  flex: 1;
+  min-height: 32px;
+  border: none;
+  border-radius: var(--radius-input);
+  background: transparent;
+  color: var(--spruce);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.pulse-rollup-mode[aria-pressed='true'] {
+  background: var(--chalk);
+  box-shadow: inset 0 -2px 0 var(--marigold-deep);
+  font-weight: 600;
+}
+
+/* Breadcrumbs: mono, the last one in full ink and not a control. */
+.pulse-rollup-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 42px;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  letter-spacing: 0.04em;
+  color: var(--spruce-60);
+}
+
+.pulse-rollup-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pulse-rollup-crumb-button {
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--spruce-60);
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.pulse-rollup-crumb-button:hover {
+  color: var(--spruce);
+}
+
+.pulse-rollup-crumb-current {
+  color: var(--spruce);
+  font-weight: 500;
+}
+
+/* The cohort chips carry an input's edge, so each is a visible control. */
+.pulse-rollup-choices .pulse-rollup-mode {
+  border: 1px solid var(--input-edge);
+  padding: 0 var(--space-3);
+}
+
+/* The cohort and named-set choices under the trend. */
+.pulse-rollup-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+/* ---- HierarchyNav --------------------------------------------------------- */
+
+.pulse-hierarchy {
+  padding: var(--space-3);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.pulse-hierarchy-all {
+  display: flex;
+  gap: var(--space-3);
+  padding: 0 10px var(--space-2);
+}
+
+.pulse-hierarchy-all-button {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--spruce-60);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.pulse-hierarchy-all-button:hover {
+  color: var(--spruce);
+}
+
+.pulse-hierarchy-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pulse-hierarchy-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: var(--radius-input);
+}
+
+.pulse-hierarchy-row:hover {
+  background: var(--chalk);
+}
+
+.pulse-hierarchy-row-selected {
+  background: var(--chalk);
+}
+
+.pulse-hierarchy-toggle,
+.pulse-hierarchy-toggle-space {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.pulse-hierarchy-caret,
+.pulse-hierarchy-caret-open {
+  fill: var(--spruce-60);
+  transition: transform 150ms ease;
+}
+
+.pulse-hierarchy-caret-open {
+  transform: rotate(90deg);
+}
+
+.pulse-hierarchy-select,
+.pulse-hierarchy-link {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--spruce);
+  font-family: var(--font-body);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.pulse-hierarchy-link {
+  color: var(--marigold-deep);
+  text-decoration: underline;
+}
+
+.pulse-hierarchy-name {
+  font-size: var(--text-1);
+}
+
+.pulse-hierarchy-row-selected .pulse-hierarchy-name {
+  font-weight: 600;
+}
+
+.pulse-hierarchy-count {
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  line-height: 1.4;
+  color: var(--spruce-60);
+}
+
+/* ---- AggregateHeader ------------------------------------------------------ */
+
+.pulse-aggregate-name {
+  margin: 0 0 var(--space-1);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-4);
+  line-height: 1.25;
+}
+
+.pulse-aggregate-scope {
+  margin: 0;
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+.pulse-aggregate-mark {
+  display: block;
+  margin: var(--space-4) 0 var(--space-5);
+}
+
+.pulse-aggregate-mark path {
+  fill: none;
+  stroke: var(--marigold);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.pulse-aggregate-mark circle {
+  fill: var(--marigold);
+}
+
+/* ---- AttentionList -------------------------------------------------------- */
+
+.pulse-attention-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pulse-attention-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.pulse-attention-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.pulse-attention-rule {
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  letter-spacing: 0.04em;
+  color: var(--marigold-deep);
+}
+
+.pulse-attention-section {
+  margin: 0;
+  font-size: var(--text-2);
+  font-weight: 500;
+}
+
+.pulse-attention-week {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+.pulse-attention-link {
+  margin-top: var(--space-1);
+  text-decoration: underline;
+  font-size: var(--text-1);
+  font-weight: 500;
+  color: var(--marigold-deep);
+}
+
+.pulse-attention-link:hover {
+  color: var(--spruce);
+}
+
+.pulse-attention-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-6) var(--space-5);
+  text-align: center;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-card);
+}
+
+.pulse-attention-empty-line {
+  stroke: var(--mist);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.pulse-attention-empty-dot {
+  fill: var(--mist);
+}
+
+.pulse-attention-empty-text {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-2);
+  color: var(--spruce-60);
+}
+
+/* ---- The drill-down's context bar ----------------------------------------- */
+
+.pulse-drill-down-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--space-4) var(--space-5) 0;
+  box-sizing: border-box;
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--spruce-60);
+}
+
+/* ---- The app shell's switcher and logout ---------------------------------- */
+
+.pulse-shell-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  font-family: var(--font-mono);
+  font-size: var(--text-1);
+  color: var(--spruce-60);
+}
+
+.pulse-shell-button {
+  min-height: 32px;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--input-edge);
+  border-radius: var(--radius-input);
+  background: var(--paper);
+  color: var(--spruce);
+  font-family: var(--font-body);
+  font-size: var(--text-1);
+  cursor: pointer;
+}
+
+/* A control that is aria-disabled (busy, or nothing to switch to) looks it. */
+.pulse-shell-button[aria-disabled='true'],
+.pulse-rollup-select[aria-disabled='true'] {
+  color: var(--spruce-60);
+  border-color: var(--hairline);
+  cursor: default;
+}
+
+.pulse-shell-status {
+  margin: 0;
+}

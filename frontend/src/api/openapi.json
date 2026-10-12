@@ -1149,6 +1149,28 @@
         }
       }
     },
+    "/leadership/context": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "My leadership roles, the terms, and the current term",
+        "description": "What the roll-up pages read first: which term to open, and the reader's own roles.\n\nThe roles are the session's own (ADR 0199); the terms are every term, which\nis no secret.",
+        "operationId": "read_leadership_context_leadership_context_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadershipContext"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/leadership/rollup": {
       "get": {
         "tags": [
@@ -1786,6 +1808,50 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/InstructorReport"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/leadership/sections/{section_id}/published-weeks": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "The course weeks of a section in my purview with a report",
+        "description": "The published course weeks of one section, for the drill-down to open its latest.\n\nBehind the same purview as the drill-down itself, with the same 404 and\nsentence for a section outside it and a section that does not exist.",
+        "operationId": "read_drill_down_weeks_leadership_sections__section_id__published_weeks_get",
+        "parameters": [
+          {
+            "name": "section_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Section Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublishedWeeks"
                 }
               }
             }
@@ -2605,6 +2671,48 @@
         }
       }
     },
+    "/admin/org-nodes": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "The organization nodes a role may be granted at",
+        "description": "Only nodes at the level `role` is granted at, sorted by name.",
+        "operationId": "read_org_nodes_admin_org_nodes_get",
+        "parameters": [
+          {
+            "name": "role",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/AssignmentRole"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgNodes"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/dev": {
       "get": {
         "tags": [
@@ -3288,6 +3396,51 @@
         "title": "LeadDecision",
         "description": "What a lead or chair sends to exclude or keep one queued comment.\n\nTwo actions: a leader has no undo (decision 1). `reason` is optional, because\nevery queued comment was flagged by the AI, and is checked by the decision\nservice as it was sent, before any trimming (`docs/MISTAKES.md` entry 29)."
       },
+      "LeadershipContext": {
+        "properties": {
+          "roles": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "VP_ACADEMICS",
+                "DEAN",
+                "ASSISTANT_DEAN",
+                "CHAIR",
+                "LEAD_FACULTY"
+              ]
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/RollupTerm"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "current_term_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Term Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "roles",
+          "terms",
+          "current_term_id"
+        ],
+        "title": "LeadershipContext",
+        "description": "What the leadership pages need before their first read (SPEC \u00a75.5).\n\n`roles` is every leadership role the reader holds, highest first, so a\nread-only context bar can name the reader's role. `terms` is every term,\noldest first; `current_term_id` is the term whose dates contain the\ninstitution's today, absent between terms. Terms are no secret."
+      },
       "LogRow": {
         "properties": {
           "section_label": {
@@ -3740,6 +3893,54 @@
         ],
         "title": "OpenSurvey",
         "description": "The one survey open for a section right now (SPEC \u00a73.1's one-open rule).\n\nPresent only while the window is open. \u00a73.1 says a missed week cannot be\nback-filled, so a closed week is not something the form can answer and is not\noffered as one; the section it belonged to is still reported, which is how a\nstudent is told they are enrolled and there is nothing to do this minute.\n\n**`length_weeks` is the reader's own section's length and nobody else's**\n(E4-17). It is the `length_weeks` column of the section the window belongs\nto, reached through the section the reader is enrolled in \u2014 the same scoping\nargument `EnrolledSection.course_label` stands on, and \u00a74.1 item 1 is what it\nhas to hold against. It names no other section, carries no identity, and\ndiscloses nothing new: SPEC \u00a72.2 puts the length in the section code the\nstudent is already shown. It is a number about a calendar rather than about a\nperson, so no confidentiality rule in \u00a74 reaches it.\n\nIt is a plain integer because the column is `NOT NULL` on the section row. An\noptional one would let a read path that found no length answer a half-eyebrow\n\u2014 \"COURSE WK 04 / , TERM WK 07\" \u2014 instead of failing where the data is wrong."
+      },
+      "OrgNode": {
+        "properties": {
+          "node_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Node Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "parent_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Label"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_id",
+          "label",
+          "parent_label"
+        ],
+        "title": "OrgNode",
+        "description": "One organization node a role may be granted at, with its parent's name to tell namesakes apart."
+      },
+      "OrgNodes": {
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/OrgNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "nodes"
+        ],
+        "title": "OrgNodes"
       },
       "OwedWeek": {
         "properties": {
@@ -4583,6 +4784,43 @@
         ],
         "title": "RollupParticipation",
         "description": "A cohort's response rate and validity rate in its latest published week."
+      },
+      "RollupTerm": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          },
+          "length_weeks": {
+            "type": "integer",
+            "title": "Length Weeks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "start_date",
+          "end_date",
+          "length_weeks"
+        ],
+        "title": "RollupTerm",
+        "description": "One term a roll-up may be read for: its name, its dates and its length in weeks."
       },
       "RollupTree": {
         "properties": {

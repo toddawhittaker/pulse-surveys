@@ -3,14 +3,17 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  lazyRouteComponent,
 } from '@tanstack/react-router';
 
+import type { JSX } from 'react';
+
+import { AppShell } from './components/AppShell';
+import { copy as rollupCopy } from './copy/leadershipRollupCopy';
 import { UnknownAddress } from './components/UnknownAddress';
-import { AdminLanding } from './routes/admin';
 import { CareLanding } from './routes/care';
 import { InstructorLanding } from './routes/instructor';
 import { InstructorReportRoute } from './routes/instructor/InstructorMondayReport';
-import { LeadershipLanding } from './routes/leadership';
 import { ComparisonSetsRoute } from './routes/leadership/ComparisonSets';
 import { EXCLUSION_LOG_ROUTE, ExclusionLogRoute } from './routes/leadership/ExclusionLog';
 import { OnBehalfRoute } from './routes/leadership/OnBehalf';
@@ -58,8 +61,30 @@ import {
  * machine.
  */
 
+// The root renders the app shell — SPEC §2's role switcher and logout — around
+// whatever the address opens. The shell draws nothing without a session.
+/**
+ * What a lazily loaded leadership page shows while its code arrives: the
+ * roll-up's own loading line, in a polite live region.
+ *
+ * The leadership and admin pages are loaded on first visit rather than in the
+ * first chunk (ci/bundle-budget.json): a student or instructor in the LMS
+ * iframe never downloads them.
+ */
+function LeadershipPending(): JSX.Element {
+  return (
+    <p className="pulse-rollup-status" role="status">
+      {rollupCopy('leadership_rollup.loading')}
+    </p>
+  );
+}
+
 const rootRoute = createRootRoute({
-  component: Outlet,
+  component: () => (
+    <AppShell>
+      <Outlet />
+    </AppShell>
+  ),
   notFoundComponent: UnknownAddress,
 });
 
@@ -152,7 +177,22 @@ const instructorReportRoute = createRoute({
 const leadershipRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/leadership',
-  component: LeadershipLanding,
+  component: lazyRouteComponent(() => import('./routes/leadership'), 'LeadershipLanding'),
+  pendingComponent: LeadershipPending,
+});
+
+// SPEC §5.5's drill-down: one section's Monday report, read-only, for a leader.
+// The week is a search parameter for the reason the instructor's report takes
+// one: an address with none opens the latest published week, and any week a
+// reader reaches is a link. The same validator, because it is the same rule.
+const leadershipDrillDownRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  // `DrillDown.tsx`'s DRILL_DOWN_ROUTE, written out so this table does not
+  // pull the lazily loaded page into the first chunk.
+  path: '/leadership/sections/$sectionId',
+  validateSearch: validateReportWeek,
+  component: lazyRouteComponent(() => import('./routes/leadership/DrillDown'), 'DrillDownRoute'),
+  pendingComponent: LeadershipPending,
 });
 
 // SPEC §5.1's comparison sets, under the leadership area (E5-09). Two addresses
@@ -220,7 +260,24 @@ const careRoute = createRoute({
 const adminRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/admin',
-  component: AdminLanding,
+  component: lazyRouteComponent(() => import('./routes/admin'), 'AdminLanding'),
+});
+
+// SPEC §6.3's two editors, under the admin area and flat off the root for the
+// reason the comparison sets are. Whether a session may open them is the API's
+// answer (an admin gate), not this table's.
+const adminPeopleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  // `People.tsx`'s PEOPLE_ROUTE, written out for the reason the drill-down's is.
+  path: '/admin/people',
+  component: lazyRouteComponent(() => import('./routes/admin/People'), 'PeopleRoute'),
+});
+
+const adminMappingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  // `Mappings.tsx`'s MAPPINGS_ROUTE, written out for the same reason.
+  path: '/admin/lead-mappings',
+  component: lazyRouteComponent(() => import('./routes/admin/Mappings'), 'MappingsRoute'),
 });
 
 /**
@@ -240,6 +297,7 @@ export const routeTree = rootRoute.addChildren([
   instructorRoute,
   instructorReportRoute,
   leadershipRoute,
+  leadershipDrillDownRoute,
   leadershipComparisonSetsRoute,
   leadershipComparisonSetRoute,
   leadershipReviewQueueRoute,
@@ -249,6 +307,8 @@ export const routeTree = rootRoute.addChildren([
   leadershipOnBehalfRoute,
   careRoute,
   adminRoute,
+  adminPeopleRoute,
+  adminMappingsRoute,
 ]);
 
 /**

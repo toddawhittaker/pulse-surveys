@@ -51,11 +51,13 @@ from app.schemas.rollup import (
     AttentionCard,
     AttentionRule,
     FiguresKind,
+    LeadershipContext,
     NodeKind,
     RollupCohort,
     RollupFigures,
     RollupNode,
     RollupParticipation,
+    RollupTerm,
     RollupTree,
     RollupWeek,
 )
@@ -76,6 +78,7 @@ __all__ = [
     "TermUnavailableError",
     "attention_cards",
     "build_hierarchy",
+    "leadership_context",
     "rollup_figures",
     "rollup_tree",
 ]
@@ -831,4 +834,44 @@ def rollup_figures(
         cohorts=cohorts,
         attention=cards,
         attention_empty=None if cards else words.NOTHING_NEEDS_ATTENTION.text,
+    )
+
+
+# SPEC §2's reporting chain, highest first: the order `leadership_context`
+# names a reader's roles in.
+_ROLES_HIGHEST_FIRST = (
+    AssignmentRole.VP_ACADEMICS,
+    AssignmentRole.DEAN,
+    AssignmentRole.ASSISTANT_DEAN,
+    AssignmentRole.CHAIR,
+    AssignmentRole.LEAD_FACULTY,
+)
+
+
+def leadership_context(
+    session: Session, *, scope: ActorScope, settings: Settings
+) -> LeadershipContext:
+    """The reader's leadership roles, every term, and the term containing today.
+
+    The roles come from the scope's own grants, so they are the session's
+    person's and nobody else's. Where two configured terms overlap today, the
+    one that started later is current, as `provisioning` decides it for a launch.
+    """
+    held = {grant.role for grant in scope.grants}
+    terms = session.scalars(select(Term).order_by(Term.start_date, Term.name)).all()
+    today = clock.today(session, settings=settings)
+    containing = [term for term in terms if term.start_date <= today <= term.end_date]
+    return LeadershipContext(
+        roles=[role.value for role in _ROLES_HIGHEST_FIRST if role in held],
+        terms=[
+            RollupTerm(
+                id=term.id,
+                name=term.name,
+                start_date=term.start_date,
+                end_date=term.end_date,
+                length_weeks=term.length_weeks,
+            )
+            for term in terms
+        ],
+        current_term_id=containing[-1].id if containing else None,
     )

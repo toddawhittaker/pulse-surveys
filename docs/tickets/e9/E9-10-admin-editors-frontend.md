@@ -3,9 +3,8 @@
 **ID:** E9-10
 **Branch:** `e9/admin-editors-frontend`
 **Depends on:** 06
-**Lane:** light
-**Why this lane:** frontend only, over E9-06's routes, with its strings under
-the `admin_people` prefix E9-02 placed.
+**Lane:** heavy
+**Why this lane:** the grant picker's read of organization names adds a function to `services/authz.py` and a statement to `views_sql/queries.py`, both heavy paths; the rest is frontend over E9-06's routes, with its strings under the `admin_people` prefix E9-02 placed.
 **Size:** M
 **Security-relevant:** low. The routes refuse every non-admin; the screen
 must not apply an import the admin has not seen in its dry run.
