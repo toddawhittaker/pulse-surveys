@@ -5907,8 +5907,9 @@ APPLICATION_READERS = (APPLICATION_ROLE, "PUBLIC")
 # **Per view, because the sanction is per view.** Each entry below carries the
 # sentence that admits it, and the sentences come from the ticket, SPEC and the
 # ADR rather than from the SQL: E0-10's two, ADR 0046's three, E4-03's three
-# report views, E4-04's comment view, E5-03's four benchmark views and E9-07's
-# org-node label view, and what
+# report views, E4-04's comment view and E9-07's org-node label view (E5-03's
+# four benchmark views were retired by E9-12; the note where they stood says
+# so), and what
 # each is *for* is written down in those records. No count
 # is written here — the set grows with every ticket that ships a read view, and a
 # number in a comment is a record with a scheduled expiry (`docs/MISTAKES.md`
@@ -6075,112 +6076,18 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
     # first view in the schema whose rows are a person's writing, so the column
     # that must never arrive is any column that would let a reader sort them.
     "report_comment": ("section_id", "week_id", "stream", "answer_id", "comment_text"),
-    # E5-03's four, and the sentence that admits all of them at once: **a
-    # benchmark row is about a cohort, and a cohort has no id, no section and no
-    # person in it**. Each is keyed by a length, a level, a term and a week —
-    # four facts about a *set* of sections — and every other column is a
-    # statistic or a count over what that set's students submitted. There is
-    # deliberately no `section_id` here, which is the difference between these
-    # and E4-03's report views one row up: those are about one section an
-    # instructor already has, and these are about every section of a length and
-    # level in the institution, across the current and every retained prior term
-    # (SPEC §5.1's past-referencing). A key on that row would name a section a
-    # reader has no other route to.
-    #
-    # **`respondent_count` is a count and not a key**, and it is worth saying
-    # outright because it is the one column here that is *about* people. SPEC
-    # §5.1 gives comparison figures their own minimum and §4.1 item 7 covers "a
-    # mean, a median, or any other statistic"; E5-04 compares this number
-    # against `benchmark_min_respondents_default`, so it has to be a count of
-    # students rather than of responses (`docs/MISTAKES.md` entry 50). It is
-    # computed with `COUNT(DISTINCT ...)` inside the view and the key it counts
-    # over never leaves it.
-    #
-    # **What is absent is the whole point, and it was argued.** The work order
-    # for E5-03 asked for a fifth view exposing `(section_id, course_week,
-    # stream, user_id)` — a person-week index spanning a cohort — and the ruling
-    # on `docs/disputes/E5-03-01.md` withdrew it on E5-03's own scope sentence
-    # ("section id and numbers, never a person") and on SPEC §8's "enforced in
-    # the database, not just the application". The figures it was meant to feed
-    # are computed by `benchmark_set_week` and `benchmark_set_rating_week`,
-    # which are in `SANCTIONED_APPLICATION_EXECUTE` above with their own
-    # sentence. A `user_id` arriving on any of the four below is that decision
-    # being reversed without a ruling.
-    #
-    # `stream` is a key column on the two rating views (SPEC §3.2's two Likert
-    # questions, carried on the question rows since E4-02, never derived from a
-    # position), and `section_start_date` is a key column on the two term-axis
-    # views: SPEC §2.2 draws "one line per start cohort" on the aggregate axis,
-    # and a cohort is identified by the date it started rather than by its start
-    # letter, which is per-term admin data.
-    "benchmark_cohort_rating_week": (
-        "length_weeks",
-        "level",
-        "term_id",
-        "course_week",
-        "stream",
-        "rating_mean",
-        "rating_count",
-    ),
-    "benchmark_cohort_week": (
-        "length_weeks",
-        "level",
-        "term_id",
-        "course_week",
-        "workload_mean",
-        "workload_median",
-        "response_count",
-        "respondent_count",
-        "section_count",
-    ),
-    "benchmark_cohort_rating_term_axis": (
-        "length_weeks",
-        "level",
-        "term_id",
-        "section_start_date",
-        "term_week",
-        "stream",
-        "rating_mean",
-        "rating_count",
-    ),
-    # **The last two columns are a widening E5-04 admits here rather than makes
-    # quietly**, on the ruling appended to `docs/disputes/E5-04-01.md`. That
-    # ticket's security round found a figure sealed against counts of a
-    # population it was not computed over: the workload mean and median are
-    # computed only over the responses that carry hours — ADR 0165 keeps a
-    # cohort week's row when nobody reports any — while `respondent_count` and
-    # `section_count` above count everybody who answered anything. So the two
-    # figures were suppressed against the wrong number, which is
-    # `docs/MISTAKES.md` entry 50's class and, on this view, a real disclosure:
-    # two students' hours shown as a figure over fifteen people. The `_v002`
-    # body carries each figure's own contributor counts and the service seals
-    # with those.
-    #
-    # **Why the widening is admissible.** Both are aggregate counts of the same
-    # class the view already exposes — a count of distinct students and a count
-    # of sections, over a cohort that has no id, no section key and no person in
-    # it. Neither is a key and neither is new reach: `pulse_app` could already
-    # read `respondent_count` and `section_count` on this row. The alternative
-    # routes were measured and are in the dispute; the one the ruling rejected
-    # would have reversed an ADR 0166 decision taken in this same pull request.
-    #
-    # This entry is what makes the widening argued rather than discovered, which
-    # is §4.1 item 1's purpose and the convention E5-03 used to admit these four
-    # views in the first place.
-    "benchmark_cohort_term_axis": (
-        "length_weeks",
-        "level",
-        "term_id",
-        "section_start_date",
-        "term_week",
-        "workload_mean",
-        "workload_median",
-        "response_count",
-        "respondent_count",
-        "section_count",
-        "workload_respondent_count",
-        "workload_section_count",
-    ),
+    # E5-03's four cohort views (`benchmark_cohort_week`,
+    # `benchmark_cohort_rating_week`, `benchmark_cohort_term_axis` and
+    # `benchmark_cohort_rating_term_axis`) were sanctioned here from E5-03 to
+    # E9-11 and are **retired by E9-12** (README decision 10: E9-05 deleted their
+    # last reader, and named-set figures are computed through the two set
+    # functions in `SANCTIONED_APPLICATION_EXECUTE` above). With the views
+    # dropped, `pulse_app` may read none of their columns, so none is sanctioned;
+    # a grant on a relation of any of those names is now unsanctioned and this
+    # equality fails on it. The columns they carried, and the argument that
+    # admitted them, stand in git history and in
+    # `tests/integration/test_the_four_cohort_views_are_retired.py`, whose round
+    # trip requires the downgrade to restore them.
     # E9-07's one view, and the sentence that admits it is the re-lane's ruling:
     # the roll-up tree must say "Mathematics" and "College of Arts and Sciences"
     # (SPEC §2.1's labels), `pulse_app` holds no `SELECT` on `institution`,

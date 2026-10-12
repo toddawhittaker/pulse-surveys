@@ -215,7 +215,7 @@ boundary: `metadata_tables` is asked for by both.
     connection, and the planted `audit_log` trigger done-when 5 fails an audit
     insert with.
 
-Six modules under `tests/fixtures/` carry **no fixtures** and are therefore not
+The modules below under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
 `seed_row` already is. They are listed here because this docstring is the index
 of that directory and a module missing from it is a record that has stopped being
@@ -257,6 +257,12 @@ complete.
     world, an admin or Care session at the web door.
   - `fixtures/people_editor.py` — the admin's people editor driven over HTTP on
     the built application with an admin session, and the planting its tests share.
+  - `fixtures/e9_invariant_pass.py` — E9-12: the URLs of E9's four read routes
+    (the roll-up tree, a node's figures, a named set's series, the drill-down),
+    the readers that search an answer for ids, names and comment-shaped keys,
+    the shared owed read swapped so every section a page computes over carries a
+    card, a named set planted over courses a test names, and `LeadReviewWorld`'s
+    session minting over the bare report world.
 
 `pytest_plugins` is spelled `fixtures.<name>` rather than `tests.fixtures.<name>`
 because pytest puts `tests/` on `sys.path` when it loads this file: there is no

@@ -2872,6 +2872,25 @@ SWEEPS_THAT_NEED_NO_PROTECTION = {
     "tests/unit/test_every_section_benchmarks_caller_names_the_reader.py": (
         "sweeps *.py under backend/app, and a .py change is never inert"
     ),
+    # E9-12's sweep that every leadership caller of the staff-name door passes a
+    # scope (carried item C3): the same E0-35 device. Its walker takes `root` and
+    # is called with `APP_ROOT` (`backend/app`) and with pytest's `tmp_path` for
+    # its planted control, and it reads `*.py` only. If it is ever taught to read
+    # anything else, it belongs in the unconditional job instead.
+    "tests/unit/test_every_leadership_caller_of_the_staff_name_door_passes_a_scope.py": (
+        "sweeps *.py under backend/app, and a .py change is never inert"
+    ),
+    # E9-12's search for the four retired cohort views (done-when 10). Its walker
+    # takes `root` and is called with `APP_ROOT` and with `tmp_path`; unlike the
+    # sweeps above it reads **every** file under `backend/app`, not only `*.py`,
+    # because the done-when says "nothing under backend/app/ names them". Nothing
+    # under `backend/app` is in the inert set (the inert families are `docs/`,
+    # `design/` and the root Markdown files), so every file it can read already
+    # runs the whole pipeline when it changes. If it is ever pointed outside
+    # `backend/app`, it belongs in the unconditional job instead.
+    "tests/unit/test_nothing_under_the_application_names_a_retired_cohort_view.py": (
+        "sweeps every file under backend/app, and nothing under backend/app is inert"
+    ),
 }
 
 UNCONDITIONAL_SWEEP_JOB = "lint-python"

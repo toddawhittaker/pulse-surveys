@@ -231,3 +231,147 @@ def test_every_call_to_section_benchmarks_under_backend_app_writes_scope() -> No
         f"{offenders}. E9-05 fix round, P2: the reader is keyword-only and required, and an "
         f"instructor's own report writes `{THE_READER}=None`."
     )
+
+
+# ---------------------------------------------------------------------------
+# E9-12, carried item C2: the two reader-less benchmark reads.
+#
+# E9-05's accepted residue: "`benchmark_trend` and `benchmark_workload` reach the
+# same seal but take no reader; they pass `scope=None`. Nothing under
+# `backend/app` calls either today. If E9-09's drill-down needs them for a
+# leader, it gives them a required `scope` and adds them to the caller sweep;
+# E9-12's invariant pass checks the sweep covers them." So: no reference to
+# either under `backend/app/` outside its own definition, unless it is a direct
+# call writing `scope=` — which a caller can only write once the function takes
+# one. The found-reference control is the definitions themselves: both are
+# required to be *defined* in `services/benchmarks.py`, so a rename cannot make
+# the rule vacuous (`docs/MISTAKES.md` entry 35).
+# ---------------------------------------------------------------------------
+
+READERLESS = ("benchmark_trend", "benchmark_workload")
+THE_SERVICE = Path("services/benchmarks.py")
+
+
+def readerless_sites(source: str, where: str, name: str) -> list[tuple[int, str]]:
+    """Every reference to `name` in one module, as (line, verdict); the device above, by name."""
+    try:
+        tree = ast.parse(source, filename=where)
+    except SyntaxError as failure:  # pragma: no cover - a broken source tree
+        pytest.fail(f"{where} does not parse ({failure}); this sweep would report it clean.")
+    aliases = {name}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == name and alias.asname:
+                    aliases.add(alias.asname)
+
+    def names_it(node: ast.AST) -> bool:
+        return (isinstance(node, ast.Name) and node.id in aliases) or (
+            isinstance(node, ast.Attribute) and node.attr == name
+        )
+
+    called: set[int] = set()
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and names_it(node.func):
+            called.add(id(node.func))
+            keywords = [keyword.arg for keyword in node.keywords]
+            if THE_READER in keywords:
+                verdict = PASSES_THE_READER
+            elif None in keywords:
+                verdict = HIDES_THE_READER
+            else:
+                verdict = FORGETS_THE_READER
+            found.append((node.lineno, verdict))
+    for node in ast.walk(tree):
+        if names_it(node) and id(node) not in called:
+            found.append((node.lineno, NOT_A_CALL))
+    return sorted(found)
+
+
+def readerless_offenders_under(root: Path) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        source = path.read_text(encoding="utf-8")
+        for name in READERLESS:
+            for line, verdict in readerless_sites(source, str(relative), name):
+                if verdict != PASSES_THE_READER:
+                    out.append((f"{relative}:{line}", f"{name}: {verdict}"))
+    return sorted(out)
+
+
+READERLESS_PLANTED_TREE = {
+    "services/benchmarks.py": (
+        "def benchmark_trend(session, *, section_id):\n    return None\n\n\n"
+        "def benchmark_workload(session, *, section_id):\n    return None\n"
+    ),
+    "services/reporting.py": (
+        "from app.services.benchmarks import benchmark_trend as trend_for\n\n\n"
+        "def leadership_report(session, section_id):\n"
+        "    return trend_for(session, section_id=section_id)\n\n\n"
+        "def scoped(session, section_id, scope):\n"
+        "    return trend_for(session, section_id=section_id, scope=scope)\n"
+    ),
+    "services/rollups.py": (
+        "from app.services import benchmarks as bm\n\n\n"
+        "def node(session, section_id):\n"
+        "    return bm.benchmark_workload(session, section_id=section_id)\n\n\n"
+        "LATER = bm.benchmark_trend\n"
+    ),
+    "services/labels.py": "def benchmark_trend_label():\n    return 'benchmark_trend'\n",
+}
+
+
+def test_the_readerless_sweep_flags_calls_one_level_out_and_spares_definitions_and_scoped_calls(
+    tmp_path: Path,
+) -> None:
+    """The control on the C2 sweep, over a planted tree. **A red means this module is broken.**
+
+    **The mutations it kills (in the sweep):** an import alias not followed (the
+    drill-down's `trend_for(...)` walks free); a module alias not followed one
+    level out (`bm.benchmark_workload` walks free — entry 53); calls only (the
+    stored `LATER` walks free). **The near misses it spares:** the two
+    definitions, a call writing `scope=`, and a longer name.
+    """
+    for name, source in READERLESS_PLANTED_TREE.items():
+        planted = tmp_path / name
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(source, encoding="utf-8")
+    assert readerless_offenders_under(tmp_path) == [
+        ("services/reporting.py:5", f"benchmark_trend: {FORGETS_THE_READER}"),
+        ("services/rollups.py:5", f"benchmark_workload: {FORGETS_THE_READER}"),
+        ("services/rollups.py:8", f"benchmark_trend: {NOT_A_CALL}"),
+    ]
+
+
+@pytest.mark.parametrize("name", READERLESS)
+def test_the_readerless_benchmark_read_is_defined_in_the_benchmark_service(name: str) -> None:
+    """The found-reference control: `services/benchmarks.py` defines it, so the rule below can see it.
+
+    **A red means it was renamed or deleted**: update `READERLESS` (or, if it
+    was deleted, delete its row here and say so in the pull request).
+    """
+    service = APP_ROOT / THE_SERVICE
+    tree = ast.parse(service.read_text(encoding="utf-8"), filename=str(service))
+    defined = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    assert name in defined, f"{THE_SERVICE} defines no `{name}`; it defines {sorted(defined)}."
+
+
+def test_no_module_calls_a_readerless_benchmark_read_without_a_reader() -> None:
+    """C2's rule over the real tree: neither read is called (or stored) without `scope=`.
+
+    **The mutation it kills:** the drill-down (or any leadership page) calling
+    `benchmark_trend` or `benchmark_workload`, which seal against the reported
+    section's instructors only and would serve a leader a figure thin enough to
+    subtract with her purview. **The near miss it spares:** the two definitions.
+    """
+    offenders = readerless_offenders_under(APP_ROOT)
+    assert not offenders, (
+        f"These references reach a benchmark read that takes no reader: {offenders}. E9-05's "
+        "residue: give it a required `scope` and pass the reader, or do not call it."
+    )

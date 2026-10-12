@@ -78,6 +78,20 @@ Controlled the same three ways: planted references (an aliased import and a call
 through an aliased module, entry 53) and near misses; a planted tree with a
 caller in each of `api/` and another service; and both allowed modules required
 to be *found* referencing it (entry 35).
+
+**Two more doors, carried into E9-12** (its work order, items C1 and C4), held by
+the same closed-set rule and controlled the same three ways:
+
+  - `authz.leadership_grant_covers(session, *, person_id, …)` answers on any
+    person's leadership grant (ADR 0108). It may be named only in
+    `services/authz.py`, which defines it, and `services/provisioning.py` (the
+    E9-01 residue, C1).
+  - `authz.admin_grant_nodes(session, *, role)` is E9-10's unscoped read of every
+    org node at a level, for the admin's grant picker. It may be named only in
+    `services/authz.py`, which defines it, and `api/admin.py`, its one caller
+    (C4). **Its found-reference controls are red until E9-10 merges into the
+    epic branch**, because neither module names it on a branch without E9-10;
+    the rule itself is green either way.
 """
 
 import ast
@@ -698,3 +712,188 @@ def test_no_module_but_authz_and_the_seal_names_leadership_section_ids() -> None
         f"{offenders}. It answers any person's leadership purview; every other module takes an "
         f"`ActorScope` from the `{THE_DEPENDENCY}` dependency instead."
     )
+
+
+# ---------------------------------------------------------------------------
+# E9-12's carried doors: `leadership_grant_covers` (C1) and `admin_grant_nodes` (C4).
+# ---------------------------------------------------------------------------
+
+# Each guarded name and the only modules that may name it. `api/deps.py` gets no
+# exemption for either: the dependency resolves a scope through `resolve_scope`.
+CLOSED_DOORS: dict[str, tuple[Path, ...]] = {
+    "leadership_grant_covers": (THE_CHOKEPOINT, Path("services/provisioning.py")),
+    "admin_grant_nodes": (THE_CHOKEPOINT, Path("api/admin.py")),
+}
+
+
+def door_offenders_under(root: Path, name: str) -> list[str]:
+    """Every reference to `name` under `root` outside its allowed modules, as "path:line"."""
+    allowed = CLOSED_DOORS[name]
+    out: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root)
+        if relative in allowed:
+            continue
+        lines = sorted(
+            {
+                line
+                for line, _, _ in references(path.read_text(encoding="utf-8"), str(relative), name)
+            }
+        )
+        out.extend(f"{relative}:{line}" for line in lines)
+    return out
+
+
+def planted_references(name: str) -> dict[str, str]:
+    """The four reference shapes, one level out included, for one guarded name."""
+    return {
+        "an aliased import, called with a person off the request": (
+            f"from app.services.authz import {name} as door\n\n\n"
+            "def read(session, request):\n"
+            "    return door(session, person_id=request.query_params['person'])\n"
+        ),
+        "a call through an aliased module": (
+            "from app.services import authz as az\n\n\n"
+            "def read(session, person_id):\n"
+            f"    return az.{name}(session, person_id=person_id)\n"
+        ),
+        "a call through the dotted module path": (
+            "import app.services.authz\n\n\n"
+            "def read(session, person_id):\n"
+            f"    return app.services.authz.{name}(session, person_id=person_id)\n"
+        ),
+        "a getattr by string": (
+            f"from app.services import authz\n\nDOOR = getattr(authz, '{name}')\n"
+        ),
+    }
+
+
+def planted_near_misses(name: str) -> dict[str, str]:
+    return {
+        "prose": (
+            f'"""Only authz names {name}."""\n\n'
+            f"# {name} is a closed door.\n\n\n"
+            "def ping():\n"
+            f'    """This never calls {name}."""\n'
+            "    return 'pong'\n"
+        ),
+        "longer and shorter names": (
+            f"{name}_label = 'Door'\nFLAG = '{name}s'\nOTHER = '{name[:-1]}'\n"
+        ),
+    }
+
+
+def planted_tree(name: str) -> dict[str, str]:
+    """The allowed modules naming `name`, and three callers one level out."""
+    allowed = CLOSED_DOORS[name]
+    tree = {
+        str(allowed[0]): f"def {name}(session, **kwargs):\n    return frozenset()\n",
+        str(allowed[1]): (
+            f"from app.services.authz import {name}\n\n\n"
+            "def allowed(session):\n"
+            f"    return {name}(session)\n"
+        ),
+        "api/deps.py": (
+            f"from app.services.authz import {name}\n\n\n"
+            "def leadership_scope(session, person_id):\n"
+            f"    return {name}(session, person_id=person_id)\n"
+        ),
+        "api/leadership.py": (
+            f"from app.services.authz import {name} as door\n\n\n"
+            "def rollup(session, request):\n"
+            "    return door(session, person_id=request.query_params['person'])\n"
+        ),
+        "services/rollups.py": (
+            "from app.services import authz as az\n\n\n"
+            "def tree(session, person_id):\n"
+            f"    return az.{name}(session, person_id=person_id)\n"
+        ),
+    }
+    return tree
+
+
+@pytest.mark.parametrize("name", sorted(CLOSED_DOORS))
+def test_the_closed_door_matcher_finds_planted_references_and_spares_near_misses(
+    name: str,
+) -> None:
+    """The instrument for each carried door, both ways. **A red means this module is broken.**
+
+    **The mutations it kills (in the sweep):** an import alias not followed; a
+    module alias or the dotted path not followed one level out
+    (`docs/MISTAKES.md` entry 53); the string branch dropped. **The near misses
+    it spares:** prose, docstrings, and longer or shorter names.
+    """
+    found = {
+        what: references(source, what, name) for what, source in planted_references(name).items()
+    }
+    missed = sorted(what for what, hits in found.items() if not hits)
+    assert not missed, f"The matcher missed these planted references to `{name}`: {missed}."
+    spared = {
+        what: references(source, what, name) for what, source in planted_near_misses(name).items()
+    }
+    flagged = {what: hits for what, hits in spared.items() if hits}
+    assert not flagged, f"The matcher flagged these near misses of `{name}`: {flagged}."
+
+
+@pytest.mark.parametrize("name", sorted(CLOSED_DOORS))
+def test_the_closed_door_sweep_flags_callers_one_level_out_and_spares_the_allowed_modules(
+    name: str, tmp_path: Path
+) -> None:
+    """The control on each rule, over a planted tree: three callers red, the allowed two not.
+
+    **The mutations it kills:** the rule exempting all of `services/` (the
+    planted roll-up walks free); `api/deps.py` given an exemption (the planted
+    dependency walks free); an alias not followed (the planted leadership route
+    walks free). **A red means this module is broken.**
+    """
+    for relative, source in planted_tree(name).items():
+        planted = tmp_path / relative
+        planted.parent.mkdir(parents=True, exist_ok=True)
+        planted.write_text(source, encoding="utf-8")
+    assert door_offenders_under(tmp_path, name) == [
+        "api/deps.py:1",
+        "api/deps.py:5",
+        "api/leadership.py:1",
+        "api/leadership.py:5",
+        "services/rollups.py:5",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "allowed"),
+    [(name, module) for name, modules in sorted(CLOSED_DOORS.items()) for module in modules],
+    ids=[
+        f"{name}-{module}" for name, modules in sorted(CLOSED_DOORS.items()) for module in modules
+    ],
+)
+def test_each_allowed_module_is_found_naming_its_carried_door(name: str, allowed: Path) -> None:
+    """The found-reference control (`docs/MISTAKES.md` entry 35): each allowed module names its door.
+
+    A rule that reports absence is satisfied by a misspelt or renamed name. **A
+    red for `services/authz.py` means the door is renamed or gone; a red for the
+    other module means it reaches the door some way this sweep cannot see.**
+    `admin_grant_nodes` is E9-10's, so both of its rows are red until E9-10 merges
+    into the epic branch.
+    """
+    module = APP_ROOT / allowed
+    assert module.is_file(), f"{module.relative_to(REPO_ROOT)} does not exist."
+    found = references(module.read_text(encoding="utf-8"), str(module), name)
+    assert found, f"The sweep finds no reference to `{name}` in {module.relative_to(REPO_ROOT)}."
+
+
+@pytest.mark.parametrize("name", sorted(CLOSED_DOORS))
+def test_no_module_but_the_allowed_two_names_a_carried_door(name: str) -> None:
+    """The rule over the real tree, for each carried door.
+
+    **The mutation it kills:** a route or a service calling
+    `leadership_grant_covers` (any person's grant) or `admin_grant_nodes` (every
+    org node, unscoped) itself — a read past `leadership_scope` and past the
+    admin gate. **The non-emptiness control:** the walk reads more than the two
+    allowed modules.
+    """
+    assert APP_ROOT.is_dir(), f"{APP_ROOT} is not a directory, so this sweep walked nothing."
+    assert len(list(APP_ROOT.rglob("*.py"))) > 2, f"{APP_ROOT} holds next to nothing to sweep."
+    offenders = door_offenders_under(APP_ROOT, name)
+    assert (
+        not offenders
+    ), f"`{name}` is referenced outside {[str(m) for m in CLOSED_DOORS[name]]}: {offenders}."
