@@ -6,7 +6,7 @@ Today that is four things:
   `require_leadership`, which read a session back off a request and say what it
   may act as, `require_session`, which admits a live session in any role, and
   `person_of`, which reads the person a session names. Every gate refuses a
-  session that was revoked before its token expired (E9-04, ADR 0202);
+  session that was revoked before its token expired (ADR 0202);
 * **the CSRF check** a writing route carries on top of its role gate,
   `csrf_verified_student`, `csrf_verified_leadership`,
   `csrf_verified_instructor` and `csrf_verified_session`, and `ending_session`,
@@ -362,7 +362,7 @@ def leadership_scope(
     claims: SessionClaims = Depends(require_leadership),
     session: Session = Depends(get_session),
 ) -> ActorScope:
-    """The leadership scope of the person this verified leadership session names (E9-01).
+    """The leadership scope of the person this verified leadership session names (ADR 0199).
 
     The one way a leadership read gets a scope (ADR 0199). The person comes from
     the session `require_leadership` verified, and from nothing else: this takes
@@ -389,7 +389,7 @@ def leadership_scope(
 def require_admin(request: Request, db: Session = Depends(get_session)) -> SessionClaims:
     """The verified session of an admin, a 403 for a real session in another role, or one 401.
 
-    E9-06's admin routes depend on this or on `csrf_verified_admin` below, so a
+    The admin console's routes depend on this or on `csrf_verified_admin` below, so a
     sweep asking the running application which routes carry it gets the admin
     console's whole surface, as `require_leadership` gives the leadership one.
 
@@ -469,7 +469,7 @@ def _session_in_role(
 def _unrevoked_session(request: Request, db: Session) -> SessionClaims | None:
     """The verified session on `request`, or `None` if there is none or it was revoked.
 
-    E9-04 (ADR 0202): a role switch and a logout end a session before its token
+    ADR 0202: a role switch and a logout end a session before its token
     expires, by recording its `jti`. Every gate reads the session through this,
     so a revoked session joins the absent, malformed, expired and wrongly signed
     ones in the one `None` each gate already refuses. That is what makes a
@@ -487,15 +487,15 @@ def _unrevoked_session(request: Request, db: Session) -> SessionClaims | None:
 
 
 def require_session(request: Request, db: Session = Depends(get_session)) -> SessionClaims:
-    """A verified, unrevoked session in any role, or `require_student`'s refusal (E9-04).
+    """A verified, unrevoked session in any role, or `require_student`'s refusal (ADR 0202).
 
     The gate of the role switcher's two routes: the landings a person may open
     at this door, and (through `csrf_verified_session`) the switch itself. Any
     role, because every role may ask which other views it holds.
 
     **The refusal is `require_student`'s own**, status, words and challenge, and
-    it borrows that gate's constants on purpose: E9-04's settled interface says
-    the switcher's refusal is the same answer, so it moves when that one does.
+    it borrows that gate's constants on purpose: the switcher's refusal
+    (ADR 0202) is the same answer, so it moves when that one does.
     It is the one 401 for every way a request carries no live session, so a
     caller trying tokens learns nothing from it.
     """
@@ -1163,7 +1163,7 @@ def csrf_verified_instructor(
 def csrf_verified_session(
     request: Request, claims: SessionClaims = Depends(require_session)
 ) -> SessionClaims:
-    """`require_session`, plus the same double-submit check every other write carries (E9-04).
+    """`require_session`, plus the same double-submit check every other write carries (ADR 0202).
 
     The role switch carries this. A switch revokes the session it is asked from
     and issues another, so a forged one would end a person's session and put
@@ -1183,7 +1183,7 @@ def csrf_verified_admin(
 ) -> SessionClaims:
     """`require_admin`, plus the same double-submit check every other write carries.
 
-    E9-06's people-graph write routes carry this where its reads carry
+    The people-graph write routes (ADR 0200) carry this where its reads carry
     `require_admin`, for the reason `csrf_verified_student` gives: forgery is a
     defence for writes, and a route says which it means by which dependency it
     declares. `require_admin` is *declared* rather than called, so the route stays
@@ -1197,7 +1197,7 @@ def csrf_verified_admin(
 
 
 def ending_session(request: Request) -> SessionClaims | None:
-    """The session a logout ends: signature and expiry checked, revocation not (E9-04).
+    """The session a logout ends: signature and expiry checked, revocation not (ADR 0202).
 
     Logout must answer a second logout with the same token as it answered the
     first, so it reads the token without asking whether it was revoked; the
