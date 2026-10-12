@@ -92,7 +92,6 @@ from app.schemas.student import (
     SurveyQuestion,
 )
 from app.services import clock, response_loop
-from app.services.authz import teaching_instructors_of
 from app.services.enrollment_windows import live_on
 from app.services.section_codes import course_label, course_week_of
 from app.services.submissions import current_questions
@@ -246,10 +245,10 @@ def _instructors(
     **Teaching instructors only.** The channel also answers the section's
     response authors, its course's lead, its department's chair and its
     college's dean, each as a row of its own role (ADR 0201); this member is the
-    section's professor, so the answer is kept to the `INSTRUCTOR` rows, and of
-    those to the people `authz.teaching_instructors_of` gives for it.
+    section's professor, so the answer is kept to the `INSTRUCTOR` rows: the
+    section's `INSTRUCTOR` assignments, the same people
+    `authz.teaching_instructors_of` answers.
     """
-    teaching = teaching_instructors_of(session, section_id=section_id)
     return sorted(
         staff.display_name
         for staff in response_loop.section_staff_names(
@@ -259,7 +258,7 @@ def _instructors(
             scope=None,
             settings=settings,
         )
-        if staff.role is response_loop.StaffNameRole.INSTRUCTOR and staff.person_id in teaching
+        if staff.role is response_loop.StaffNameRole.INSTRUCTOR
     )
 
 
