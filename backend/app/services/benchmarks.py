@@ -1072,6 +1072,10 @@ def _purview_cohorts(
     wholly outside the purview answers the same cohorts as a thin set inside it,
     each week suppressed, and a reader cannot tell "outside my purview" from
     "too few" (E9-05 done-when 9).
+
+    The statement selects the term's sections at that length and level, and the
+    purview is applied here in Python, so the statement carries no parameter per
+    purview section.
     """
     if not purview:
         return {}
@@ -1079,7 +1083,6 @@ def _purview_cohorts(
         select(Section.id, Section.start_date)
         .join(Course, Course.id == Section.course_id)
         .where(
-            Section.id.in_(sorted(purview)),
             Section.term_id == term_id,
             Section.length_weeks == length_weeks,
             Course.level == level,
@@ -1087,7 +1090,8 @@ def _purview_cohorts(
     ).all()
     cohorts: dict[date, set[UUID]] = {}
     for section_id, start_date in rows:
-        cohorts.setdefault(start_date, set()).add(section_id)
+        if section_id in purview:
+            cohorts.setdefault(start_date, set()).add(section_id)
     return cohorts
 
 
