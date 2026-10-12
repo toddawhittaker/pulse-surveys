@@ -126,8 +126,9 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Select, column, func, select, table, text
-from sqlalchemy.orm import Session
+from sqlalchemy import Select, Uuid, any_, bindparam, column, func, select, table, text
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.orm import Session, aliased
 
 from app.config import Settings
 from app.models.benchmark import ComparisonSet, ComparisonSetMember
@@ -295,24 +296,53 @@ def resolve_default_set(session: Session, *, section_id: UUID) -> list[UUID]:
         section's own answers.
 
     A course with no lead has no default set, and resolves to nothing rather than
-    to everything.
+    to everything. A section that does not exist resolves to nothing too.
+
+    The rule itself is `_default_sets_of`, which answers it for many sections in
+    one statement; this is that, asked about one.
     """
-    hero = _hero_of(session, section_id)
-    if hero is None:
-        return []
-    the_lead = select(_LEAD_FACULTY_COURSE.c.person_id).where(
-        _LEAD_FACULTY_COURSE.c.course_id == hero.course_id
-    )
-    their_courses = select(_LEAD_FACULTY_COURSE.c.course_id).where(
-        _LEAD_FACULTY_COURSE.c.person_id.in_(the_lead)
-    )
+    return _default_sets_of(session, [section_id])[section_id]
+
+
+def _default_sets_of(session: Session, section_ids: Collection[UUID]) -> dict[UUID, list[UUID]]:
+    """`resolve_default_set` for every section asked about, in one statement (E9-05 fix round).
+
+    One row per (asked section, member of its default set): the asked section's
+    course's lead, every course that same person leads, and those courses'
+    sections at the asked section's length and level, the asked section left out.
+    Every section asked about is a key, with an empty list when it has no
+    default set. The ids are bound as one array, so the statement is the same
+    size however many sections a reader's purview holds.
+    """
+    asked = sorted(set(section_ids))
+    found: dict[UUID, list[UUID]] = {section: [] for section in asked}
+    if not asked:
+        return found
+    hero, member = aliased(Section), aliased(Section)
+    hero_course, member_course = aliased(Course), aliased(Course)
+    hero_lead = _LEAD_FACULTY_COURSE.alias("hero_lead")
+    member_lead = _LEAD_FACULTY_COURSE.alias("member_lead")
     statement = (
-        _matching_sections(hero)
-        .where(Section.course_id.in_(their_courses))
-        .where(Section.id != section_id)
-        .order_by(Section.id)
+        select(hero.id.label("hero_id"), member.id.label("member_id"))
+        .select_from(hero)
+        .join(hero_course, hero_course.id == hero.course_id)
+        .join(hero_lead, hero_lead.c.course_id == hero.course_id)
+        .join(member_lead, member_lead.c.person_id == hero_lead.c.person_id)
+        .join(member, member.course_id == member_lead.c.course_id)
+        .join(member_course, member_course.id == member.course_id)
+        .where(
+            hero.id == any_(bindparam("asked", asked, type_=ARRAY(Uuid))),
+            member.length_weeks == hero.length_weeks,
+            member_course.level == hero_course.level,
+            member.id != hero.id,
+        )
+        .distinct()
     )
-    return [row.id for row in session.execute(statement)]
+    for row in session.execute(statement):
+        found[row.hero_id].append(row.member_id)
+    for members in found.values():
+        members.sort()
+    return found
 
 
 def resolve_university(session: Session, *, section_id: UUID) -> list[UUID]:
@@ -844,32 +874,36 @@ def _section_populations(
     """The section-keyed populations asked for, each resolved once and read through one `_Reads`.
 
     Each reader's sections are read once (`_known_by_reader`). The default set
-    of every one of a reader's sections here — this term, this length and level
-    — is resolved once per read and shared between readers;
-    `_university_population` says why the university needs them. For a reader
-    whose purview is a whole college, that is one default-set resolution per
-    alike section, which is the cost of sealing against everything she knows.
+    of the reported section and of every one of each reader's sections here —
+    this term, this length and level — is resolved in **one** statement
+    (`_default_sets_of`) and shared between readers; `_university_population`
+    says why the university needs them. Each reader's lead sets are kept once
+    per distinct set, and `_Reads` asks the set functions once per distinct
+    section set, so the number of statements does not grow with the number of
+    sections in a reader's purview (E9-05 fix round). It grows only with the
+    number of distinct lead sets among them, and the one default-set statement
+    answers more rows.
     """
     reads = _Reads(session, cutoffs)
-    default_sets: dict[UUID, list[UUID]] = {
-        section_id: resolve_default_set(session, section_id=section_id)
-    }
-
-    def default_set_of(section: UUID) -> list[UUID]:
-        if section not in default_sets:
-            default_sets[section] = resolve_default_set(session, section_id=section)
-        return default_sets[section]
-
     known = _known_by_reader(session, section_id=section_id, scope=scope)
+    alike = (
+        _alike_in_this_term(session, section_id=section_id)
+        if BenchmarkPopulation.UNIVERSITY in wanted
+        else set()
+    )
+    mine_here = [hers & alike for hers in known]
+    default_sets = _default_sets_of(
+        session, {section_id}.union(*mine_here) if mine_here else {section_id}
+    )
     populations: dict[BenchmarkPopulation, _Population] = {}
     if BenchmarkPopulation.DEFAULT_SET in wanted:
         populations[BenchmarkPopulation.DEFAULT_SET] = _default_population(
             reads, default_set=default_sets[section_id], known=known
         )
     if BenchmarkPopulation.UNIVERSITY in wanted:
-        alike = _alike_in_this_term(session, section_id=section_id)
         lead_sets_seen = [
-            [set(default_set_of(mine)) for mine in sorted(hers & alike)] for hers in known
+            list(dict.fromkeys(frozenset(default_sets[mine]) for mine in sorted(here)))
+            for here in mine_here
         ]
         populations[BenchmarkPopulation.UNIVERSITY] = _university_population(
             reads,
