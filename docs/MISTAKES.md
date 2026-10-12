@@ -598,3 +598,12 @@ already bound in the file, above all to a module: `from datetime import time`
 replaces `import time` without a word from the linter. Import the second one
 under its own name (`time as time_of_day`), and run the suites of every caller
 in the file, not only the ticket's own.
+
+## 61. A breakdown stated a fact about the seeded world that nobody had checked
+
+**Caught: 0** · [the incidents, the root cause, and the whole rule](mistakes/61-a-breakdown-stated-a-fact-about-the-seeded-world-nobody-had-checked.md)
+
+**Rule.** A ticket's statement about the existing tree or the seeded world is a
+claim to check, not a premise to build on: resolve it the way the feature will
+(the subject through the door's own function, the row through the reader), and
+when it is false, say so before building around it.
