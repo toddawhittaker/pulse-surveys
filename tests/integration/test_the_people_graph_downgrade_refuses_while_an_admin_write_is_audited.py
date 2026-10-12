@@ -45,8 +45,10 @@ from test_the_response_records_downgrade_refuses_while_a_row_exists import (
 
 pytestmark = pytest.mark.integration
 
-# The ticket's own allotment: E9-02's migration chains from this revision.
-BELOW_E9_02 = "7f679faf4b8d"
+# E9-02's migration chains from E9-03's revision. The E9 README's counters rule has
+# the ticket that merges second re-point its `down_revision` to the head it finds;
+# E9-03 merged first, so E9-02 re-pointed (the ruling on docs/disputes/E9-02-03.md).
+BELOW_E9_02 = "e9b2c4d6a802"
 E9_02_REVISION = "e9a1d0c3f201"
 
 AUDIT_LOG = "audit_log"
@@ -64,7 +66,7 @@ SUBJECT_USER_NULLABLE = text(
 
 
 def require_the_revision(config: Any) -> None:
-    """E9-02's revision is in the history and chains from `7f679faf4b8d`, or a failure."""
+    """E9-02's revision is in the history and chains from `e9b2c4d6a802`, or a failure."""
     from alembic.script import ScriptDirectory
 
     script = ScriptDirectory.from_config(config)
@@ -113,7 +115,7 @@ def plant_an_admin_write(database: Any, tables: dict[str, Any]) -> None:
 def test_the_downgrade_refuses_while_an_admin_write_row_exists(
     empty_database: Any, metadata_tables: dict[str, Any], alembic_config_pointed_at: Any
 ) -> None:
-    """One `ROLE_GRANTED` row at head: `downgrade 7f679faf4b8d` raises `RuntimeError`; the row and its columns stay.
+    """One `ROLE_GRANTED` row at head: `downgrade e9b2c4d6a802` raises `RuntimeError`; the row and its columns stay.
 
     **The mutations it kills:** no guard, so the downgrade drops
     `subject_person_id` and either fails on restoring `NOT NULL` part-way or
@@ -149,7 +151,7 @@ def test_the_downgrade_refuses_while_an_admin_write_row_exists(
 def test_the_downgrade_round_trips_over_an_audit_log_with_no_admin_write(
     empty_database: Any, metadata_tables: dict[str, Any], alembic_config_pointed_at: Any
 ) -> None:
-    """Head, down to `7f679faf4b8d`, head again, over no admin-write rows: E9-02 gone in the middle, then back.
+    """Head, down to `e9b2c4d6a802`, head again, over no admin-write rows: E9-02 gone in the middle, then back.
 
     The twin the refusal needs. **The mutations it kills:** a guard that refuses
     unconditionally; a downgrade that leaves a column, the functions or the
