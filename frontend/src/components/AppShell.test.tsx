@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 
@@ -220,5 +224,13 @@ describe('AppShell', () => {
     renderShell();
     expect(await screen.findByRole('combobox', { name: 'Switch view' })).toBeTruthy();
     expect(screen.getByTestId(SHELL_TESTID)).toBeTruthy();
+  });
+});
+
+describe('the shell’s stylesheet', () => {
+  it('is its own, so a page with the shell does not load the roll-up’s', () => {
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'AppShell.tsx'), 'utf8');
+    const sheets = [...source.matchAll(/^import '(\.[^']*\.css)';$/gm)].map((match) => match[1]);
+    expect(sheets).toEqual(['./appShell.css']);
   });
 });
