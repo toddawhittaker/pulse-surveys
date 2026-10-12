@@ -840,6 +840,29 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/context": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * My leadership roles, the terms, and the current term
+         * @description What the roll-up pages read first: which term to open, and the reader's own roles.
+         *
+         *     The roles are the session's own (ADR 0199); the terms are every term, which
+         *     is no secret.
+         */
+        readonly get: operations["read_leadership_context_leadership_context_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/leadership/rollup": {
         readonly parameters: {
             readonly query?: never;
@@ -1927,6 +1950,23 @@ export interface components {
             readonly reason?: string | null;
         };
         /**
+         * LeadershipContext
+         * @description What the leadership pages need before their first read (SPEC §5.5).
+         *
+         *     `roles` is every leadership role the reader holds, highest first, so a
+         *     read-only context bar can name the reader's role. `terms` is every term,
+         *     oldest first; `current_term_id` is the term whose dates contain the
+         *     institution's today, absent between terms. Terms are no secret.
+         */
+        readonly LeadershipContext: {
+            /** Roles */
+            readonly roles: readonly ("VP_ACADEMICS" | "DEAN" | "ASSISTANT_DEAN" | "CHAIR" | "LEAD_FACULTY")[];
+            /** Terms */
+            readonly terms: readonly components["schemas"]["RollupTerm"][];
+            /** Current Term Id */
+            readonly current_term_id: string | null;
+        };
+        /**
          * LogRow
          * @description One decision a person made about a comment inside the reader's own grant.
          */
@@ -2642,6 +2682,31 @@ export interface components {
             readonly response_rate: number | null;
             /** Validity Rate */
             readonly validity_rate: number | null;
+        };
+        /**
+         * RollupTerm
+         * @description One term a roll-up may be read for: its name, its dates and its length in weeks.
+         */
+        readonly RollupTerm: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Name */
+            readonly name: string;
+            /**
+             * Start Date
+             * Format: date
+             */
+            readonly start_date: string;
+            /**
+             * End Date
+             * Format: date
+             */
+            readonly end_date: string;
+            /** Length Weeks */
+            readonly length_weeks: number;
         };
         /**
          * RollupTree
@@ -4349,6 +4414,26 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_leadership_context_leadership_context_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["LeadershipContext"];
                 };
             };
         };

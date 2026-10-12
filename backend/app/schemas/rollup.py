@@ -138,3 +138,35 @@ class RollupFigures(BaseModel):
     cohorts: list[RollupCohort]
     attention: list[AttentionCard]
     attention_empty: str | None
+
+
+# The leadership roles a reader can hold, as the context answers them.
+LeaderRole = Literal["VP_ACADEMICS", "DEAN", "ASSISTANT_DEAN", "CHAIR", "LEAD_FACULTY"]
+
+
+class RollupTerm(BaseModel):
+    """One term a roll-up may be read for: its name, its dates and its length in weeks."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: UUID
+    name: str
+    start_date: date
+    end_date: date
+    length_weeks: int
+
+
+class LeadershipContext(BaseModel):
+    """What the leadership pages need before their first read (SPEC §5.5).
+
+    `roles` is every leadership role the reader holds, highest first, so a
+    read-only context bar can name the reader's role. `terms` is every term,
+    oldest first; `current_term_id` is the term whose dates contain the
+    institution's today, absent between terms. Terms are no secret.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    roles: list[LeaderRole]
+    terms: list[RollupTerm]
+    current_term_id: UUID | None

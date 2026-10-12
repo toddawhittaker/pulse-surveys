@@ -1149,6 +1149,28 @@
         }
       }
     },
+    "/leadership/context": {
+      "get": {
+        "tags": [
+          "leadership"
+        ],
+        "summary": "My leadership roles, the terms, and the current term",
+        "description": "What the roll-up pages read first: which term to open, and the reader's own roles.\n\nThe roles are the session's own (ADR 0199); the terms are every term, which\nis no secret.",
+        "operationId": "read_leadership_context_leadership_context_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LeadershipContext"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/leadership/rollup": {
       "get": {
         "tags": [
@@ -3288,6 +3310,51 @@
         "title": "LeadDecision",
         "description": "What a lead or chair sends to exclude or keep one queued comment.\n\nTwo actions: a leader has no undo (decision 1). `reason` is optional, because\nevery queued comment was flagged by the AI, and is checked by the decision\nservice as it was sent, before any trimming (`docs/MISTAKES.md` entry 29)."
       },
+      "LeadershipContext": {
+        "properties": {
+          "roles": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "VP_ACADEMICS",
+                "DEAN",
+                "ASSISTANT_DEAN",
+                "CHAIR",
+                "LEAD_FACULTY"
+              ]
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/RollupTerm"
+            },
+            "type": "array",
+            "title": "Terms"
+          },
+          "current_term_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Term Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "roles",
+          "terms",
+          "current_term_id"
+        ],
+        "title": "LeadershipContext",
+        "description": "What the leadership pages need before their first read (SPEC \u00a75.5).\n\n`roles` is every leadership role the reader holds, highest first, so a\nread-only context bar can name the reader's role. `terms` is every term,\noldest first; `current_term_id` is the term whose dates contain the\ninstitution's today, absent between terms. Terms are no secret."
+      },
       "LogRow": {
         "properties": {
           "section_label": {
@@ -4583,6 +4650,43 @@
         ],
         "title": "RollupParticipation",
         "description": "A cohort's response rate and validity rate in its latest published week."
+      },
+      "RollupTerm": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Start Date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "End Date"
+          },
+          "length_weeks": {
+            "type": "integer",
+            "title": "Length Weeks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "start_date",
+          "end_date",
+          "length_weeks"
+        ],
+        "title": "RollupTerm",
+        "description": "One term a roll-up may be read for: its name, its dates and its length in weeks."
       },
       "RollupTree": {
         "properties": {
