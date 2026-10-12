@@ -747,8 +747,16 @@ def _import_people(
         _begin(session, applying=applying)
         everyone = _people(session, actor)
         before = {person: everyone[person] for person in named if person in everyone}
+        # A new person's line is held to the people already bearing its name, so
+        # applying the same file twice is refused rather than creating two copies.
+        new_names = {row.name for row in rows if row.person_id is None}
+        watched = {
+            person: row
+            for person, row in everyone.items()
+            if person in named or row["identity_name"] in new_names
+        }
         state = sorted(
-            [str(person), row["identity_name"], row["category"]] for person, row in before.items()
+            [str(person), row["identity_name"], row["category"]] for person, row in watched.items()
         )
         expected = _digest("people", body, state)
         if applying and digest != expected:

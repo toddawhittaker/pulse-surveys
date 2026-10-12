@@ -220,6 +220,22 @@ def test_a_people_import_adds_and_changes_after_its_dry_run(people_editor: Peopl
     }
     assert len(people_editor.rows(named_new, n=f"New Person {tag}")) == 1
 
+    replayed = _apply(people_editor, PEOPLE, body, diff["digest"])
+    assert replayed.status_code == 409
+    assert len(people_editor.rows(named_new, n=f"New Person {tag}")) == 1
+
+
+def test_a_file_of_new_people_alone_is_not_applied_twice(people_editor: PeopleEditor) -> None:
+    name = f"Only New {uuid4().hex[:8]}"
+    body = _csv(PEOPLE_HEADER, [["", name, "Dean"]])
+    digest = _dry_run(people_editor, PEOPLE, body).json()["digest"]
+    assert _apply(people_editor, PEOPLE, body, digest).status_code == 200
+    assert _apply(people_editor, PEOPLE, body, digest).status_code == 409
+    assert (
+        len(people_editor.rows("SELECT id FROM public.person WHERE identity_name = :n", n=name))
+        == 1
+    )
+
 
 def test_a_people_line_with_a_padded_name_is_refused_and_not_trimmed(
     people_editor: PeopleEditor,
