@@ -203,6 +203,13 @@ boundary: `metadata_tables` is asked for by both.
     students, former teacher, two-hat person and response a test plants for
     itself.
 
+  - `fixtures/named_set_figures.py` — E9-05: E5-03's benchmark world given named
+    departments, courses with several sections, and the people and assignments
+    E9-01's purview is resolved from (`purview_world`, unbuilt); the reads E9-05's
+    interface settles — `named_set_series` and `section_benchmarks` with the
+    reader's scope — reached inside a test body; and the readers for one week of
+    a series, a figure's state, and any answer as plain data for equality.
+
 Six modules under `tests/fixtures/` carry **no fixtures** and are therefore not
 in the tuple below: they are imported directly, the way `fixtures.supervision`'s
 `seed_row` already is. They are listed here because this docstring is the index
@@ -302,6 +309,7 @@ pytest_plugins = (
     "fixtures.the_hold",
     "fixtures.response_draft",
     "fixtures.response_loop_doors",
+    "fixtures.named_set_figures",
 )
 
 

@@ -94,11 +94,17 @@ def references(source: str, where: str) -> list[tuple[int, tuple[str, ...], bool
             enclosing = (*enclosing, node.name)
         if isinstance(node, ast.ImportFrom) and any(a.name == RESOLVER for a in node.names):
             found.append((node.lineno, enclosing, True))
-        elif isinstance(node, ast.Name) and node.id in aliases or isinstance(node, ast.Attribute) and node.attr == RESOLVER or (
-            isinstance(node, ast.Constant)
-            and isinstance(node.value, str)
-            and id(node) not in excused
-            and NAMED.search(node.value) is not None
+        elif (
+            isinstance(node, ast.Name)
+            and node.id in aliases
+            or isinstance(node, ast.Attribute)
+            and node.attr == RESOLVER
+            or (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in excused
+                and NAMED.search(node.value) is not None
+            )
         ):
             found.append((node.lineno, enclosing, False))
         for child in ast.iter_child_nodes(node):
