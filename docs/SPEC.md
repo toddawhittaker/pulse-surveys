@@ -354,7 +354,7 @@ Selected constraints:
 - `comparison_set` holds named leadership-defined sets; the default per section (same lead's courses, matched length+level, past-referencing) is computed, not stored.
 - `instructor_response` is append-only: one row per published response and per edit, naming the section and course week, the author (a `person` key that cannot be deleted from under it), the role the author wrote under (instructor, Lead Faculty, or the chair acting as lead for a course with no lead; a response on behalf is that role, not a separate flag), whether it was AI-seeded, the text (non-blank, at most 4000 characters) and the time. The week belongs to the section's term. A row is refused when it is written unless its author holds the role it states for the section at that moment, and a section-week takes rows from one author only. The latest row for a section-week is the response students see, and "latest" is a database-assigned sequence column, as on `moderation_state`.
 - `response_policy` is append-only too: one row per course a policy change covers, naming the course (fixed when the row is written), the prefix the setter switched, the person who set it, the role they set it under (Lead Faculty, or the chair for the courses with no lead), the mode (encouraged or required), the time, and the same sequence column. A row is refused unless its setter holds the role it states for that course. The policy in force for a course is its latest row, whoever wrote it.
-- A member of staff's name reaches a reader only through one database function, which answers one section's live teaching instructors and the authors of its published responses, and answers only a reader of that section: a student with a live enrollment in it, its teaching instructor, or the lead or chair responsible for its course.
+- A member of staff's name reaches a reader only through one database function, in two versions. The first answers one section's live teaching instructors and the authors of its published responses, and answers only a reader of that section: a student with a live enrollment in it, its teaching instructor, or the lead or chair responsible for its course. The second answers a set of sections in one call, one row per section, role and person, naming each section's live teaching instructors, its published responses' authors, its course's lead, its department's chair and its college's dean. It answers a section to a student with a live enrollment in it on the reader's date in the institution's timezone, to its teaching instructor, and to the lead of its course; a reader holding a chair, assistant dean, dean or vice president assignment is answered for any section passed, and the application passes such a reader only the sections inside their purview.
 - `audit_log` is append-only and includes all re-identifications, imports (with their dry-run diffs), and admin config edits. It holds no exclusion or keep: those are `moderation_state` rows, which name their decider. It holds no policy change and no response, on behalf or not: those are `response_policy` and `instructor_response` rows, which name the person and the role.
 - Identity separation: instructor/leadership read paths go through views that structurally cannot join to `user` identity columns — enforced in the database, not just the application. Only the Care role's queue path can reach identity, and only via the audited reveal action. The §4.1 invariants are asserted against these views in CI.
 
@@ -457,6 +457,7 @@ pulse-surveys/
 │       │   ├── response_loop_guard_v001.sql  # who may write a response or a policy, checked at insert
 │       │   ├── response_loop_guard_v002.sql  # who may set a policy, checked for the one course a row covers
 │       │   ├── section_staff_names_v001.sql  # the one channel a staff name reaches a reader through
+│       │   ├── section_staff_names_v002.sql  # the same channel over a set of sections, with each name's role
 │       │   └── queries.py          # typed ways into the read views
 │       │
 │       ├── schemas/                # Pydantic request/response contracts (also feeds OpenAPI)
@@ -512,7 +513,7 @@ pulse-surveys/
 │       │   ├── comparison_sets.py  # defining, editing and deleting a named comparison set
 │       │   ├── safety.py           # the Care queue, and the only connection that can reach identity (§6.2)
 │       │   ├── moderation.py       # moderation verdict routing, the hourly sweep, decisions, the review queue and log (§5.2)
-│       │   ├── response_loop.py    # a section's staff names for a reader of it; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)
+│       │   ├── response_loop.py    # the staff names of a set of sections for a reader of them; the hold: policy of record, week state, the writers; the publish, policy and on-behalf doors (§5.3)
 │       │   └── retention.py        # configurable purge jobs (§4) — not built yet: E13
 │       │
 │       ├── lti/                    # pylti1p3 integration
