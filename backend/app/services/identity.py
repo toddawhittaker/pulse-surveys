@@ -24,11 +24,13 @@ anyway: E1-10's round-3 review revoked `SELECT (lms_user_id)` on `user` from
 `pulse_app`, because a connection able to read that column can enumerate every
 subject that ever launched and join a response back to the person who gave it,
 and `pulse_app` holds no privilege on `person` at all. So every lookup below goes
-through a `SECURITY DEFINER` function that answers one point question (ADR 0094):
-this subject, this row. The connection resolves a subject it already holds from a
+through a `SECURITY DEFINER` function. Four answer one point question (ADR 0094):
+this subject, this row. The fifth, `persons_for_users`, answers a set: the person
+keys of the user ids the caller already holds, ADR 0205's own mechanism for a bulk
+need, because ADR 0094 forbids looping a point resolver. The connection resolves a subject it already holds from a
 token it has verified, and can never enumerate the subjects it does not.
 
-**Three of the four answer a uuid and one answers a subject**, and the asymmetry
+**Three of the four point lookups answer a uuid and one answers a subject**, and the asymmetry
 is a decision rather than an oversight. `subject_for_user` runs the mechanism
 backwards for SPEC §3.4's grade passback, which posts a score keyed by the LTI
 `sub` and can key it by nothing else, so it hands a value back where the others

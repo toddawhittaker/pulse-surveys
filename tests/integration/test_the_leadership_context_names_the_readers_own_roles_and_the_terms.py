@@ -11,9 +11,11 @@ of one course and the chair of its department. Every request rides the built
 application as `pulse_app` (`docs/MISTAKES.md` entries 46 and 47).
 """
 
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 
 import pytest
+from fixtures.clock import ClockOverrides
 from fixtures.lead_review import CHAIR_ROLE, LEAD_FACULTY_ROLE, LeadReviewWorld, Reader
 from fixtures.supervision import require_table, single_primary_key
 from fixtures.survey_windows import TERM_TABLE
@@ -79,6 +81,82 @@ def test_the_terms_carry_the_worlds_term_and_the_current_one_is_listed(
     assert starts == sorted(starts), f"The terms are not oldest first: {starts}."
     current = body["current_term_id"]
     assert current is None or str(current) in listed
+
+
+def expected_opening_term(terms: list[dict[str, Any]], today: date) -> str | None:
+    """The term the pages open on `today`, read off the answer's own term list.
+
+    The one containing today, the later-started of two that overlap; else the
+    latest that has begun; else none. The shared database holds other tests'
+    terms too, so the expectation is computed from what the route listed.
+    """
+
+    def start(term: dict[str, Any]) -> date:
+        return date.fromisoformat(term["start_date"])
+
+    def end(term: dict[str, Any]) -> date:
+        return date.fromisoformat(term["end_date"])
+
+    containing = [term for term in terms if start(term) <= today <= end(term)]
+    pool = containing or [term for term in terms if start(term) <= today]
+    if not pool:
+        return None
+    return str(max(pool, key=start)["id"])
+
+
+def context_on(review: LeadReviewWorld, overrides: ClockOverrides, today: date) -> dict[str, Any]:
+    """The lead's context with the development clock moved to noon UTC on `today`.
+
+    Noon UTC is the same calendar day in every zone an institution in this
+    product sits in, so the institution's day is `today` (ADR 0109).
+    """
+    overrides.set(
+        pretend_now=datetime.combine(today, time(12), tzinfo=UTC), anchored_at=datetime.now(UTC)
+    )
+    assert review.lead is not None
+    return context_for(review, review.lead)
+
+
+def test_the_term_containing_today_is_the_one_opened(
+    lead_review: LeadReviewWorld, committed_clock_overrides: ClockOverrides
+) -> None:
+    """On the world's term's first day, a term containing that day is opened."""
+    term_row = lead_review.world.calendar.term
+    first_day = term_row["start_date"]
+    body = context_on(lead_review, committed_clock_overrides, first_day)
+    opened = body["current_term_id"]
+    assert opened is not None
+    assert str(opened) == expected_opening_term(body["terms"], first_day)
+    term = next(term for term in body["terms"] if str(term["id"]) == str(opened))
+    assert (
+        date.fromisoformat(term["start_date"]) <= first_day <= date.fromisoformat(term["end_date"])
+    )
+
+
+def test_between_terms_the_latest_term_that_has_begun_is_opened(
+    lead_review: LeadReviewWorld, committed_clock_overrides: ClockOverrides
+) -> None:
+    """With no term containing the day, the latest begun one opens, never a future one."""
+    far = date(2999, 1, 1)
+    body = context_on(lead_review, committed_clock_overrides, far)
+    assert not any(
+        date.fromisoformat(term["start_date"]) <= far <= date.fromisoformat(term["end_date"])
+        for term in body["terms"]
+    ), "A term contains the probe day, so this test reads nothing about the fallback."
+    opened = body["current_term_id"]
+    assert opened is not None, "Between terms the context opened no term at all."
+    assert str(opened) == expected_opening_term(body["terms"], far)
+
+
+def test_before_any_term_begins_no_term_is_opened(
+    lead_review: LeadReviewWorld, committed_clock_overrides: ClockOverrides
+) -> None:
+    """A day before every listed term opens none, rather than a term not yet begun."""
+    listed = context_on(lead_review, committed_clock_overrides, date(2999, 1, 1))["terms"]
+    assert listed, "The world lists no term, so this test reads nothing."
+    earliest = min(date.fromisoformat(term["start_date"]) for term in listed)
+    body = context_on(lead_review, committed_clock_overrides, earliest - timedelta(days=1))
+    assert body["current_term_id"] is None
 
 
 def test_a_request_without_a_session_is_refused(lead_review: LeadReviewWorld) -> None:

@@ -23,6 +23,7 @@ import {
 import { AggregateHeader } from '../../components/AggregateHeader';
 import { AttentionList } from '../../components/AttentionList';
 import { HierarchyNav } from '../../components/HierarchyNav';
+import { LiveStatus } from '../../components/LiveStatus';
 import type { OverlaySeries, TrendPoint } from '../../components/PulseTrendChart';
 import { ResponseRateBar } from '../../components/ResponseRateBar';
 import { StatPair } from '../../components/StatPair';
@@ -34,13 +35,8 @@ import { copy as responseCopy } from '../../copy/leadershipResponseCopy';
 import { copy, fillCopy } from '../../copy/leadershipRollupCopy';
 import { LANDINGS } from '../../lib/landings';
 import '../../components/leadershipRollup.css';
-import { COMPARISON_SETS_ROUTE } from './ComparisonSetForm';
-import { DRILL_DOWN_ROUTE } from './DrillDown';
-import { EXCLUSION_LOG_ROUTE } from './ExclusionLog';
-import { RESPONSE_POLICY_ROUTE } from './ResponsePolicy';
-import { RESPONSES_OWED_ROUTE } from './ResponsesOwed';
-import { REVIEW_QUEUE_ROUTE } from './ReviewQueue';
 import './leadershipComparisonSets.css';
+import { COMPARISON_SETS_ROUTE, DRILL_DOWN_ROUTE, EXCLUSION_LOG_ROUTE, RESPONSES_OWED_ROUTE, RESPONSE_POLICY_ROUTE, REVIEW_QUEUE_ROUTE } from '../paths';
 
 /**
  * The leadership landing: SPEC §5.5's roll-up, one template for every
@@ -66,8 +62,14 @@ import './leadershipComparisonSets.css';
  * **Polite live regions that exist before their text arrives.** The page's
  * region, present from the first render, carries the context's and the tree's
  * loading lines and refusals; the content pane's, mounted with the tree, carries
- * a node's; the named-set control's carries the set's. Choosing a node moves
- * focus to its heading, so a reader hears what was chosen.
+ * a node's, ending on "Showing {name}" once its figures arrive; the named-set
+ * control's carries the set's. Each mounts empty and is given its text a tick
+ * later (`LiveStatus`), so the first loading line is heard too.
+ *
+ * **Focus.** Pressing a tree row leaves focus on the row, so a reader moving
+ * through the tree keeps their place and hears the pane's status instead. A
+ * breadcrumb press moves focus to the node's heading, because the button
+ * pressed leaves the trail.
  *
  * **No comment appears here** (SPEC §5.5, settled at the E9 breakdown): the
  * roll-up carries figures and attention cards, and a section's comments are
@@ -120,9 +122,7 @@ export function LeadershipLanding(): JSX.Element {
       <h1 className="pulse-rollup-title" id={HEADING_ID}>
         {landingCopy(LANDINGS.leadership.heading)}
       </h1>
-      <p className="pulse-rollup-status" role="status">
-        {status}
-      </p>
+      <LiveStatus className="pulse-rollup-status" text={status} />
       {empty ? <p className="pulse-rollup-note">{landingCopy(LANDINGS.leadership.emptyState)}</p> : null}
       {terms.length > 0 && termId !== null ? (
         <div className="pulse-rollup-bar">
@@ -291,11 +291,11 @@ function Rollup({
     (first === undefined ? [] : [first]);
   const node = path.at(-1) ?? null;
 
-  // A choice moves focus to the chosen node's heading: a breadcrumb press
-  // unmounts the button pressed, and a tree press changes the whole pane.
+  // A breadcrumb press unmounts the button pressed, so focus moves to the
+  // chosen node's heading; a tree press leaves focus on its row.
   const focusTheHeading = useRef(false);
-  function choose(next: RollupNodeView): void {
-    focusTheHeading.current = true;
+  function choose(next: RollupNodeView, moveFocus: boolean): void {
+    focusTheHeading.current = moveFocus;
     setChosen({ kind: next.kind, id: next.id });
   }
   useEffect(() => {
@@ -352,7 +352,9 @@ function Rollup({
           key={mode}
           roots={roots}
           selectedId={node?.id ?? null}
-          onSelect={choose}
+          onSelect={(next) => {
+            choose(next, false);
+          }}
           sectionLink={(section, children) => (
             <Link
               className="pulse-hierarchy-link"
@@ -380,7 +382,7 @@ function Rollup({
                       type="button"
                       className="pulse-rollup-crumb-button"
                       onClick={() => {
-                        choose(step);
+                        choose(step, true);
                       }}
                     >
                       {step.name}
@@ -392,15 +394,18 @@ function Rollup({
             ))}
           </ol>
         </nav>
-        <p className="pulse-rollup-status" role="status">
-          {node === null
-            ? ''
-            : figures === null
-              ? copy('leadership_rollup.figures.loading')
-              : figures.kind === 'ok'
-                ? ''
-                : refusalLine(figures, 'leadership_rollup.figures.unavailable')}
-        </p>
+        <LiveStatus
+          className="pulse-rollup-status"
+          text={
+            node === null
+              ? ''
+              : figures === null
+                ? copy('leadership_rollup.figures.loading')
+                : figures.kind === 'ok'
+                  ? fillCopy('leadership_rollup.figures.showing', { name: node.name })
+                  : refusalLine(figures, 'leadership_rollup.figures.unavailable')
+          }
+        />
         {node === null ? null : (
           <NodeFigures
             key={`${node.kind}:${node.id}`}
@@ -432,6 +437,9 @@ function NodeFigures({
   );
 }
 
+/** The cohort chip that shows every start cohort at once: the default (SPEC §2.2). */
+const ALL_STARTS = 'all';
+
 function Figures({
   figures,
   term,
@@ -439,18 +447,20 @@ function Figures({
   readonly figures: RollupFiguresView;
   readonly term: RollupTermView;
 }): JSX.Element {
-  const [cohortAt, setCohortAt] = useState(0);
-  const cohort: RollupCohortView | undefined = figures.cohorts[cohortAt] ?? figures.cohorts[0];
+  const [picked, setPicked] = useState<string>(ALL_STARTS);
+  const chosen = figures.cohorts.filter((cohort) => cohort.section_start_date === picked);
+  const shown = chosen.length > 0 ? chosen : figures.cohorts;
 
   return (
     <>
-      {cohort === undefined ? (
+      {figures.cohorts.length === 0 ? (
         <p className="pulse-rollup-note">{copy('leadership_rollup.figures.no_cohorts')}</p>
       ) : (
         <CohortFigures
           cohorts={figures.cohorts}
-          cohort={cohort}
-          onChoose={setCohortAt}
+          shown={shown}
+          picked={chosen.length > 0 ? picked : ALL_STARTS}
+          onPick={setPicked}
           term={term}
         />
       )}
@@ -474,15 +484,26 @@ function Figures({
   );
 }
 
+/**
+ * The trend, workload and participation for the start cohorts the chips show.
+ *
+ * "All starts" draws every cohort's line on the one term axis; a cohort chip
+ * draws that cohort alone, and only then is the named set's line drawn beside
+ * it, because a set's line beside several cohorts would not say which one it
+ * compares. Workload and participation follow the chips, one block per cohort
+ * shown, each named by its cohort when there is more than one.
+ */
 function CohortFigures({
   cohorts,
-  cohort,
-  onChoose,
+  shown,
+  picked,
+  onPick,
   term,
 }: {
   readonly cohorts: readonly RollupCohortView[];
-  readonly cohort: RollupCohortView;
-  readonly onChoose: (index: number) => void;
+  readonly shown: readonly RollupCohortView[];
+  readonly picked: string;
+  readonly onPick: (key: string) => void;
   readonly term: RollupTermView;
 }): JSX.Element {
   const [sets, setSets] = useState<readonly ComparisonSetSummaryView[]>([]);
@@ -504,40 +525,64 @@ function CohortFigures({
     ),
   );
   const chosenSet = sets.find((candidate) => candidate.id === setId) ?? null;
-  const setLine = chosenSet === null ? null : namedSetLines(series, cohort);
-  const latest = latestWorkload(cohort.weeks);
-  const participation = cohort.participation;
+  const single = shown.length === 1 ? (shown[0] ?? null) : null;
+  const setLine = chosenSet === null || single === null ? null : namedSetLines(series, single);
+  const named = shown.length > 1;
 
   return (
     <>
       <h3 className="pulse-rollup-heading">{copy('leadership_rollup.trend.heading')}</h3>
-      <TrendPair
-        axis="term"
-        lengthWeeks={term.length_weeks}
-        instructor={termAxis(cohort.weeks, 'instructor_mean')}
-        course={termAxis(cohort.weeks, 'course_mean')}
-        heroLabel={copy('leadership_rollup.trend.legend_node')}
-        instructorBenchmark={setLine === null ? undefined : { comparison: setLine.instructor }}
-        courseBenchmark={setLine === null ? undefined : { comparison: setLine.course }}
-        {...(chosenSet === null
-          ? {}
-          : {
-              comparisonLabel: chosenSet.name,
-              comparisonSuppressed: fillCopy('leadership_rollup.set.suppressed', {
-                name: chosenSet.name,
-              }),
-            })}
-      />
+      {single === null ? (
+        <TrendPair
+          axis="term"
+          lengthWeeks={term.length_weeks}
+          instructor={[]}
+          course={[]}
+          cohorts={shown.map((cohort) => ({
+            label: cohort.label,
+            instructor: termAxis(cohort.weeks, 'instructor_mean'),
+            course: termAxis(cohort.weeks, 'course_mean'),
+          }))}
+        />
+      ) : (
+        <TrendPair
+          axis="term"
+          lengthWeeks={term.length_weeks}
+          instructor={termAxis(single.weeks, 'instructor_mean')}
+          course={termAxis(single.weeks, 'course_mean')}
+          heroLabel={copy('leadership_rollup.trend.legend_node')}
+          instructorBenchmark={setLine === null ? undefined : { comparison: setLine.instructor }}
+          courseBenchmark={setLine === null ? undefined : { comparison: setLine.course }}
+          {...(chosenSet === null
+            ? {}
+            : {
+                comparisonLabel: chosenSet.name,
+                comparisonSuppressed: fillCopy('leadership_rollup.set.suppressed', {
+                  name: chosenSet.name,
+                }),
+              })}
+        />
+      )}
       <div className="pulse-rollup-choices">
         <div role="group" aria-label={copy('leadership_rollup.cohort.label')} className="pulse-rollup-field">
-          {cohorts.map((candidate, index) => (
+          <button
+            type="button"
+            className="pulse-rollup-mode"
+            aria-pressed={picked === ALL_STARTS}
+            onClick={() => {
+              onPick(ALL_STARTS);
+            }}
+          >
+            {copy('leadership_rollup.cohort.all')}
+          </button>
+          {cohorts.map((candidate) => (
             <button
               key={candidate.section_start_date}
               type="button"
               className="pulse-rollup-mode"
-              aria-pressed={candidate === cohort}
+              aria-pressed={picked === candidate.section_start_date}
               onClick={() => {
-                onChoose(index);
+                onPick(candidate.section_start_date);
               }}
             >
               {candidate.label}
@@ -562,24 +607,67 @@ function CohortFigures({
           </select>
         </label>
       </div>
-      <p className="pulse-rollup-status" role="status">
-        {setId === null
-          ? ''
-          : series === null
-            ? copy('leadership_rollup.set.loading')
-            : series.kind === 'ok'
-              ? ''
-              : refusalLine(series, 'leadership_rollup.set.unavailable')}
-      </p>
+      <LiveStatus
+        className="pulse-rollup-status"
+        text={
+          setId === null
+            ? ''
+            : series === null
+              ? copy('leadership_rollup.set.loading')
+              : series.kind !== 'ok'
+                ? refusalLine(series, 'leadership_rollup.set.unavailable')
+                : chosenSet !== null && single === null
+                  ? fillCopy('leadership_rollup.set.choose_one', { name: chosenSet.name })
+                  : ''
+        }
+      />
 
       <h3 className="pulse-rollup-heading">{copy('leadership_rollup.workload.heading')}</h3>
+      {shown.map((cohort) => (
+        <CohortWorkload key={cohort.section_start_date} cohort={cohort} named={named} />
+      ))}
+
+      <h3 className="pulse-rollup-heading">{copy('leadership_rollup.participation.heading')}</h3>
+      {shown.map((cohort) => (
+        <CohortParticipation key={cohort.section_start_date} cohort={cohort} named={named} />
+      ))}
+    </>
+  );
+}
+
+/** One cohort's latest workload, under its label when several are shown. */
+function CohortWorkload({
+  cohort,
+  named,
+}: {
+  readonly cohort: RollupCohortView;
+  readonly named: boolean;
+}): JSX.Element {
+  const latest = latestWorkload(cohort.weeks);
+  return (
+    <>
+      {named ? <h4 className="pulse-rollup-subheading">{cohort.label}</h4> : null}
       {latest === null ? (
         <p className="pulse-rollup-note">{copy('leadership_rollup.workload.absent')}</p>
       ) : (
         <StatPair median={latest.median} mean={latest.mean} />
       )}
+    </>
+  );
+}
 
-      <h3 className="pulse-rollup-heading">{copy('leadership_rollup.participation.heading')}</h3>
+/** One cohort's latest participation, under its label when several are shown. */
+function CohortParticipation({
+  cohort,
+  named,
+}: {
+  readonly cohort: RollupCohortView;
+  readonly named: boolean;
+}): JSX.Element {
+  const participation = cohort.participation;
+  return (
+    <>
+      {named ? <h4 className="pulse-rollup-subheading">{cohort.label}</h4> : null}
       {participation === null || participation.response_rate === null ? (
         <p className="pulse-rollup-note">{copy('leadership_rollup.participation.absent')}</p>
       ) : (

@@ -18,6 +18,7 @@ import { StateNotice } from '../../components/StateNotice';
 import { TrendDuo } from '../../components/TrendDuo';
 import { WeekNav } from '../../components/WeekNav';
 import { copy, fillCopy } from '../../copy/studentResults';
+import { WEEK_RESULTS_ROUTE } from '../paths';
 
 /**
  * SPEC §7.6's `StudentResults` — the shell: one section's reply for one
@@ -51,10 +52,6 @@ import { copy, fillCopy } from '../../copy/studentResults';
  * do not carry: the institution's time zone, which the date on the card is shown
  * in. A failed survey read costs the card its date, not the page its reply.
  */
-
-/** The two addresses this page answers, relative to the router's `/app` mount. */
-export const LATEST_RESULTS_ROUTE = '/student/sections/$sectionId/results';
-export const WEEK_RESULTS_ROUTE = '/student/sections/$sectionId/weeks/$courseWeek/results';
 
 /**
  * Set when the student picks a week, so that focus moves to the heading once

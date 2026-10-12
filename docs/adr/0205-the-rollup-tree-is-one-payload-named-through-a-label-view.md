@@ -32,7 +32,10 @@ this ticket failed on exactly that.
   Algebra", built in the view's SQL. The view is read only through
   `authz.ScopedReader.org_node_labels(section_ids=...)`, which refuses a section
   outside the purview and walks `parent_id` upward from each section's course,
-  so a reader is named only the nodes above sections they hold.
+  so a reader is named only the nodes above sections they hold. One other reader
+  exists, and it is unscoped on purpose: `authz.admin_grant_nodes` lists every
+  node of one level for the admin's grant picker (ADR 0200), and its one caller
+  is `api/admin.py` behind `require_admin`.
 - **Node series through the set functions.** `benchmarks.node_series` groups a
   node's sections by start date and reads `benchmark_set_week` and
   `benchmark_set_rating_week` once per cohort. Node figures are plain values,
@@ -93,5 +96,6 @@ this ticket failed on exactly that.
   answers one call at a time.
 - A section whose path is incomplete in the view fails the read loudly
   (`LookupError`) rather than leaving a node unnamed.
-- The view lists every org node to `pulse_app`; the narrowing to the reader's
-  purview is `ScopedReader`'s, as for every other org view (ADR 0046).
+- The view lists every org node to `pulse_app`; the narrowing to a leadership
+  reader's purview is `ScopedReader`'s, as for every other org view (ADR 0046),
+  and the admin's grant picker (`admin_grant_nodes`) reads it unscoped.

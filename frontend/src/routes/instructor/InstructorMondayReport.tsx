@@ -40,6 +40,7 @@ import { WeekNav } from '../../components/WeekNav';
 import { copy as commentCopy } from '../../copy/instructorReportCommentCopy';
 import { copy, fillCopy } from '../../copy/instructorReportPageCopy';
 import './instructorReportPage.css';
+import { REPORT_ROUTE } from '../paths';
 
 /**
  * SPEC §7.6's `InstructorMondayReport` — ticket E4-11.
@@ -104,8 +105,6 @@ export const INSTRUCTOR_REPORT_ERROR_TESTID = 'pulse-instructor-report-error';
 
 const HEADING_ID = 'pulse-instructor-report-heading';
 
-/** The route this page is served at, and the one `WeekNav` navigates within. */
-export const REPORT_ROUTE = '/instructor/sections/$sectionId';
 
 /**
  * Where the page's reads go, and whether its reader may act on what it shows.

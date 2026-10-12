@@ -8,8 +8,8 @@ import {
   type SessionLandingsView,
 } from '../api/session';
 import { copy } from '../copy/landings';
-import { forgetSessionToken, sessionToken, storeSessionToken } from '../lib/session';
-import './leadershipRollup.css';
+import { forgetSessionToken, storeSessionToken } from '../lib/session';
+import './appShell.css';
 
 /** Where a spec finds the shell's controls. */
 export const SHELL_TESTID = 'pulse-shell';
@@ -27,10 +27,16 @@ function openLanding(role: LandingName): void {
  * The app shell: the role switcher and logout (SPEC §2, ADR 0202), above
  * whatever page the address opens.
  *
- * **Drawn only for a session the server answers for.** A tab holding a session
- * asks `GET /session/landings` once; with no session there is nothing to
- * switch from or sign out of, and the page beneath renders exactly as it would
- * alone, without the shell asking anything.
+ * **Drawn only for a session the server answers for.** Every tab asks
+ * `GET /session/landings` once, whether or not it holds a Bearer session: a
+ * tab opened on a cookie session holds none and still needs its logout. A
+ * refusal (no session at all) draws nothing, and the page beneath renders
+ * exactly as it would alone.
+ *
+ * **On a student page, only when there is another view to switch to.** A
+ * student's survey sits in the LMS frame, where a Sign out above it would end
+ * the session under an unsent answer and the design brief draws no top bar; a
+ * person who also holds another view still needs the way to it.
  *
  * **The switcher lists exactly the views the server sent**, current one
  * included and marked, in the server's order; it decides nothing about which
@@ -63,10 +69,6 @@ export function AppShell({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    // Both doors hand the tab its session in the address's fragment (ADR
-    // 0089), so a tab holding none has nothing to switch from or sign out of,
-    // and asks nothing.
-    if (sessionToken() === null) return;
     let live = true;
     void readSessionLandings().then((answer) => {
       if (live && answer.kind === 'landings') setLandings(answer.landings);
@@ -107,7 +109,8 @@ export function AppShell({
 
   return (
     <>
-      {landings === null ? null : (
+      {landings === null ||
+      (landings.current === 'student' && landings.landings.length <= 1) ? null : (
         <header className="pulse-shell-bar" data-testid={SHELL_TESTID}>
           {landings.landings.length > 1 ? (
             <Switcher landings={landings} busy={busy} onSwitch={switchTo} />
@@ -150,16 +153,16 @@ function Switcher({
   const [chosen, setChosen] = useState<LandingName>(landings.current);
   return (
     <form
-      className="pulse-rollup-field"
+      className="pulse-shell-field"
       onSubmit={(event) => {
         event.preventDefault();
         if (!busy && chosen !== landings.current) void onSwitch(chosen);
       }}
     >
-      <label className="pulse-rollup-field">
+      <label className="pulse-shell-field">
         {copy('landing.switcher.label')}
         <select
-          className="pulse-rollup-select"
+          className="pulse-shell-select"
           value={chosen}
           aria-disabled={busy}
           onChange={(event) => {

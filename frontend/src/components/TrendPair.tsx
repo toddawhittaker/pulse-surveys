@@ -1,6 +1,13 @@
 import type { JSX } from 'react';
 
 import { PulseTrendChart, type StreamBenchmark, type TrendPoint } from './PulseTrendChart';
+
+/** One start cohort's two streams, for an aggregate page's term axis (SPEC §2.2). */
+export interface CohortStreams {
+  readonly label: string;
+  readonly instructor: readonly TrendPoint[];
+  readonly course: readonly TrendPoint[];
+}
 import { copy } from '../copy/instructorReportTrendCopy';
 import './instructorReportTrend.css';
 
@@ -46,6 +53,10 @@ import './instructorReportTrend.css';
  * way; every question about whether a figure may be shown is asked once, in the
  * panel, where the fail-closed reading lives.
  *
+ * **Given `cohorts`, each panel draws one line per start cohort** in place of
+ * its single line (an aggregate page, SPEC §2.2), and the caller passes no
+ * benchmark beside them.
+ *
  * One consequence of one legend, said out loud: the legend is the lower panel's,
  * so it names the lines that panel draws. The two panels suppress together in
  * practice — the benchmark minimums count the sections and the students in the
@@ -64,6 +75,7 @@ export function TrendPair({
   heroLabel,
   comparisonLabel,
   comparisonSuppressed,
+  cohorts,
 }: {
   /** The instructor stream's published weeks, oldest first. */
   readonly instructor: readonly TrendPoint[];
@@ -83,8 +95,12 @@ export function TrendPair({
   readonly comparisonLabel?: string;
   /** What a withheld comparison line says, where it is not the comparable courses. */
   readonly comparisonSuppressed?: string;
+  /** Every start cohort's two streams, drawn as one line each in place of the single pair. */
+  readonly cohorts?: readonly CohortStreams[];
 }): JSX.Element {
   const variant = { axis, heroLabel, comparisonLabel, comparisonSuppressed };
+  const instructorCohorts = cohorts?.map((cohort) => ({ label: cohort.label, points: cohort.instructor }));
+  const courseCohorts = cohorts?.map((cohort) => ({ label: cohort.label, points: cohort.course }));
   return (
     <div className="pulse-trend-pair">
       <PulseTrendChart
@@ -94,6 +110,7 @@ export function TrendPair({
         comparison={instructorBenchmark?.comparison}
         university={instructorBenchmark?.university}
         showTicks={false}
+        cohorts={instructorCohorts}
         {...variant}
       />
       <PulseTrendChart
@@ -104,6 +121,7 @@ export function TrendPair({
         university={courseBenchmark?.university}
         showLegend
         drawDelayed
+        cohorts={courseCohorts}
         {...variant}
       />
     </div>
