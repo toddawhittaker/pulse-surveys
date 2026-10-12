@@ -52,6 +52,12 @@ session ADRs `services/session.py` cites; `services/session.py`,
 - A model for the revoked-session table, and migration **`e9c3f5a7b403`**,
   planned `down_revision = "e9b2c4d6a802"` (re-pointed to the head it finds).
 - `frontend/src/api/openapi.json` and `wire.gen.ts`, regenerated.
+- The `landing` copy surface (README decision 15): the four landing views'
+  sentences move from `frontend/src/lib/landings.ts` into
+  `frontend/src/copy/landings.ts`, unchanged word for word, with the
+  switcher's and logout's labels and refusal sentences; the copy inventory
+  places `landing` in `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason.
+  `tests/e2e/landing-views.spec.ts` still pins the same strings.
 - ADR **0202** (the switch issues a new session and revokes the old; the
   revoked-id table instead of server sessions; why the switch never merges
   hats).
@@ -89,7 +95,11 @@ session ADRs `services/session.py` cites; `services/session.py`,
    unchanged).
 8. **Revocations purge.** A revoked id past its token's expiry is deleted by
    the purge; one before it is kept.
-9. **The records match.** ADR 0202 is written and indexed. `PERSON_TABLES` is
+9. **The landing sentences are governed.** The copy inventory collects the
+   landing views' sentences under `landing` (a planted shame word in one goes
+   red), `frontend/src/lib/landings.ts` holds no sentence, and the landing
+   drive's pinned strings are unchanged.
+10. **The records match.** ADR 0202 is written and indexed. `PERSON_TABLES` is
    checked against the new table and the answer recorded in the pull request.
    The carried logout entry is named closed in the pull request, with
    back-channel logout pointed at E13.

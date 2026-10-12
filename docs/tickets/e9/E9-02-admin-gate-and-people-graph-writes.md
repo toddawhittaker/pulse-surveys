@@ -80,6 +80,11 @@ Read first: SPEC §2, §2.1, §4, §6.2 and §6.3; ADRs 0001, 0041, 0044, 0071,
 - `backend/app/models/audit.py`: the new actions and the subject column.
 - Migration **`e9a1d0c3f201`**, `down_revision = "7f679faf4b8d"`.
 - `tests/integration/test_identity_grants.py`: the new grants' rows.
+- `backend/app/copy/admin_people.py` (new): the definers' named refusals as
+  governed sentences, and the `admin_people` surface placed in the copy
+  inventory's `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason (the
+  people pages show staff records and no student's data). README decision
+  15.
 - SPEC §13: the new view file.
 - ADR **0200** (the admin's definers, every role grantable, revoke deletes,
   the audit row as the control).
@@ -132,7 +137,10 @@ the existing unique constraints on `lead_faculty_mapping` and
     `insufficient_scope`, and an admin session through. Driven over HTTP on
     one stub route the tests mount (MISTAKES entry 47), since the real routes
     are E9-06's.
-11. **The records match.** ADR 0200 is written and indexed. ADR 0097's manual
+11. **The surface is placed.** The copy inventory places `admin_people` in
+    `SURFACES_WITH_NO_CONFIDENTIALITY_LINE` with its reason, and collects the
+    refusal sentences under it.
+12. **The records match.** ADR 0200 is written and indexed. ADR 0097's manual
     linkage step gains a line pointing at the definer. Every ADR or docstring
     that says Care and Admin are separated "in code" on the assignment path is
     found by grepping the fact and corrected (MISTAKES entry 1).

@@ -28,14 +28,15 @@ Every ticket names the ADRs it reads. UI tickets (10, 11) read
 `docs/DESIGN_BRIEF.md`, `design/tokens.css`, §7.6 and the mockups they name
 first.
 
-**Lanes in this breakdown:** six of the thirteen tickets are heavy, far more
-than the usual one in five. That follows from what this epic is: the purview
-(01), an identity definer (02), a staff-name definer (03), the session (04),
-and two tickets that add `invariant`-marked tests (05, 12) are each security
-code by `.claude/heavy-lane-paths.md`. SPEC marks the purview computation ⚠,
+**Lanes in this breakdown:** seven of the thirteen tickets are heavy, far
+more than the usual one in five. That follows from what this epic is: the
+purview (01), an identity definer (02), a staff-name definer (03), the
+session (04), two tickets that add `invariant`-marked tests (05, 12), and one
+that edits the `invariant`-marked student import sweep (08) are each heavy by
+`.claude/heavy-lane-paths.md`. SPEC marks the purview computation ⚠,
 so 01 carries ⚠ and gets the verifier's mutation battery. 12 carries ⚠ too:
 its invariant tests are written after the code they test, so only a mutation
-battery shows each can fail. The other seven are light. 09, the drill-down, is
+battery shows each can fail. The other six are light. 09, the drill-down, is
 light by path but carries privacy weight: it must not add or change an
 `invariant`-marked test (those are 12's), and it reads the reader-aware seal
 05 builds rather than changing the seal itself. A light ticket whose change
@@ -46,7 +47,7 @@ test, stops and re-lanes in its pull request.
 
 Rulings 1 to 9 are the owner's, made on 2026-10-12 at the start of the epic.
 Rulings 1 and 5 depart from the architect's recommendation; the other seven
-took it. Decisions 10 to 14 were settled the same day as breakdown decisions
+took it. Decisions 10 to 15 were settled the same day as breakdown decisions
 inside the epic's scope. No ticket reopens them. This breakdown's pull request
 writes rulings 1, 2, 4, 5, 6, 7, 8 and 9 into SPEC §5.1, §5.4, §5.5, §6.2,
 §6.3 and §14.3.
@@ -133,6 +134,19 @@ Breakdown decisions:
     week-N window close in the term being viewed. Every section of one start
     cohort shares its window closes, so this is the earliest close in that
     population (ADR 0178) without a cross-term question. Ticket 05 records it.
+15. **New copy surfaces are registered by heavy tickets.** The copy inventory
+    (`tests/unit/test_the_shipped_copy_inventory_holds_to_items_four_and_five.py`)
+    is `invariant`-marked. It requires every copy prefix to sit in
+    `GOVERNED_SURFACES` or `SURFACES_WITH_NO_CONFIDENTIALITY_LINE`, and every
+    governed prefix to collect at least one key, so placing a new surface is
+    an invariant-test edit. Each of E9's three new surfaces is registered,
+    with its first keys, by a ticket that is heavy anyway: `admin_people` by
+    02, `landing` by 04 (which moves the landing views' sentences out of
+    `frontend/src/lib/landings.ts`, the carried entry), and `leadership_rollup`
+    by 05. None of the three owes a confidentiality line, because none shows a
+    student's words or a single response. The drill-down reuses the
+    instructor report's surface and its line. Light tickets file their strings
+    under these prefixes; one that needs a new prefix stops and re-lanes.
 
 **Facts checked in the code at 40d3e24b, which the tickets build on:**
 
@@ -166,11 +180,11 @@ Breakdown decisions:
 | 01 | [The purview walk and its chokepoint](E9-01-purview-walk-and-chokepoint.md) | `e9/purview-walk-and-chokepoint` | heavy ⚠ | none | `transitive_purview` over `reports_to`, the lead clamp, the leadership scope resolved only from the verified session, `ActorScope.grants`, `course_leads`, the chair walk written once, Hypothesis properties over generated forests; ADR 0199. | |
 | 02 | [The admin gate and the people-graph writes](E9-02-admin-gate-and-people-graph-writes.md) | `e9/admin-gate-and-people-graph-writes` | heavy | none | `require_admin`; admin-checked definers for person, assignment, edge, mapping and web-login linkage writes and the admin's name reads; every Pulse-owned role grantable (ruling 1); revoke deletes (ruling 7); every grant and revocation audited; ADR 0200; migration `e9a1d0c3f201`. | |
 | 03 | [Staff names for a set of sections](E9-03-staff-names-for-a-set-of-sections.md) | `e9/staff-names-for-a-set-of-sections` | heavy | none | `section_staff_names` v002, set-based, answering instructors, response authors, lead, chair and dean; leadership readers per ruling 3; the reader's date from the app clock; ADR 0201; migration `e9b2c4d6a802`. | |
-| 04 | [The role switcher and logout](E9-04-role-switcher-and-logout.md) | `e9/role-switcher-and-logout` | heavy | none | The landings at this door, a CSRF-protected switch that issues a new session and revokes the old one, logout that revokes, a revoked-session table that purges itself; ADR 0202; migration `e9c3f5a7b403`. | |
+| 04 | [The role switcher and logout](E9-04-role-switcher-and-logout.md) | `e9/role-switcher-and-logout` | heavy | none | The landings at this door, a CSRF-protected switch that issues a new session and revokes the old one, logout that revokes, a revoked-session table that purges itself; the `landing` copy surface; ADR 0202; migration `e9c3f5a7b403`. | |
 | 05 | [Named-set figures under the reader's purview](E9-05-named-set-figures-under-the-readers-purview.md) | `e9/named-set-figures-under-the-readers-purview` | heavy | 01 | The seal counts a leadership reader; named-set figures over the set's sections inside the purview, on their own route; `named_set_term_axis` deleted; generated isolation properties over named sets; the set-name index; ADR 0203; migration `e9a7c9e1b807`. | |
 | 06 | [The people and mapping editor, backend](E9-06-people-and-mapping-editor-backend.md) | `e9/people-and-mapping-editor-backend` | light | 02 | `services/people.py`, `api/admin.py`, `schemas/admin.py`: sorting, paging, the reports-to selector, CSV export and import with a dry-run diff, the web-login linkage field; ADR 0204. | |
-| 07 | [The roll-up backend](E9-07-roll-up-backend.md) | `e9/roll-up-backend` | light | 01, 03 | `services/rollups.py`: the whole tree in one payload, hierarchy and by-lead modes, held-only counts and labels, term-axis series per start cohort, rates and workload, the §5.6 attention cards on a set-based owed read, the ordering property; ADR 0205; migration `e9f6c8e0a706` only if `EXPLAIN` asks. | |
-| 08 | [The Lead Faculty name on course pages](E9-08-lead-faculty-name-on-course-pages.md) | `e9/lead-faculty-name-on-course-pages` | light | 03 | The student read moved to `services/student_results.py` first, as a pure move; the lead's name on the student results and instructor report headers. | |
+| 07 | [The roll-up backend](E9-07-roll-up-backend.md) | `e9/roll-up-backend` | light | 01, 03, 05 | `services/rollups.py`: the whole tree in one payload, hierarchy and by-lead modes, held-only counts and labels, term-axis series per start cohort, rates and workload, the §5.6 attention cards on a set-based owed read, the ordering property; ADR 0205; migration `e9f6c8e0a706` only if `EXPLAIN` asks. | |
+| 08 | [The Lead Faculty name on course pages](E9-08-lead-faculty-name-on-course-pages.md) | `e9/lead-faculty-name-on-course-pages` | heavy | 03 | The student read moved to `services/student_results.py` first, as a pure move; the lead's name on the student results and instructor report headers. | |
 | 09 | [The drill-down and the wider roles](E9-09-drill-down-and-the-wider-roles.md) | `e9/drill-down-and-the-wider-roles` | light | 01, 05 | The read-only section drill-down through the purview, sealed against the reader; the stored-summary filter on decision sequence; the exclusion log and policy for the assistant dean, dean and VP; ADR 0206; migration `e9d4a6c8e504`. | |
 | 10 | [The admin editors, frontend](E9-10-admin-editors-frontend.md) | `e9/admin-editors-frontend` | light | 06 | The People & reporting table and the Lead Faculty mapping table in `routes/admin/`, with the import diff screen. | |
 | 11 | [The leadership frontend](E9-11-leadership-frontend.md) | `e9/leadership-frontend` | light | 04, 05, 07, 09 | The tree, the roll-up page, the cohort and named-set selectors, the attention list, the read-only drill-down with its context bar, the switcher and logout, the leadership landing replaced; the carried frontend entries. | |
@@ -185,8 +199,8 @@ than wait for the merge.
 | Wave | Tickets (in parallel within a wave) | Why it waits |
 |---|---|---|
 | 1 | 01, 02, 03, 04 | Nothing. Each is security code the rest stands on, and none needs another's code (ruling 3 frees 03 from 01). |
-| 2 | 05, 06, 07, 08 | 05 and 07 need 01's purview; 07 and 08 need 03's set-based names; 06 needs 02's definers. |
-| 3 | 09, 10 | 09 needs 01's scope and 05's reader-aware seal; 10 needs 06's contract. |
+| 2 | 05, 06, 08 | 05 needs 01's purview; 06 needs 02's definers and copy surface; 08 needs 03's set-based names. |
+| 3 | 07, 09, 10 | 07 needs 01's purview, 03's names and 05's `leadership_rollup` surface (decision 15); 09 needs 01's scope and 05's reader-aware seal; 10 needs 06's contract. |
 | 4 | 11, 12 | 11 draws 04, 05, 07 and 09; 12 tests 05, 07 and 09 through their routes. |
 | 5 | 13 | Waits for everything. |
 
@@ -320,7 +334,7 @@ ticket each entry lands in beside the entry in `carried-from-e8.md`.
 | Set names that differ only in case are two sets (`../e6/carried-from-e5.md`) | **05** |
 | A teaching grant with a child edge would stop its section's roster sync (`../e6/carried-from-e5.md`) | **06** (one test that the edge is refused) |
 | Six server-required members stay optional in the frontend, and one figure has three names (`../e6/carried-from-e5.md`) | **11** |
-| The landing views' sentences sit outside the inventory (`../e5/carried-from-e4.md`) | **11** |
+| The landing views' sentences sit outside the inventory (`../e5/carried-from-e4.md`) | **04** moves them into `frontend/src/copy/` under the `landing` surface (decision 15); **11** replaces the leadership landing on those keys |
 | Aggregate ordering has no code-level gate (`../e5/carried-from-e4.md`) | **07** (the property) and **12** (the invariant), by decision 13 |
 | The E1 generative purview coverage note (`../e3/carried-from-e2.md`) | **01** |
 | A web-login linkage can only be provisioned by the demo seed or by hand (`../e3/carried-from-e2.md`) | **02** (the definer), **06** and **10** (the editor) |
