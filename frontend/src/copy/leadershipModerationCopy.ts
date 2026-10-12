@@ -58,7 +58,7 @@ export const LEADERSHIP_MODERATION_COPY = {
 
   'leadership_moderation.log.heading': 'Exclusion log',
   'leadership_moderation.log.intro':
-    'Every exclusion and every keep made in the courses you review, and every undo of one, newest first. It records both directions, so a fair comment that was quietly dropped leaves a trail.',
+    'Every exclusion and every keep made in the courses you review, and every undo of one, newest first, with any row shown without a date after them. It records both directions, so a fair comment that was quietly dropped leaves a trail.',
   'leadership_moderation.log.loading': 'Opening the exclusion log…',
   'leadership_moderation.log.unavailable':
     'The exclusion log could not be loaded just now. Reload the page to try again.',

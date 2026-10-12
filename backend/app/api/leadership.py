@@ -623,7 +623,7 @@ def read_exclusion_log(
     scope: ActorScope = Depends(leadership_scope),
     session: Session = Depends(get_session),
 ) -> ExclusionLog:
-    """Every exclusion, keep and undo a person made inside the reader's reach, newest first.
+    """Every exclusion, keep and undo a person made inside the reader's reach; dated rows first.
 
     A lead's or chair's own grant, and an assistant dean's, dean's or vice
     president's purview (ADR 0206); the scope is the session's own.

@@ -19,6 +19,16 @@ E9-14, from the E9 boundary review. Two changes:
     carries no scope node. Every row the definers have written already holds to
     both, so the checks are added as validated.
 
+**The upgrade refuses over a mapping that already breaks the rule.** The new
+definers stop any new write from mapping a course to a person with no
+`LEAD_FACULTY` assignment, but they never look at rows written before. So the
+upgrade first counts mappings whose person holds no such assignment and, if
+there are any, raises `RuntimeError` having changed nothing, rather than
+carrying the gap forward or deleting the mappings silently. Whoever migrates
+grants the role or unmaps those courses, then upgrades again. Offline
+(`alembic upgrade --sql`) there is nothing to count, so the script carries the
+same refusal as a guard block that raises when it is run.
+
 **The downgrade** restores v001's two definitions, written out below character
 for character with `CREATE FUNCTION` changed to `CREATE OR REPLACE FUNCTION`:
 a migration records what was applied on the day it ran, so the downgrade
@@ -29,7 +39,8 @@ holds data, so it needs no guard.
 
 from collections.abc import Sequence
 
-from alembic import op
+import sqlalchemy as sa
+from alembic import context, op
 
 from app.views_sql import read_sql
 
@@ -49,6 +60,23 @@ ROLE_AND_SCOPE_CHECK_RULE = (
 )
 LINKAGE_CHECK = "a_linkage_names_no_scope"
 LINKAGE_CHECK_RULE = "action <> 'WEB_LOGIN_LINKAGE_CHANGED' OR scope_node_id IS NULL"
+
+# The mappings whose person holds no `LEAD_FACULTY` assignment.
+UNLED_MAPPINGS = (
+    "FROM public.lead_faculty_mapping AS mapped "
+    "WHERE NOT EXISTS (SELECT 1 FROM public.role_assignment AS lead "
+    "WHERE lead.person_id = mapped.person_id AND lead.role = 'LEAD_FACULTY')"
+)
+OFFLINE_UNLED_GUARD = f"""
+DO $guard$
+BEGIN
+    IF EXISTS (SELECT 1 {UNLED_MAPPINGS}) THEN
+        RAISE EXCEPTION 'A lead mapping names a person holding no Lead Faculty role; grant the '
+            'role or unmap the course, then upgrade again. Nothing was changed.';
+    END IF;
+END
+$guard$
+"""
 
 # `people_graph_v001.sql`'s W4, as revision `e9a1d0c3f201` applied it.
 V001_REVOKE_ROLE = """
@@ -170,7 +198,30 @@ $$;
 
 
 def upgrade() -> None:
-    """Apply this revision: the two checks, then the two definers."""
+    """Apply this revision: the two checks, then the two definers.
+
+    Raises `RuntimeError`, having changed nothing, when a lead mapping names a
+    person holding no `LEAD_FACULTY` assignment.
+    """
+    # Writes to both tables are blocked from here to the commit (`SHARE` mode
+    # lets reads through), so no mapping or revoke lands between the count and
+    # the new definers.
+    op.execute("LOCK TABLE public.lead_faculty_mapping, public.role_assignment IN SHARE MODE")
+    if context.is_offline_mode():
+        # No database to count (`alembic upgrade --sql`): the script carries the
+        # same refusal, raised when someone runs it.
+        op.execute(OFFLINE_UNLED_GUARD)
+    else:
+        unled = op.get_bind().execute(sa.text(f"SELECT count(*) {UNLED_MAPPINGS}")).scalar_one()
+        if unled:
+            raise RuntimeError(
+                "This database maps courses to people who hold no Lead Faculty role: "
+                f"{unled} of those mappings. From this revision a course is mapped only to a "
+                "Lead Faculty holder, because the review queue reads a lead through that role, "
+                "so those courses' flagged comments reach nobody's queue. Nothing was changed. "
+                "Grant each mapped person the Lead Faculty role, or unmap those courses, then "
+                "upgrade again."
+            )
     op.create_check_constraint(
         op.f(f"ck_audit_log_{ROLE_AND_SCOPE_CHECK}"), AUDIT_LOG, ROLE_AND_SCOPE_CHECK_RULE
     )

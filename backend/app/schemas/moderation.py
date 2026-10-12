@@ -100,7 +100,7 @@ class LogRow(BaseModel):
 
 
 class ExclusionLog(BaseModel):
-    """The reader's exclusion log, newest decision first."""
+    """The reader's exclusion log: dated rows newest first, then undated rows in no time order."""
 
     model_config = ConfigDict(frozen=True)
 

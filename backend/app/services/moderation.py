@@ -845,7 +845,7 @@ def purview_read(scope: ActorScope) -> Purview:
 def exclusion_log(
     session: Session, *, scope: ActorScope, settings: Settings
 ) -> list[ExclusionLogRow]:
-    """Every exclusion, keep and undo a person made inside this reader's reach, newest first.
+    """Every exclusion, keep and undo a person made inside this reader's reach; dated rows first.
 
     SPEC §5.2's anti-cherry-picking trail, in both directions (§11 question 5,
     settled). The rows are `report_comments.logged_decisions` over two reaches,
@@ -873,6 +873,12 @@ def exclusion_log(
     keeps both: the row is their own accountability record, and they already
     know what they decided and when. A row whose excerpt is shown keeps every
     member for every reader.
+
+    **An undated row sits in no time order.** Left in the newest-first run, an
+    undated row's date would be bracketed by its dated neighbours'. So the dated
+    rows come first, newest first, and the undated rows follow as one group
+    ordered by section label, then decision, then the comment's random key,
+    none of which follows time (the E9-14 fix round, ADR 0206).
 
     The date is the decision's instant in the institution's zone, and no time.
 
@@ -909,23 +915,28 @@ def exclusion_log(
         {(decision.answer_id, decision.section_id, decision.week_id) for decision in decisions},
     )
     zone = ZoneInfo(settings.institution_timezone)
-    rows: list[ExclusionLogRow] = []
+    dated_rows: list[ExclusionLogRow] = []
+    undated_rows: list[tuple[str, str, str, ExclusionLogRow]] = []
     for decision in decisions:
         quoted = decision.answer_id in shown
         dated = quoted or decision.decided_by == person_id
-        rows.append(
-            ExclusionLogRow(
-                section_label=labels[decision.section_id],
-                decision=decision.state,
-                decided_as=DeciderRole(decision.decided_as),
-                flagged=decision.flagged,
-                reason=decision.reason if dated else None,
-                decided_on=decision.decided_at.astimezone(zone).date() if dated else None,
-                excerpt=decision.text[:EXCERPT_LENGTH] if quoted else None,
-                is_undo=decision.is_undo,
-            )
+        row = ExclusionLogRow(
+            section_label=labels[decision.section_id],
+            decision=decision.state,
+            decided_as=DeciderRole(decision.decided_as),
+            flagged=decision.flagged,
+            reason=decision.reason if dated else None,
+            decided_on=decision.decided_at.astimezone(zone).date() if dated else None,
+            excerpt=decision.text[:EXCERPT_LENGTH] if quoted else None,
+            is_undo=decision.is_undo,
         )
-    return rows
+        if dated:
+            dated_rows.append(row)
+        else:
+            # The answer's key is `gen_random_uuid()`, so it orders nothing by time.
+            undated_rows.append((row.section_label, row.decision, str(decision.answer_id), row))
+    undated_rows.sort(key=lambda keyed: keyed[:3])
+    return dated_rows + [keyed[3] for keyed in undated_rows]
 
 
 def _review_courses(session: Session, person_id: UUID | None) -> Mapping[UUID, AssignmentRole]:

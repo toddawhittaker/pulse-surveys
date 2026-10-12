@@ -1361,7 +1361,7 @@
           "leadership"
         ],
         "summary": "The exclusion log inside my own grant or purview",
-        "description": "Every exclusion, keep and undo a person made inside the reader's reach, newest first.\n\nA lead's or chair's own grant, and an assistant dean's, dean's or vice\npresident's purview (ADR 0206); the scope is the session's own.",
+        "description": "Every exclusion, keep and undo a person made inside the reader's reach; dated rows first.\n\nA lead's or chair's own grant, and an assistant dean's, dean's or vice\npresident's purview (ADR 0206); the scope is the session's own.",
         "operationId": "read_exclusion_log_leadership_moderation_log_get",
         "responses": {
           "200": {
@@ -3197,7 +3197,7 @@
           "rows"
         ],
         "title": "ExclusionLog",
-        "description": "The reader's exclusion log, newest decision first."
+        "description": "The reader's exclusion log: dated rows newest first, then undated rows in no time order."
       },
       "GrantWrite": {
         "properties": {

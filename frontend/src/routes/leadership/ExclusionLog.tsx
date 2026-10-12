@@ -29,7 +29,8 @@ type Load =
  * `/leadership/exclusion-log` — every exclusion and keep made inside the
  * reader's own grant (SPEC §5.2).
  *
- * **The rows keep the server's order**, newest decision first. Nothing here
+ * **The rows keep the server's order**: dated rows newest first, then rows with
+ * no date in an order that does not follow time (ADR 0206). Nothing here
  * sorts, groups or counts them: a log ordered by how often somebody excluded,
  * or grouped by instructor, would be a ranking (SPEC §4.1 item 4). Each row
  * names the role a decision was made under and never a person.

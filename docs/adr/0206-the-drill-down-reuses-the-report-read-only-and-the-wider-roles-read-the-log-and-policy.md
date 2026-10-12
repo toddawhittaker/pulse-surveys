@@ -99,7 +99,19 @@ the row is their own record and tells them nothing they did not know. A row whos
 excerpt is shown keeps every member for everyone. The rule is in
 `moderation.exclusion_log`, next to the excerpt rule it extends.
 
+**An undated row sits in no time order.** Left in the newest-first run, its
+neighbours' dates would bracket the date it lost. So the dated rows come first,
+newest first, and the undated rows follow as one group ordered by section label,
+then decision, then the comment's random key.
+
 *Rejected:* nulling the date only (a reason can name the week's events); nulling
 both for every reader (takes the decider's own record away); keying the rule on
 the wider roles (a lead reading an instructor's dated reason is the same leak).
+
+**Residual, accepted:** the log is read live, so a non-decider who reloads it
+every day learns roughly when an undated row first appeared, which is about
+when its decision was made. Closing it would mean holding new undated rows back
+until some later, unrelated moment, which would delay the accountability record
+for every reader. It is accepted for that reason, and named here so a later
+change to how often the log can be read is judged against it.
 

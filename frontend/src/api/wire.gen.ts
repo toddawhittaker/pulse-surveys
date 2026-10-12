@@ -962,7 +962,7 @@ export interface paths {
         };
         /**
          * The exclusion log inside my own grant or purview
-         * @description Every exclusion, keep and undo a person made inside the reader's reach, newest first.
+         * @description Every exclusion, keep and undo a person made inside the reader's reach; dated rows first.
          *
          *     A lead's or chair's own grant, and an assistant dean's, dean's or vice
          *     president's purview (ADR 0206); the scope is the session's own.
@@ -1864,7 +1864,7 @@ export interface components {
         };
         /**
          * ExclusionLog
-         * @description The reader's exclusion log, newest decision first.
+         * @description The reader's exclusion log: dated rows newest first, then undated rows in no time order.
          */
         readonly ExclusionLog: {
             /** Rows */
