@@ -55,7 +55,7 @@ import logging
 import re
 import threading
 import time
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -1286,16 +1286,73 @@ def _published_weeks(
     """This section's weeks whose report has opened, on the effective clock (ADR 0109).
 
     The one place both readers above select their published weeks, so the list a
-    reader pages across and the report she is reading cannot disagree. The zone is
-    the institution's, because "06:00 on Monday" is a wall-clock promise.
+    reader pages across and the report she is reading cannot disagree. It is
+    `published_weeks_of` asked about one section.
     """
+    return published_weeks_of(session, [section.id], settings=settings).get(section.id, [])
+
+
+def published_weeks_of(
+    session: Session, section_ids: Collection[UUID], *, settings: Settings
+) -> dict[UUID, list[_SectionWeek]]:
+    """Each section's weeks whose report has opened, in one statement, in term-week order.
+
+    The one published-weeks rule for every reader: the instructor's report (through
+    `_published_weeks`), the roll-up's section figures and a roll-up node's series.
+    The zone is the institution's, because "06:00 on Monday" is a wall-clock
+    promise, and the clock is the effective one (ADR 0109). A section with no
+    published week is absent from the answer.
+
+    **The stored windows, not the derived ones.** `survey_windows.windows_for_section`
+    answers what the calendar *implies*; `survey_window` holds what was written, and
+    when a week's report opens is computed from the close on the row a student
+    answered against — the same instants `generate_missing_summaries` above compares. A read that
+    derived its own instants would answer a different question the day a calendar
+    is corrected under windows already written.
+
+    **The course week is arithmetic over the term axis and is not re-derived from
+    the section code.** `week_of_the_term` is this codebase's one reading of §2.2's
+    two axes, and a second copy of it here is how a course-level page and an
+    aggregate page come to disagree about the same section (`docs/MISTAKES.md`
+    entry 19). `section_codes.course_week_of` reads it backwards, once, for every
+    report that turns a stored term week into a course week.
+    """
+    if not section_ids:
+        return {}
     now = clock.now(session, settings=settings)
     zone = ZoneInfo(settings.institution_timezone)
-    return [
-        week
-        for week in _section_weeks(session, section)
-        if week_is_published(week.closes_at, now=now, zone=zone)
-    ]
+    rows = session.execute(
+        select(
+            SurveyWindow.section_id,
+            SurveyWindow.week_id,
+            Week.number,
+            SurveyWindow.opens_at,
+            SurveyWindow.closes_at,
+            Section.start_date,
+            Term.start_date,
+        )
+        .join(Week, Week.id == SurveyWindow.week_id)
+        .join(Section, Section.id == SurveyWindow.section_id)
+        .join(Term, Term.id == Section.term_id)
+        .where(SurveyWindow.section_id.in_(sorted(section_ids)))
+        .order_by(SurveyWindow.section_id, Week.number)
+    ).all()
+    published: dict[UUID, list[_SectionWeek]] = {}
+    for section_id, week_id, number, opens_at, closes_at, section_start, term_start in rows:
+        if not week_is_published(closes_at, now=now, zone=zone):
+            continue
+        published.setdefault(section_id, []).append(
+            _SectionWeek(
+                week_id=week_id,
+                term_week=number,
+                course_week=course_week_of(
+                    number, section_start=section_start, term_start=term_start
+                ),
+                opens_at=opens_at,
+                closes_at=closes_at,
+            )
+        )
+    return published
 
 
 def taught_sections(session: Session, *, person_id: UUID | None) -> list["TaughtSection"]:
@@ -1373,51 +1430,6 @@ def _readable_section(session: Session, *, person_id: UUID | None, section_id: U
     if section is None:  # pragma: no cover - the assignment's foreign key holds this
         raise SectionUnavailableError
     return section
-
-
-def _section_weeks(session: Session, section: Section) -> list[_SectionWeek]:
-    """Every week this section has a survey window for, on both of §2.2's axes.
-
-    **The stored windows, not the derived ones.** `survey_windows.windows_for_section`
-    answers what the calendar *implies*; `survey_window` holds what was written, and
-    when a week's report opens is computed from the close on the row a student
-    answered against — the same instants `generate_missing_summaries` above compares. A read that
-    derived its own instants would answer a different question the day a calendar
-    is corrected under windows already written.
-
-    **The course week is arithmetic over the term axis and is not re-derived from
-    the section code.** `week_of_the_term` is this codebase's one reading of §2.2's
-    two axes, and a second copy of it here is how a course-level page and an
-    aggregate page come to disagree about the same section (`docs/MISTAKES.md`
-    entry 19). `section_codes.course_week_of` reads it backwards, once, for every
-    report that turns a stored term week into a course week.
-    """
-    term = session.get(Term, section.term_id)
-    if term is None:  # pragma: no cover - `section.term_id` is a non-null foreign key
-        raise SectionUnavailableError
-    rows = session.execute(
-        select(
-            SurveyWindow.week_id,
-            Week.number,
-            SurveyWindow.opens_at,
-            SurveyWindow.closes_at,
-        )
-        .join(Week, Week.id == SurveyWindow.week_id)
-        .where(SurveyWindow.section_id == section.id)
-        .order_by(Week.number)
-    ).all()
-    return [
-        _SectionWeek(
-            week_id=week_id,
-            term_week=number,
-            course_week=course_week_of(
-                number, section_start=section.start_date, term_start=term.start_date
-            ),
-            opens_at=opens_at,
-            closes_at=closes_at,
-        )
-        for week_id, number, opens_at, closes_at in rows
-    ]
 
 
 # The four columns every wording lookup below reads: which stream the question

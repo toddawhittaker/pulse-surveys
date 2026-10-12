@@ -36,17 +36,16 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from uuid import UUID
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.copy import leadership_rollup as words
-from app.models.identity import AssignmentRole
+from app.models.identity import LEADERSHIP_ROLES, AssignmentRole
 from app.models.org import Section
 from app.models.survey import REPORT_STREAMS
-from app.models.term import SurveyWindow, Term, Week
+from app.models.term import Term
 from app.schemas.rollup import (
     AttentionCard,
     AttentionRule,
@@ -71,7 +70,7 @@ from app.services.response_loop import (
     owed_section_weeks,
     section_staff_names,
 )
-from app.services.section_codes import course_week_of, parse_section_code
+from app.services.section_codes import parse_section_code
 
 __all__ = [
     "NodeUnavailableError",
@@ -638,44 +637,23 @@ def _chosen(
 
 
 def _section_week_figures(
-    session: Session, *, term: Term, chosen: Sequence[HeldSection], settings: Settings
+    session: Session, *, chosen: Sequence[HeldSection], settings: Settings
 ) -> dict[UUID, SectionWeekFigures]:
     """Each section's published weeks, rating means, and latest week's responses and enrolment.
 
-    Every read is set-based: the windows, the response counts, the rating
-    counts, then each section's enrolment in its latest published week through
-    the report's own rule (`reporting._enrolled_students_of`, which
+    Every read is set-based: the published weeks (`reporting.published_weeks_of`,
+    the report's own rule), the response counts, the rating counts, then each
+    section's enrolment in its latest published week through the report's own rule (`reporting._enrolled_students_of`, which
     `_enrolled_students` calls), so the denominator is the report's and the
     number of statements does not grow with the node (ADR 0205).
     """
     ids = sorted(section.section_id for section in chosen)
-    by_id = {section.section_id: section for section in chosen}
-    now = clock.now(session, settings=settings)
-    zone = ZoneInfo(settings.institution_timezone)
-    weeks: dict[UUID, dict[int, reporting._SectionWeek]] = defaultdict(dict)
-    for section_id, week_id, number, opens_at, closes_at in session.execute(
-        select(
-            SurveyWindow.section_id,
-            SurveyWindow.week_id,
-            Week.number,
-            SurveyWindow.opens_at,
-            SurveyWindow.closes_at,
-        )
-        .join(Week, Week.id == SurveyWindow.week_id)
-        .where(SurveyWindow.section_id.in_(ids))
-    ):
-        if not reporting.week_is_published(closes_at, now=now, zone=zone):
-            continue
-        course_week = course_week_of(
-            number, section_start=by_id[section_id].start_date, term_start=term.start_date
-        )
-        weeks[section_id][course_week] = reporting._SectionWeek(
-            week_id=week_id,
-            term_week=number,
-            course_week=course_week,
-            opens_at=opens_at,
-            closes_at=closes_at,
-        )
+    weeks = {
+        section_id: {week.course_week: week for week in published}
+        for section_id, published in reporting.published_weeks_of(
+            session, ids, settings=settings
+        ).items()
+    }
     week_ids = sorted({week.week_id for found in weeks.values() for week in found.values()})
     counts = {
         (row[0], row[1]): (int(row[2]), int(row[3]))
@@ -797,7 +775,7 @@ def rollup_figures(
     chosen = _chosen(held, kind=kind, node_id=node_id, staff=staff)
     if not chosen:
         raise NodeUnavailableError
-    figures = _section_week_figures(session, term=term, chosen=chosen, settings=settings)
+    figures = _section_week_figures(session, chosen=chosen, settings=settings)
     owed = owed_section_weeks(
         session,
         section_ids=[section.section_id for section in chosen],
@@ -837,17 +815,6 @@ def rollup_figures(
     )
 
 
-# SPEC §2's reporting chain, highest first: the order `leadership_context`
-# names a reader's roles in.
-_ROLES_HIGHEST_FIRST = (
-    AssignmentRole.VP_ACADEMICS,
-    AssignmentRole.DEAN,
-    AssignmentRole.ASSISTANT_DEAN,
-    AssignmentRole.CHAIR,
-    AssignmentRole.LEAD_FACULTY,
-)
-
-
 def leadership_context(
     session: Session, *, scope: ActorScope, settings: Settings
 ) -> LeadershipContext:
@@ -868,7 +835,7 @@ def leadership_context(
         begun = [term for term in terms if term.start_date <= today]
         current = begun[-1] if begun else None
     return LeadershipContext(
-        roles=[role.value for role in _ROLES_HIGHEST_FIRST if role in held],
+        roles=[role.value for role in LEADERSHIP_ROLES if role in held],
         terms=[
             RollupTerm(
                 id=term.id,
