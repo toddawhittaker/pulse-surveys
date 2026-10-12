@@ -366,9 +366,10 @@ class LoggedDecision:
     The comment's key, where it was written (section, week and stream, which
     the log's caller needs to ask whether the comment's own report shows it, and
     never passes on), its text, the state it left (`EXCLUDED` or `KEPT` for a
-    decision; for an undo, whatever state it restored), the role the decision
-    was stored under, the stated reason, the instant, whether the AI flagged it,
-    and whether the row undoes an earlier decision.
+    decision; for an undo, whatever state it restored), the person who decided
+    and the role the decision was stored under (the caller compares the person
+    with its reader and never passes it on), the stated reason, the instant,
+    whether the AI flagged it, and whether the row undoes an earlier decision.
     """
 
     answer_id: UUID
@@ -377,6 +378,7 @@ class LoggedDecision:
     stream: str
     text: str
     state: str
+    decided_by: UUID
     decided_as: str
     reason: str | None
     decided_at: datetime
@@ -1017,6 +1019,7 @@ def logged_decisions(
             COMMENT_VIEW.c.stream,
             COMMENT_VIEW.c.comment_text,
             ModerationState.state,
+            ModerationState.decided_by_person_id,
             ModerationState.decided_as,
             ModerationState.reason,
             ModerationState.decided_at,
@@ -1039,11 +1042,12 @@ def logged_decisions(
             stream=row[3],
             text=row[4],
             state=row[5],
-            decided_as=row[6],
-            reason=row[7],
-            decided_at=row[8],
-            flagged=row[9],
-            is_undo=row[10],
+            decided_by=row[6],
+            decided_as=row[7],
+            reason=row[8],
+            decided_at=row[9],
+            flagged=row[10],
+            is_undo=row[11],
         )
         for row in session.execute(asked).all()
     )

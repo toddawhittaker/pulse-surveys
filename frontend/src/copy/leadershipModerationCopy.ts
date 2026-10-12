@@ -17,7 +17,8 @@
  *
  * **Any week, time of day or count of comments.** The queue shows a comment
  * from below SPEC §4's threshold, and a week or an hour beside it would place
- * it (ADR 0190). The log carries a date and nothing finer.
+ * it (ADR 0190). The log carries a date and nothing finer, and none at all on a
+ * withheld row read by anyone but its decider (ADR 0206).
  *
  * ## The confidentiality line
  *
@@ -82,6 +83,9 @@ export const LEADERSHIP_MODERATION_COPY = {
   'leadership_moderation.log.status': '{decision} · {flag}',
   'leadership_moderation.log.no_excerpt':
     'No excerpt. This comment is not shown in its section’s report, so the log does not quote it.',
+  // A withheld row read by somebody other than its decider carries no date
+  // (ADR 0206); the date column says so rather than standing empty.
+  'leadership_moderation.log.no_date': 'No date',
 
   // What a 401 says, in the register the comparison-set screen set.
   'leadership_moderation.session_ended_title': 'This page is not signed in',

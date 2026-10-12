@@ -3482,8 +3482,15 @@
             "title": "Reason"
           },
           "decided_on": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Decided On"
           },
           "excerpt": {

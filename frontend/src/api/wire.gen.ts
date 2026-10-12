@@ -2030,11 +2030,8 @@ export interface components {
             readonly flagged: boolean;
             /** Reason */
             readonly reason: string | null;
-            /**
-             * Decided On
-             * Format: date
-             */
-            readonly decided_on: string;
+            /** Decided On */
+            readonly decided_on: string | null;
             /** Excerpt */
             readonly excerpt: string | null;
             /** Is Undo */

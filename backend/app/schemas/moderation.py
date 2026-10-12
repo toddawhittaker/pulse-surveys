@@ -84,9 +84,13 @@ class LogRow(BaseModel):
     decided_as: Literal["INSTRUCTOR", "LEAD_FACULTY", "CHAIR"]
     # Whether the comment holds a harmful or privacy verdict.
     flagged: bool
+    # The stated reason, or null when none was given. Also null, with the date,
+    # when the excerpt is withheld and the reader did not make the decision: a
+    # reason beside a date would place the comment in its week (ADR 0206).
     reason: str | None
-    # The decision's date in the institution's zone, and never its time.
-    decided_on: date
+    # The decision's date in the institution's zone, and never its time; null
+    # on a withheld row for every reader but the decider.
+    decided_on: date | None
     # The first 140 characters of the comment, or null when its instructor's
     # report does not show it in a week.
     excerpt: str | None

@@ -710,7 +710,9 @@ class ExclusionLogRow:
     """One decision in a reader's exclusion log (E6-05, decision 1).
 
     `excerpt` is `None` whenever the comment's own instructor's report does not
-    show it under its week; see `exclusion_log`. `decision` is the stored state
+    show it under its week, and on such a row `reason` and `decided_on` are
+    `None` too unless the reader made the decision; see `exclusion_log`.
+    `decision` is the stored state
     the row left; `is_undo` says the row reverses the decision before it, so the
     state is the one restored (E6-09).
     """
@@ -720,7 +722,7 @@ class ExclusionLogRow:
     decided_as: DeciderRole
     flagged: bool
     reason: str | None
-    decided_on: date
+    decided_on: date | None
     excerpt: str | None
     is_undo: bool
 
@@ -853,6 +855,17 @@ def exclusion_log(
     the instructor's report's own rule (`visible_cards`) asked once for every
     decision in the log.
 
+    **On a withheld row, the reason and the date go too, for every reader but
+    the decider.** A reason is free text and may paraphrase the comment, and the
+    wider roles read the same section's drill-down, which shows a release
+    batch's comments; a paraphrase beside a date would put a released comment
+    back in its week (SPEC §5.2, ADR 0206). So a reader who did not make the
+    decision, a lead reading an instructor's row as much as a dean reading a
+    lead's, gets the row with `reason` and `decided_on` `None`. The decider
+    keeps both: the row is their own accountability record, and they already
+    know what they decided and when. A row whose excerpt is shown keeps every
+    member for every reader.
+
     The date is the decision's instant in the institution's zone, and no time.
 
     **No row from a section the reader teaches or once taught**, whichever role
@@ -888,19 +901,23 @@ def exclusion_log(
         {(decision.answer_id, decision.section_id, decision.week_id) for decision in decisions},
     )
     zone = ZoneInfo(settings.institution_timezone)
-    return [
-        ExclusionLogRow(
-            section_label=labels[decision.section_id],
-            decision=decision.state,
-            decided_as=DeciderRole(decision.decided_as),
-            flagged=decision.flagged,
-            reason=decision.reason,
-            decided_on=decision.decided_at.astimezone(zone).date(),
-            excerpt=decision.text[:EXCERPT_LENGTH] if decision.answer_id in shown else None,
-            is_undo=decision.is_undo,
+    rows: list[ExclusionLogRow] = []
+    for decision in decisions:
+        quoted = decision.answer_id in shown
+        dated = quoted or decision.decided_by == person_id
+        rows.append(
+            ExclusionLogRow(
+                section_label=labels[decision.section_id],
+                decision=decision.state,
+                decided_as=DeciderRole(decision.decided_as),
+                flagged=decision.flagged,
+                reason=decision.reason if dated else None,
+                decided_on=decision.decided_at.astimezone(zone).date() if dated else None,
+                excerpt=decision.text[:EXCERPT_LENGTH] if quoted else None,
+                is_undo=decision.is_undo,
+            )
         )
-        for decision in decisions
-    ]
+    return rows
 
 
 def _review_courses(session: Session, person_id: UUID | None) -> Mapping[UUID, AssignmentRole]:
