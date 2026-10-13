@@ -57,7 +57,7 @@ RUN pip wheel . --no-deps --no-build-isolation --wheel-dir /wheels \
  && /opt/venv/bin/pip install --no-deps --no-index /wheels/*.whl
 
 
-FROM node:26.10.0-bookworm-slim@sha256:3ffc19ea878019d9e9ae8971732ad4a03cda44f167107173174b60ed7c65bed3 AS frontend
+FROM node:26.11.1-bookworm-slim@sha256:86f07bc9c5dce4578cf37e5a418b7bfc7f817cda25cde66e2b66e95ed86c4567 AS frontend
 
 WORKDIR /src
 
