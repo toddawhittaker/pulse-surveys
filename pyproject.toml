@@ -29,9 +29,9 @@ requires-python = ">=3.14"
 dynamic = ["version"]
 
 dependencies = [
-    "fastapi==0.142.2",
+    "fastapi==0.143.0",
     "uvicorn==0.54.0",
-    "pydantic==2.13.5",
+    "pydantic==2.14.0",
     "pydantic-settings==2.15.0",
     "SQLAlchemy==2.0.54",
     "alembic==1.20.0",
@@ -114,7 +114,7 @@ dependencies = [
     # imports `openai`, and a direct dependency would say something imports it.
     # `make lock` resolves the extra into explicit, hashed lines in both
     # lockfiles, so what ships is still named and pinned.
-    "pydantic-ai-slim[openai]==2.54.0",
+    "pydantic-ai-slim[openai]==2.55.0",
     # The IANA database as a package, so `zoneinfo` resolves
     # INSTITUTION_TIMEZONE identically on a developer's machine and in a slim
     # container that ships no system tzdata (§3.1 — windows are timezone-bound).
