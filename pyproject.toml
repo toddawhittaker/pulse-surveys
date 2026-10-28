@@ -17,7 +17,7 @@
 # builds this project passes `--no-build-isolation` and uses the hash-locked
 # setuptools from `requirements-dev.txt` instead, so this pin and that lock
 # entry must move together. See docs/adr/0005-dependency-locking.md.
-requires = ["setuptools==84.0.0"]
+requires = ["setuptools==84.2.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -146,7 +146,7 @@ dev = [
     # and `pip install -e . --no-build-isolation` has a verified copy to build
     # against. It is deliberately absent from the runtime closure, because
     # nothing ships it.
-    "setuptools==84.0.0",
+    "setuptools==84.2.1",
 ]
 
 # ruff, mypy, pip-audit, and pip-licenses are deliberately not listed. They are
