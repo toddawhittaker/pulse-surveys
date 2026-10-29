@@ -336,7 +336,7 @@ services:
 
   # Celery broker and result backend (§7.1, §7.2).
   redis:
-    image: redis:7.4.11-bookworm@sha256:4fa24486b8bcca8eec45ee0eb166edc674795e53a2b53d1a9ef263eecebaac85
+    image: redis:7.4.11-bookworm@sha256:44960b3100c48159a66d28c18b0588c193492e25f7551d60e51dd464fc3eca5b
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 5s
