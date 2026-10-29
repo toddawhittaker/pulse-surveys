@@ -71,7 +71,7 @@ PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 # the tree against itself would be perfectly green on a tree that had not moved at
 # all. When the next runtime ticket lands — 3.15 is out of FIX-04's scope until its
 # compiled wheels mature — this constant moves in it, with everything below.
-PINNED_RUNTIME = "3.14"
+PINNED_RUNTIME = "3.15"
 
 # The workflow variable every Python job's `python-version:` reads.
 PYTHON_VERSION = "PYTHON_VERSION"
@@ -224,7 +224,7 @@ def major_minor(version: str) -> str:
 def test_every_python_runtime_declaration_names_the_pinned_version(
     ci_workflow_path: Path, ci_workflow: dict[str, Any]
 ) -> None:
-    """The images, CI, the lockfile floor and the type check all say Python 3.14.
+    """The images, CI, the lockfile floor and the type check all say Python 3.15.
 
     FIX-04 acceptance criterion 3, made mechanical for the five pinned places that are
     declarations rather than comments.
@@ -404,18 +404,18 @@ def test_the_interpreter_running_this_suite_is_the_pinned_version() -> None:
     the whole `pip-compile` re-lock and the `cp314` wheels it pulled would be
     unexercised.
 
-    **The near miss that must stay green:** any patch of 3.14 — 3.14.0 through
-    whatever the base image reaches. The declared runtime is `3.14` and the images
+    **The near miss that must stay green:** any patch of 3.15 — 3.15.0 through
+    whatever the base image reaches. The declared runtime is `3.15` and the images
     name a patch, so the patch is deliberately not compared here either.
 
     **Why a literal and not a comparison against the declarations.** Reading
     `PYTHON_VERSION` and comparing the interpreter to it would be perfectly green on a
     tree where nothing had moved at all, which is `docs/MISTAKES.md` entry 3 exactly.
     """
-    assert sys.version_info[:2] == (3, 14), (
+    assert sys.version_info[:2] == (3, 15), (
         f"This suite is running on Python {sys.version_info.major}.{sys.version_info.minor} "
         f"({sys.executable}), and FIX-04 pins the runtime at {PINNED_RUNTIME}. Locally the "
-        "virtualenv needs rebuilding from 3.14 and reinstalling from the committed lockfiles; "
+        "virtualenv needs rebuilding from 3.15 and reinstalling from the committed lockfiles; "
         "in CI this means `PYTHON_VERSION` in `.github/workflows/ci.yml` is not what the job "
         "installed, or the job that runs pytest does not read it. Either way every other "
         "result in this run describes an interpreter this project does not deploy."
