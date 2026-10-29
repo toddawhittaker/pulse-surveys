@@ -33,8 +33,10 @@ __all__ = [
 ]
 
 # The refusal for a leadership session whose own grant leads no course and chairs
-# no department with an unled course: an assistant dean until E9, a dean, or a
-# leadership session for somebody who holds only an instructor grant.
+# no department with an unled course: a lead with no mapped course, or a session
+# for somebody who holds only an instructor grant. The assistant dean, dean and
+# vice president get it from the review queue, and read the exclusion log over
+# their purview instead (ADR 0206).
 NO_REVIEW_GRANT = CopyEntry(
     key="leadership_moderation.no_review_grant",
     text="This leadership role has no review queue or exclusion log to read.",

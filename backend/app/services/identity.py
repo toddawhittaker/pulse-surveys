@@ -24,11 +24,13 @@ anyway: E1-10's round-3 review revoked `SELECT (lms_user_id)` on `user` from
 `pulse_app`, because a connection able to read that column can enumerate every
 subject that ever launched and join a response back to the person who gave it,
 and `pulse_app` holds no privilege on `person` at all. So every lookup below goes
-through a `SECURITY DEFINER` function that answers one point question (ADR 0094):
-this subject, this row. The connection resolves a subject it already holds from a
+through a `SECURITY DEFINER` function. Four answer one point question (ADR 0094):
+this subject, this row. The fifth, `persons_for_users`, answers a set: the person
+keys of the user ids the caller already holds, ADR 0205's own mechanism for a bulk
+need, because ADR 0094 forbids looping a point resolver. The connection resolves a subject it already holds from a
 token it has verified, and can never enumerate the subjects it does not.
 
-**Three of the four answer a uuid and one answers a subject**, and the asymmetry
+**Three of the four point lookups answer a uuid and one answers a subject**, and the asymmetry
 is a decision rather than an oversight. `subject_for_user` runs the mechanism
 backwards for SPEC §3.4's grade passback, which posts a score keyed by the LTI
 `sub` and can key it by nothing else, so it hands a value back where the others
@@ -63,7 +65,7 @@ decision; ADR 0024 rejected the same shape for the person-to-user link, because
 produces a plausible answer".
 """
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -79,6 +81,7 @@ __all__ = [
     "identity_behind_a_launch_subject",
     "person_behind_a_web_login",
     "person_for_user",
+    "persons_for_users",
     "subject_for_user",
 ]
 
@@ -97,6 +100,13 @@ _PLATFORM_USER = text("SELECT public.resolve_platform_user(:lti_platform_id, :lm
 _PERSON_FOR_USER = text("SELECT public.resolve_person_for_user(:user_id)")
 _WEB_PERSON = text("SELECT public.resolve_web_person(:idp_issuer, :idp_subject)")
 _SUBJECT_FOR_USER = text("SELECT public.resolve_subject_for_user(:user_id)")
+
+# The set form of `_PERSON_FOR_USER` (ADR 0205): ADR 0094 forbids looping the
+# point resolver for a bulk need, so the bulk need has a definer of its own,
+# with the same owner and the same one column read.
+_PERSONS_FOR_USERS = text(
+    "SELECT user_id, person_id FROM public.resolve_persons_for_users(CAST(:user_ids AS uuid[]))"
+)
 
 # The two claims a launch is identified by, and the two an `id_token` is. Both
 # doors spell them the same way and neither spelling is this project's: `sub` and
@@ -191,6 +201,21 @@ def person_for_user(session: Session, user_id: UUID) -> UUID | None:
     """
     person_id: UUID | None = session.execute(_PERSON_FOR_USER, {"user_id": user_id}).scalar_one()
     return person_id
+
+
+def persons_for_users(session: Session, user_ids: Iterable[UUID]) -> dict[UUID, UUID]:
+    """The person linked to each of these `user` rows, for the ones a person is linked to.
+
+    `person_for_user` for a set, in one definer call (ADR 0205), for a caller that
+    has to sort many members at once; ADR 0094 forbids looping the point
+    resolver for that. A user missing from the answer is linked to nobody, which
+    is a student's ordinary state (ADR 0028). An empty set sends nothing.
+    """
+    asked = sorted(set(user_ids))
+    if not asked:
+        return {}
+    rows = session.execute(_PERSONS_FOR_USERS, {"user_ids": asked})
+    return {row.user_id: row.person_id for row in rows}
 
 
 def person_behind_a_web_login(session: Session, claims: Mapping[str, Any]) -> UUID | None:

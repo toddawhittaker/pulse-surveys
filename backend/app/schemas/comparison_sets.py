@@ -1,8 +1,9 @@
 """The named-set management API as it goes over the wire (SPEC §5.1, §8).
 
-`app.api.leadership` serves seven routes over four shapes: what a set looks like
+`app.api.leadership` serves eight routes over five shapes: what a set looks like
 in a list, what it looks like on its own, what a client sends to create or edit
-one, and what the definition form is offered as choices. E5-09 renders all four.
+one, what the definition form is offered as choices, and (E9-05) a set's figures
+for one leadership reader. E5-09 renders the first four; E9-11 draws the fifth.
 
 **`SetWrite` types the length as a plain `int` and the level as a plain `str`,
 and that is a decision rather than laziness.** SPEC §5.1's rules about a set —
@@ -35,16 +36,31 @@ of section codes — a figure reaching a reader outside the suppression chokepoi
 
 Every model is frozen, the way `app.schemas.report`'s are: a payload assembled at
 one moment and serialized at another is a payload those two can disagree about.
+
+**The series payload carries figures, and each is sealed at the wire** (E9-05).
+A named set's series, read by a leader, is the first payload here holding a
+`ComparisonFigure`, so its three models follow `app.schemas.report_benchmark`'s
+two rules: `revalidate_instances="always"` on every model on the path down to a
+figure, and one `refuse_an_unsealed_comparison` validator per figure member. No
+member is called `comparison`, which keeps E4-07's discovery rule (the one model
+in `app.schemas.report` carrying that member) intact. Nothing sits beside a
+figure: a count of sections or respondents there would hand back what the
+minimums withhold.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
+
+from app.services.reporting import ComparisonFigure, refuse_an_unsealed_comparison
 
 __all__ = [
     "CourseOption",
+    "NamedSetCohort",
+    "NamedSetSeries",
+    "NamedSetWeek",
     "SetDetail",
     "SetList",
     "SetOptions",
@@ -158,3 +174,71 @@ class SetPreview(BaseModel):
 
     member_count: int
     section_count: int
+
+
+class NamedSetWeek(BaseModel):
+    """One course week of one start cohort, on both of SPEC §2.2's week axes, every figure sealed.
+
+    The two rating means and the workload mean and median, each suppressed or
+    shown on its own decision (§4.1 item 7 covers "a mean, a median, or any
+    other statistic"). One validator per member, so removing one seal is one
+    test going red.
+    """
+
+    model_config = ConfigDict(frozen=True, revalidate_instances="always")
+
+    course_week: int
+    term_week: int
+    instructor_mean: ComparisonFigure
+    course_mean: ComparisonFigure
+    workload_mean: ComparisonFigure
+    workload_median: ComparisonFigure
+
+    @field_validator("instructor_mean")
+    @classmethod
+    def _the_instructor_mean_is_the_helpers(cls, figure: ComparisonFigure) -> ComparisonFigure:
+        """SPEC §4.1 item 7 over the instructor-stream rating mean."""
+        refuse_an_unsealed_comparison(figure)
+        return figure
+
+    @field_validator("course_mean")
+    @classmethod
+    def _the_course_mean_is_the_helpers(cls, figure: ComparisonFigure) -> ComparisonFigure:
+        """SPEC §4.1 item 7 over the course-stream rating mean."""
+        refuse_an_unsealed_comparison(figure)
+        return figure
+
+    @field_validator("workload_mean")
+    @classmethod
+    def _the_workload_mean_is_the_helpers(cls, figure: ComparisonFigure) -> ComparisonFigure:
+        """SPEC §4.1 item 7 over the workload mean."""
+        refuse_an_unsealed_comparison(figure)
+        return figure
+
+    @field_validator("workload_median")
+    @classmethod
+    def _the_workload_median_is_the_helpers(cls, figure: ComparisonFigure) -> ComparisonFigure:
+        """SPEC §4.1 item 7 over the workload median, which item 7 names beside the mean."""
+        refuse_an_unsealed_comparison(figure)
+        return figure
+
+
+class NamedSetCohort(BaseModel):
+    """One start cohort of the reader's purview in the viewed term, and its published weeks."""
+
+    model_config = ConfigDict(frozen=True, revalidate_instances="always")
+
+    section_start_date: date
+    weeks: list[NamedSetWeek]
+
+
+class NamedSetSeries(BaseModel):
+    """A named set's figures for one leadership reader in one term, one series per start cohort.
+
+    A set wholly outside the reader's purview answers exactly the shape a thin set
+    inside it does: the purview's cohorts, every figure suppressed (E9-05).
+    """
+
+    model_config = ConfigDict(frozen=True, revalidate_instances="always")
+
+    cohorts: list[NamedSetCohort]

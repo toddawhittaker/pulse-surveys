@@ -4,9 +4,35 @@ import type {
   CommentView,
   InstructorReportView,
   StreamBenchmarkView,
+  StreamReportView,
   TaughtSectionView,
+  WeekView,
   WorkloadBenchmarkView,
 } from '../../api/instructor';
+
+/** `T` with the members `K` allowed to be absent. */
+type Absent<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+
+/**
+ * A report as the server wrote it before its later members existed.
+ *
+ * The view is the wire's own shape, every member required. The page still
+ * renders an answer missing the close note, the question wording, the
+ * benchmarks or the time zone, and the fixtures that prove it are typed
+ * against this instead.
+ */
+type AnEarlierReport = Absent<
+  Omit<InstructorReportView, 'week' | 'streams'>,
+  'workload_benchmark' | 'institution_timezone'
+> & {
+  readonly week: Absent<WeekView, 'closes_at'>;
+  readonly streams: {
+    readonly [Stream in keyof InstructorReportView['streams']]: Absent<
+      StreamReportView,
+      'question_text' | 'benchmark'
+    >;
+  };
+};
 
 /**
  * The report payloads the page's tests render — ticket E4-11.
@@ -258,7 +284,7 @@ export const A_WORKLOAD_BENCHMARK: WorkloadBenchmarkView = {
  * `comparison` is present and suppressed, as every E4 payload's is.
  */
 export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
-  section: { code: 'R3WW', course_label: COURSE_LABEL, length_weeks: 12 },
+  section: { code: 'R3WW', course_label: COURSE_LABEL, length_weeks: 12, lead_name: null },
   week: {
     course_week: 4,
     term_week: 7,
@@ -313,7 +339,7 @@ export const A_PUBLISHED_WEEK_BEFORE_THE_BENCHMARKS = {
   comparison: { suppressed: true, reason: 'below-minimum' },
   released_from_earlier_weeks: [],
   institution_timezone: INSTITUTION_TIMEZONE,
-} satisfies InstructorReportView & { comparison: unknown };
+} satisfies AnEarlierReport & { comparison: unknown };
 
 /**
  * The same published week with E5's benchmark members on it — the payload the
@@ -469,7 +495,7 @@ export const A_WEEK_NOBODY_ANSWERED = {
     },
   },
   workload: { mean: null, median: null },
-} satisfies InstructorReportView & { comparison: unknown };
+} satisfies AnEarlierReport & { comparison: unknown };
 
 /**
  * A section nobody is enrolled in, whose rates are absent rather than zero.
@@ -487,7 +513,7 @@ export const A_WEEK_WITH_NOBODY_ENROLLED = {
     enrolled: 0,
     valid_responses: 0,
   },
-} satisfies InstructorReportView & { comparison: unknown };
+} satisfies AnEarlierReport & { comparison: unknown };
 
 /**
  * A week both of whose streams are below the commenter threshold.
@@ -532,7 +558,7 @@ export const A_SMALL_N_WEEK = {
       small_n: WITHHELD_STREAM,
     },
   },
-} satisfies InstructorReportView & { comparison: unknown };
+} satisfies AnEarlierReport & { comparison: unknown };
 
 /**
  * A full week whose instructor stream is thin and whose course stream is shown —

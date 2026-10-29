@@ -36,7 +36,9 @@ threshold, in a batch and across the sequence of pages —
 and `test_the_students_comment_reads_go_through_the_comment_view_and_never_the_answer_table.py`.
 
 **Since E8-01 there is one student path that reads comments, and it is named.**
-`app/services/response_loop.py` serves the student's week (SPEC §5.4), and it
+`app/services/student_results.py` serves the student's week (SPEC §5.4) — E9-08
+moved that read out of `app/services/response_loop.py`, which leaves this sweep
+with it, and the allowance moved unchanged — and it
 reaches the comment service for exactly the two reads written for students —
 `student_comments` and `student_released_comments`, which filter the
 instructor's reads to `published` and `kept` and return text and stream only —
@@ -167,7 +169,13 @@ MODERATION_IMPORTS_MUST_ALLOW = (
 
 # **E8-01's one named caller** (done-when 8), its package, and what it may take
 # from the comment service: the two reads written for students, and nothing else.
-STUDENT_COMMENT_CALLER = "app/services/response_loop.py"
+# Since E9-08 (its done-when 2) the caller is `student_results.py`, the module the
+# student's week read moved into, with the allowance `response_loop.py` had.
+# **Direct imports only**, so a re-export does not satisfy this: the real-file test
+# below requires the two reads to be imported *by this module*, and a student read
+# that reached them through `response_loop` would show neither (`docs/MISTAKES.md`
+# entry 53).
+STUDENT_COMMENT_CALLER = "app/services/student_results.py"
 SERVICES_PACKAGE = "app.services"
 ALLOWED_FROM_THE_COMMENT_SERVICE = frozenset({"student_comments", "student_released_comments"})
 
@@ -175,10 +183,11 @@ ALLOWED_FROM_THE_COMMENT_SERVICE = frozenset({"student_comments", "student_relea
 # reaches every function in it and so is never inside an allowance of names.
 THE_WHOLE_MODULE = "<the whole module>"
 
-# The planted imports into `response_loop`, each a breach. The instructor's two
-# card reads by name (done-when 8's own plants), one beside an allowed name, one
-# hiding under an allowed name's alias, a star, the module by both spellings, and
-# the relative spellings a module inside `app/services/` is likeliest to use.
+# The planted imports into the named caller (`student_results`), each a breach:
+# the instructor's two card reads by name (done-when 8's own plants), one beside
+# an allowed name, one hiding under an allowed name's alias, a star, the module by
+# both spellings, and the relative spellings a module inside `app/services/` is
+# likeliest to use.
 CALLER_IMPORTS_MUST_REFUSE = (
     "from app.services.report_comments import visible_cards",
     "from app.services.report_comments import released_cards",
@@ -587,7 +596,8 @@ def test_the_import_reader_resolves_a_relative_import_inside_the_services_packag
 def test_the_allowance_reader_refuses_every_plant_and_spares_the_two_reads() -> None:
     """Done-when 8's plants, read by the instrument before the caller is judged with it.
 
-    Every planted import into `response_loop` is a breach — `visible_cards`,
+    Every planted import into the named caller (`student_results`, since E9-08) is
+    a breach — `visible_cards`,
     `released_cards`, a star, the module whole, `moderation` by every spelling —
     and the two allowed reads, together, alone, aliased or relative, are not.
 
@@ -611,22 +621,29 @@ def test_the_allowance_reader_refuses_every_plant_and_spares_the_two_reads() -> 
 
 
 def test_the_one_student_caller_takes_the_two_student_reads_and_nothing_else() -> None:
-    """Done-when 8: `services/response_loop.py` is in the sweep, with its allowance.
+    """E9-08's done-when 2: `services/student_results.py` is in the sweep, with its allowance.
 
-    It takes exactly `student_comments` and `student_released_comments` from the
-    comment service — both, because it is the one module that reaches the
-    student's comment read (the ticket's "Comments a student may read") — and
-    nothing else from it, and nothing from `app.services.moderation`. **Direct
-    imports only** (entry 53's disclosed limit): a helper elsewhere that reached
-    `visible_cards` for it is invisible here, and the behavioural modules named
-    in this file's docstring are the proof.
+    E8-01 named `services/response_loop.py`; E9-08 moved the student's week read
+    into `services/student_results.py`, and the allowance moved with it. It takes
+    exactly `student_comments` and `student_released_comments` from the comment
+    service — both, because it is the one module that reaches the student's
+    comment read (E8-01's "Comments a student may read") — and nothing else from
+    it, and nothing from `app.services.moderation`. **Direct imports only**
+    (entry 53's disclosed limit): a helper elsewhere that reached `visible_cards`
+    for it is invisible here, and the behavioural modules named in this file's
+    docstring are the proof.
 
     **The mutations this kills:** `from app.services.report_comments import
-    visible_cards` added to `response_loop` to build the week from the
-    instructor's cards; the moderation service imported there; and the student
-    read reached through another module — `reporting.student_streams`, which no
-    sweep watches — rather than through the named caller. **The near miss:** the
-    two allowed imports.
+    visible_cards` added to `student_results` to build the week from the
+    instructor's cards; the moderation service imported there; the student read
+    reached through another module — `reporting.student_streams`, which no sweep
+    watches — rather than through the named caller; and, since E9-08, the move
+    done as a re-export, with the two reads still imported by `response_loop` and
+    handed on (the new module then imports neither, and `taken` below is empty).
+    **The near miss:** the two allowed imports.
+
+    **Which failure a red is, before E9-08's move lands:** the first assertion,
+    `student_results.py is not in the backend`.
     """
     path = BACKEND_ROOT / STUDENT_COMMENT_CALLER
     assert path.is_file(), f"{STUDENT_COMMENT_CALLER} is not in the backend; the sweep names it."

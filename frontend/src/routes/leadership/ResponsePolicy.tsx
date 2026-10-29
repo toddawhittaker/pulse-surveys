@@ -14,8 +14,6 @@ import { ResponseRefusal } from './ResponseRefusal';
 import './leadershipComparisonSets.css';
 import './leadershipResponse.css';
 
-/** The address of the response policy page, under the leadership area. */
-export const RESPONSE_POLICY_ROUTE = '/leadership/response-policy';
 
 /** Where a spec finds the page. */
 export const RESPONSE_POLICY_TESTID = 'pulse-leadership-response-policy';

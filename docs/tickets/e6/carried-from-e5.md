@@ -103,6 +103,8 @@ lines as the canary.
 
 ## A named set's figures are read with no reader and no purview
 
+**Closed by E9-05** (#339, merged as 0d1d4ae0): `benchmarks.named_set_series` reads a set inside the reader's purview (ADR 0203).
+
 From the boundary's `privacy-authz` review, which disputes the decision rather
 than calling it an oversight. `named_set_trend` and `named_set_workload` take a
 set and cutoffs and nothing about who is reading, and ADR 0173 lets every
@@ -135,6 +137,8 @@ three lines to this entry's done-when (sources:
 
 ## Generative sibling isolation does not cover named sets
 
+**Closed by E9-05** (#339, merged as 0d1d4ae0): generated named sets prove no figure reaches a reader from outside their purview.
+
 From the boundary's `invariant-coverage` review. The generative tests that
 prove a lead never sees a sibling lead's course walk reports; they do not
 generate named sets. **Owner:** E9, together with the entry above.
@@ -143,6 +147,8 @@ random course lists and leads, and asserts no figure reaches a reader outside
 her purview.
 
 ## The rating term-axis read and three cohort views are unread
+
+**Closed in E9.** E9-05 (#339, merged as 0d1d4ae0) deleted `named_set_term_axis`; E9-12 (#345, 464f9773) retired the four cohort views (migration `e9e5b7d9f605`).
 
 Breakdown decision 7 said the cohort-mode term-axis aggregates land "as views
 and service reads". The boundary's `spec-conformance` review found that only
@@ -163,6 +169,8 @@ view a surface reads carries contributor counts; and any view still unread when
 E9 closes is retired, with its grant.
 
 ## Set names that differ only in case are two sets
+
+**Closed by E9-05** (#339, merged as 0d1d4ae0): a unique index on the normalized name (migration `e9a7c9e1b807`).
 
 From the boundary's `data-model` review. E5-14 made a blank name unstorable
 (`CHECK (btrim(name) <> '')`) and refused at the route (the schema strips
@@ -350,6 +358,8 @@ a stylesheet test.
 
 ## The exit drive does not show a week where only the university line is withheld
 
+**Closed by E9-13** (#346): `tests/e2e/exit-university-line-withheld.spec.ts` asserts the payload and the page.
+
 From the pass over round 2 (`spec-conformance`, LOW). The thin-cohort drive
 exercises the default-set treatments; no drive shows the university line
 withheld while the comparison line is drawn, the case the sealing rules (ADR
@@ -483,6 +493,8 @@ counts students who commented rather than responses.
 
 ## A teaching grant with a child edge would stop its section's roster sync
 
+**Closed by E9-06** (#338, merged as 3dc0c087): the editor refuses an edge under a teaching grant, tested in `test_the_people_editor_writes_through_the_definers.py`.
+
 From the E5.1 boundary review. `role_assignment.reports_to` references another
 assignment with `RESTRICT` (`backend/app/models/identity.py:715`). If an
 `INSTRUCTOR` assignment ever had a child edge, the `DELETE` in
@@ -512,6 +524,8 @@ test that a request whose Host and Origin match each other but name another
 host is refused.
 
 ## Six server-required members stay optional in the frontend, and one figure has three names
+
+**Closed by E9-11** (#344, merged as b5f39706): the views alias the generated types, and `ComparisonFigureView` is the one name.
 
 From the E5.1 boundary review. The frontend wire types keep six members the
 server requires optional: `closes_at`, `question_text`, `benchmark`,

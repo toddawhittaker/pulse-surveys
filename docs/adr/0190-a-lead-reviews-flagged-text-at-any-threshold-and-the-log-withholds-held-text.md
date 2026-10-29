@@ -89,6 +89,9 @@ section's per-week completion ledger in the gradebook (§3.4) can narrow the
 author in a small week. Ruling 1 accepts showing the
 text, and the shuffle removes order as a second clock. Second, a lead's own
 stated reason is free text shown beside a date, and could quote a held comment.
+(Narrowed by [0206](0206-the-drill-down-reuses-the-report-read-only-and-the-wider-roles-read-the-log-and-policy.md)'s
+E9-14 amendment: on a withheld row, only the decider now reads that reason and
+date.)
 
 ## Alternatives rejected
 
@@ -120,3 +123,4 @@ stated reason is free text shown beside a date, and could quote a held comment.
   governed, the log row gained `decision` (seven members, not the work order's
   six), and the two route inventories now expect a CSRF member per decision
   door and the moderation routes beside the named sets.
+- *Amended by [0206](0206-the-drill-down-reuses-the-report-read-only-and-the-wider-roles-read-the-log-and-policy.md):* the assistant dean, the dean and the vice president read the log over their purview, under the same taught-section rule; they still read no queue, with the same 403.

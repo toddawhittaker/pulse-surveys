@@ -8,28 +8,6 @@ import { formatStatistic } from './instructorReportFigures';
 import './instructorReportStats.css';
 
 /**
- * One benchmark number, sealed — the wire's `ComparisonFigure`, which ticket
- * E5-10 reconciled this component's props to, and the one figure type the
- * chart's overlays read too.
- *
- * SPEC §4.1 item 7 suppresses every figure computed from a comparison set below
- * the benchmark minimums, and the server seals the mean and the median
- * independently, "and neither rides on the other's decision". So the seal is
- * read once per cell, by {@link isShownFigure}.
- *
- * `reason` is the payload's one-word token (`"below-minimum"`) and **nothing
- * renders it**: a wire token is not a governed string, and the words a reader
- * sees come from `instructorReportStatCopy.ts` like every other sentence on this
- * surface.
- *
- * `figure` is `null` wherever `suppressed` is true, because a figure under a
- * suppression is the inference the suppression exists to prevent; it is `null`
- * again for a week the population has no figure in, which is a different fact
- * and takes different words.
- */
-export type BenchmarkFigure = ComparisonFigureView;
-
-/**
  * One comparison column's pair of figures — the wire's
  * `WorkloadBenchmarkFigures`.
  *
@@ -257,7 +235,7 @@ function BenchmarkCell({
 }: {
   readonly labelKey: InstructorReportStatsCopyKey;
   readonly testId: string;
-  readonly figure: BenchmarkFigure | null | undefined;
+  readonly figure: ComparisonFigureView | null | undefined;
 }): JSX.Element {
   return (
     <div data-testid={testId}>
@@ -298,7 +276,7 @@ function BenchmarkCell({
  * member never sent — takes the suppression sentence, which is the one that
  * withholds rather than the one that explains.
  */
-function saysItIsNotSuppressed(figure: BenchmarkFigure | null | undefined): boolean {
+function saysItIsNotSuppressed(figure: ComparisonFigureView | null | undefined): boolean {
   return figure != null && figure.suppressed === false;
 }
 

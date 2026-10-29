@@ -1,6 +1,7 @@
 import type { RatingDistribution } from './RatingHistogram';
 import type { RateFigure } from './ResponseRateBar';
-import type { BenchmarkFigure, WorkloadBenchmark, WorkloadBenchmarkFigures } from './StatPair';
+import type { ComparisonFigureView } from '../api/instructor';
+import type { WorkloadBenchmark, WorkloadBenchmarkFigures } from './StatPair';
 
 /**
  * The report weeks the stat component tests render — ticket E4-09.
@@ -122,15 +123,15 @@ export const A_WEEK_NOBODY_ANSWERED: ReportWeekFixture = {
  * is the server's own rule, and it is the shape rather than a convenience: a
  * value sent beside a suppression is the figure the suppression is withholding.
  */
-function reported(figure: number): BenchmarkFigure {
+function reported(figure: number): ComparisonFigureView {
   return { suppressed: false, reason: null, figure };
 }
 
 /** A figure SPEC §4.1 item 7 withheld: sealed shut, with the wire's own token. */
-const WITHHELD: BenchmarkFigure = { suppressed: true, reason: 'below-minimum', figure: null };
+const WITHHELD: ComparisonFigureView = { suppressed: true, reason: 'below-minimum', figure: null };
 
 /** A figure the population has nothing for this week — unsuppressed and empty. */
-const NO_FIGURE: BenchmarkFigure = { suppressed: false, reason: null, figure: null };
+const NO_FIGURE: ComparisonFigureView = { suppressed: false, reason: null, figure: null };
 
 /** One whole column, both of whose figures report. */
 function reporting(mean: number, median: number): WorkloadBenchmarkFigures {

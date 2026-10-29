@@ -171,19 +171,20 @@ export const A_PREVIEW_WITH_BOTH_COUNTS: ComparisonSetPreviewView = {
 /**
  * A preview that answered the member count and not the section count.
  *
- * E5-06's scope note allows this, and the line renders the absence in words.
- * The member is left off the object entirely rather than set to `null`, because
- * that is the shape a response with no such key parses to.
+ * The wire requires the count; the answer is cast rather than parsed, so the
+ * line still renders an absent one in words. The member is left off the object
+ * entirely rather than set to `null`, because that is the shape a response with
+ * no such key parses to, and the cast is what lets a fixture say so.
  */
-export const A_PREVIEW_WITHOUT_A_SECTION_COUNT: ComparisonSetPreviewView = {
+export const A_PREVIEW_WITHOUT_A_SECTION_COUNT = {
   member_count: 7,
-};
+} as unknown as ComparisonSetPreviewView;
 
 /** The same fact spelled the other way, which a JSON `null` parses to. */
-export const A_PREVIEW_WITH_A_NULL_SECTION_COUNT: ComparisonSetPreviewView = {
+export const A_PREVIEW_WITH_A_NULL_SECTION_COUNT = {
   member_count: 9,
   section_count: null,
-};
+} as unknown as ComparisonSetPreviewView;
 
 /** What a create sends and what the server answers with, for the form's tests. */
 export const A_NEW_SET: ComparisonSetDetailView = {
@@ -295,7 +296,7 @@ export const A_SET_WITH_A_CROSS_LEVEL_MEMBER: ComparisonSetDetailView = {
  * would actually see.
  */
 export const A_DUPLICATE_NAME_REFUSAL =
-  'Another comparison set already uses this name, and a set is named once.';
+  'Another comparison set already uses this name, or the same name with different capitals or spacing, and a set is named once.';
 export const A_NOT_THE_DEFINER_REFUSAL =
   'A comparison set is edited and deleted by the leader who defined it, and this one was defined by somebody else.';
 export const AN_UNKNOWN_SET_REFUSAL = 'There is no comparison set here.';

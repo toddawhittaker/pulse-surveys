@@ -2747,9 +2747,27 @@ REACHED_TABLES_THAT_CARRY_NOTHING: dict[str, CarriesNothing] = {
         "one.",
     ),
     "audit_log": CarriesNothing(
-        ("action", "actor_person_id", "case_id", "id", "occurred_at", "subject_user_id"),
-        "References to people and no identity payload: an actor, a subject, a case, an action "
-        "token and a timestamp.",
+        (
+            "action",
+            "actor_person_id",
+            "case_id",
+            "detail",
+            "id",
+            "occurred_at",
+            "parent_assignment_id",
+            "role",
+            "scope_node_id",
+            "subject_person_id",
+            "subject_user_id",
+        ),
+        "References to people and no student's identity: an actor, a subject, a case, an action "
+        "token and a timestamp; since E9-02, a subject person, the role and scope node of an "
+        "admin write, and the new parent assignment of an edge change. Since E9-06, `detail`: "
+        "the dry-run diff of an applied people or mapping import, which SPEC §8 requires the log "
+        "to keep. That diff does carry staff names and categories, course labels and person keys "
+        "as the admin was shown them — staff records only, because no import names a student — "
+        "and neither runtime role holds any privilege on this table, so no screen reads it "
+        "except through a definer.",
     ),
     "enrollment": CarriesNothing(
         (

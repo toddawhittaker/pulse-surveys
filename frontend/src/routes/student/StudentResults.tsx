@@ -18,6 +18,7 @@ import { StateNotice } from '../../components/StateNotice';
 import { TrendDuo } from '../../components/TrendDuo';
 import { WeekNav } from '../../components/WeekNav';
 import { copy, fillCopy } from '../../copy/studentResults';
+import { WEEK_RESULTS_ROUTE } from '../paths';
 
 /**
  * SPEC §7.6's `StudentResults` — the shell: one section's reply for one
@@ -37,7 +38,9 @@ import { copy, fillCopy } from '../../copy/studentResults';
  *
  * **`awaiting` is a closed door.** One sentence: no number, date, countdown,
  * name or response text, because the week is held and anything more would tease
- * it.
+ * it. The header above it, the course label and the course's Lead Faculty
+ * (SPEC §2.1), is about the course rather than the week, and shows in every
+ * state.
  *
  * **Everything below the response is gated on the state before it is read.** A
  * held week draws none of it whatever the payload happens to hold, the same
@@ -49,10 +52,6 @@ import { copy, fillCopy } from '../../copy/studentResults';
  * do not carry: the institution's time zone, which the date on the card is shown
  * in. A failed survey read costs the card its date, not the page its reply.
  */
-
-/** The two addresses this page answers, relative to the router's `/app` mount. */
-export const LATEST_RESULTS_ROUTE = '/student/sections/$sectionId/results';
-export const WEEK_RESULTS_ROUTE = '/student/sections/$sectionId/weeks/$courseWeek/results';
 
 /**
  * Set when the student picks a week, so that focus moves to the heading once
@@ -206,6 +205,11 @@ function Body({
       <h2 className="pulse-results-course" data-testid="pulse-results-course">
         {results.course_label}
       </h2>
+      {results.lead_name === null ? null : (
+        <p className="pulse-results-lead" data-testid="pulse-results-lead">
+          {fillCopy('student_results.lead_faculty', { name: results.lead_name })}
+        </p>
+      )}
       {current === null ? null : (
         <div className="pulse-results-week">
           {/* A held week shows no number, not even its own week's. */}

@@ -2,12 +2,15 @@
 
 Criterion 4 asks for "the log row for each write … asserted by reading the audit
 trail, not the return value", and work-order decision 3 settles that this ticket
-writes **no** `audit_log` row and records the choice: `AuditAction` has one
-member, `audit_log.subject_user_id` is `NOT NULL`, `pulse_app` holds no `INSERT`
-on the table, and the only writer is a `SECURITY DEFINER` function built for the
-Care identity reveal. Widening that door for a non-reveal write is a change to
-the audit guarantee and belongs in its own reviewed change; SPEC §8's sentence
-listing what `audit_log` includes does not name set definitions.
+writes **no** `audit_log` row and records the choice: at E5-06 `AuditAction` had
+one member, `audit_log.subject_user_id` was `NOT NULL`, `pulse_app` held no
+`INSERT` on the table, and the only writer was a `SECURITY DEFINER` function built
+for the Care identity reveal. Widening that door for a non-reveal write is a
+change to the audit guarantee and belongs in its own reviewed change; SPEC §8's
+sentence listing what `audit_log` includes does not name set definitions. E9-02
+is that reviewed change for the people graph alone (its definers audit every
+grant, revocation, edge, mapping and linkage change); set definitions are still
+not audited, which is what the test below holds.
 
 **So the trail this module reads is the set row's own columns**, which decision 3
 names as what *is* recorded: the creator and `created_at` on a create, and
@@ -151,12 +154,13 @@ def test_no_audit_log_row_is_written_for_a_create_an_edit_or_a_delete(
     """Decision 3, asserted: the audit door is not widened by this ticket.
 
     This is a recorded decision rather than an omission, and it is asserted so
-    that changing it is deliberate. `audit_log` is append-only and its one
-    writer is the Care reveal's `SECURITY DEFINER` function; a set write that
-    reached it would have needed `AuditAction` widened, `subject_user_id` made
-    nullable and an `INSERT` granted to `pulse_app` — three changes to the
+    that changing it is deliberate. `audit_log` is append-only, and at E5-06 its
+    one writer was the Care reveal's `SECURITY DEFINER` function; a set write
+    that reached it would have needed `AuditAction` widened, `subject_user_id`
+    made nullable and an `INSERT` granted to `pulse_app` — three changes to the
     guarantee SPEC §4 calls traceability-for-safety, arriving as a side effect of
-    a management API.
+    a management API. (E9-02 widened the first two for the people graph's
+    definers only; no set write reaches them.)
 
     **Why this is not an assertion about emptiness** (`docs/MISTAKES.md` entry
     3): all three writes are driven and each is required to have taken effect —

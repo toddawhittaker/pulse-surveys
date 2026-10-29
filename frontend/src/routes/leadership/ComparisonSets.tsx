@@ -20,14 +20,9 @@ import {
   fillCopy,
   type LeadershipComparisonSetCopyKey,
 } from '../../copy/leadershipComparisonSetCopy';
-import {
-  COMPARISON_SET_EDIT_ROUTE,
-  COMPARISON_SETS_ROUTE,
-  ComparisonSetForm,
-  LEADERSHIP_SETS_TESTID,
-  PAGE_HEADING_ID,
-} from './ComparisonSetForm';
+import { ComparisonSetForm, LEADERSHIP_SETS_TESTID, PAGE_HEADING_ID } from './ComparisonSetForm';
 import './leadershipComparisonSets.css';
+import { COMPARISON_SETS_ROUTE, COMPARISON_SET_EDIT_ROUTE } from '../paths';
 
 /**
  * `/leadership/comparison-sets` — the sets this reader may read, and what each

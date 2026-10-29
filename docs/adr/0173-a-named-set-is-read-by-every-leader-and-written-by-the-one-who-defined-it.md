@@ -1,5 +1,7 @@
 # 0173 — A named set is read by every leader and written only by the one who defined it
 
+**Amended by [ADR 0203](0203-named-set-figures-are-read-inside-the-readers-purview-and-the-seal-counts-every-hat.md)** (E9-05): every leader still lists and reads every set's definition, but a set's figures are read only over the set's sections inside the reader's purview.
+
 ## Context
 
 SPEC §5.1 gives leadership the power to define named comparison sets:

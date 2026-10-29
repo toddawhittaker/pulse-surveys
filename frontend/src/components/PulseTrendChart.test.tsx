@@ -791,3 +791,62 @@ describe('the table for sighted readers', () => {
     expect(table.className).toBe('sr-only');
   });
 });
+
+describe('one line per start cohort', () => {
+  const cohort = (label: string, weeks: readonly number[]) => ({
+    label,
+    points: weeks.map((week) => ({ courseWeek: week, termWeek: null, mean: 3.5 })),
+  });
+
+  it('draws each cohort’s line, dot, table and legend entry in place of the single line', () => {
+    const { container } = render(
+      <PulseTrendChart
+        points={[]}
+        label="Instructor"
+        lengthWeeks={18}
+        axis="term"
+        showLegend
+        cohorts={[
+          cohort('U', [1, 2]),
+          cohort('R', [4, 5]),
+          cohort('Q', [7]),
+          cohort('E', [9]),
+        ]}
+      />,
+    );
+    const lines = Array.from(container.querySelectorAll('path.pulse-trend-line'));
+    expect(lines.map((line) => line.getAttribute('class'))).toEqual([
+      'pulse-trend-line pulse-trend-cohort-0',
+      'pulse-trend-line pulse-trend-cohort-1',
+      'pulse-trend-line pulse-trend-cohort-2',
+      'pulse-trend-line pulse-trend-cohort-3',
+    ]);
+    expect(container.querySelectorAll('circle.pulse-trend-dot')).toHaveLength(4);
+    expect(screen.getByRole('table', { name: 'Weekly ratings: Instructor, R' })).toBeTruthy();
+    expect(screen.queryByRole('table', { name: 'Weekly ratings: Instructor' })).toBeNull();
+    const legend = container.querySelector('.pulse-trend-legend');
+    expect(legend?.textContent).toBe('URQE');
+  });
+});
+
+describe('a patterned cohort line', () => {
+  it('carries no pathLength, so its dash pattern is not scaled into a solid stroke', () => {
+    const cohorts = Array.from({ length: 7 }, (_, index) => ({
+      label: `C${String(index)}`,
+      points: [{ courseWeek: index + 1, termWeek: null, mean: 3.5 }, { courseWeek: index + 2, termWeek: null, mean: 3.6 }],
+    }));
+    const { container } = render(
+      <PulseTrendChart points={[]} label="Instructor" lengthWeeks={18} axis="term" cohorts={cohorts} />,
+    );
+    const lines = Array.from(container.querySelectorAll('path.pulse-trend-line'));
+    expect(lines[0]?.getAttribute('pathLength')).toBe('1');
+    expect(lines[3]?.hasAttribute('pathLength')).toBe(false);
+    expect(lines[6]?.hasAttribute('pathLength')).toBe(false);
+    expect(lines[6]?.getAttribute('class')).toBe('pulse-trend-line pulse-trend-cohort-6');
+    const sheet = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'instructorReportTrend.css'), 'utf8');
+    const dashed = /\.pulse-trend-line\.pulse-trend-cohort-3,[^{]*\{[^}]*stroke-dasharray:\s*6 4/;
+    const dotted = /\.pulse-trend-line\.pulse-trend-cohort-6,[^{]*\{[^}]*stroke-dasharray:\s*2 4/;
+    expect(sheet).toMatch(dashed);
+    expect(sheet).toMatch(dotted);
+  });
+});

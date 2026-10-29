@@ -468,12 +468,15 @@ describe('a published week with data in it', () => {
     await screen.findByRole('heading', { level: 2, name: 'Rating trend' });
 
     // The third read is the week's response, which the composer asks for once the
-    // report is drawn; it is for the same week 7 and not for another.
-    expect(asked).toEqual([
-      publishedWeeksPath(SECTION_ID),
-      reportPath(SECTION_ID, 7),
-      weekResponsePath(SECTION_ID, 7),
-    ]);
+    // report is drawn; it is for the same week 7 and not for another. It is sent
+    // after the heading renders, so the test waits for it rather than racing it.
+    await waitFor(() => {
+      expect(asked).toEqual([
+        publishedWeeksPath(SECTION_ID),
+        reportPath(SECTION_ID, 7),
+        weekResponsePath(SECTION_ID, 7),
+      ]);
+    });
   });
 
   it('moves focus to the heading when another week arrives, and not on the first one', async () => {
@@ -499,6 +502,29 @@ describe('a published week with data in it', () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(screen.getByRole('heading', { level: 1 }));
     });
+  });
+});
+
+describe('the Lead Faculty in the header (SPEC §2.1)', () => {
+  const LEAD = 'Grace Hopper';
+
+  it('names the course’s lead under the heading', async () => {
+    servingWeeks({
+      4: { ...A_PUBLISHED_WEEK, section: { ...A_PUBLISHED_WEEK.section, lead_name: LEAD } },
+    });
+    open(4);
+
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe(COURSE_LABEL);
+    expect(screen.getByTestId('pulse-report-lead').textContent).toBe(`Lead Faculty: ${LEAD}`);
+  });
+
+  it('shows no Lead Faculty line for a course nobody leads', async () => {
+    servingWeeks({ 4: A_PUBLISHED_WEEK });
+    const { container } = open(4);
+
+    expect((await screen.findByRole('heading', { level: 1 })).textContent).toBe(COURSE_LABEL);
+    expect(screen.queryByTestId('pulse-report-lead')).toBeNull();
+    expect(container.textContent).not.toContain('Lead Faculty');
   });
 });
 

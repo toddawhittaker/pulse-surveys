@@ -49,6 +49,10 @@ same pattern in its own file with the same owner.
   sentence.
 - A future need to resolve in bulk (a report, an export) must not loop these
   functions; it needs its own reviewed mechanism, because point lookups are
-  the property this design protects.
+  the property this design protects. Amended by
+  [ADR 0205](0205-the-rollup-tree-is-one-payload-named-through-a-label-view.md):
+  the roll-up's bulk need is `resolve_persons_for_users(uuid[])`, a set definer
+  with the same owner reading the same one column, answering ids only for the
+  user ids the caller supplies.
 - Until both tickets merge, the file exists identically on two branches; after
   the second merge one revision replays it as a no-op.

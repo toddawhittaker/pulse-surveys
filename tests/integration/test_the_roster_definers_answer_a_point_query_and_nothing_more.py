@@ -505,6 +505,133 @@ def test_resolve_person_for_user_answers_for_a_linked_user_and_null_for_an_unlin
     )
 
 
+# E9-07's fix round (R1): the set form of the resolver above, settled as
+# `public.resolve_persons_for_users(uuid[]) RETURNS TABLE (user_id, person_id)`
+# in `identity_resolution_v003.sql`, owned by `pulse_resolve_definer`.
+RESOLVE_PERSONS_FOR_USERS = (
+    "SELECT user_id, person_id FROM public.resolve_persons_for_users(CAST(:user_ids AS uuid[]))"
+)
+
+# The function's ACL, with `PUBLIC` spelled as grantee oid 0. A NULL `proacl`
+# is Postgres's default, which grants `EXECUTE` to `PUBLIC`.
+SET_RESOLVER_ACL = """
+    SELECT p.proacl IS NULL AS defaulted,
+           coalesce(
+               (SELECT bool_or(g.grantee = 0 AND g.privilege_type = 'EXECUTE')
+                FROM aclexplode(p.proacl) AS g),
+               false
+           ) AS public_executes
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'resolve_persons_for_users'
+"""
+
+
+def test_the_set_resolver_answers_the_users_passed_and_no_one_else(
+    committed_rows: Any, metadata_tables: dict[str, Any]
+) -> None:
+    """Two linked users and one unlinked user passed: the two persons back, a third linked user's not.
+
+    **The control:** the third user is linked to a person, and the one-user
+    resolver finds that person, so its absence from the set answer is the
+    scoping and not a user nothing resolves.
+
+    **The mutations it kills:** a body that ignores its argument and answers
+    every linked user (`FROM person WHERE user_id IS NOT NULL`); a join that
+    answers a person for the unlinked user; a row per person rather than per
+    user passed. **The near miss it spares:** the unlinked user answered with a
+    NULL person, or not answered at all.
+    """
+    key = next(iter(metadata_tables["user"].primary_key.columns)).name
+    person_key = next(iter(metadata_tables["person"].primary_key.columns)).name
+    link = sorted(
+        {
+            item.parent.name
+            for item in metadata_tables["person"].foreign_keys
+            if item.column.table.name == "user"
+        }
+    )[0]
+
+    users = [committed_rows.seed("user", {}) for _ in range(3)]
+    persons = [committed_rows.seed("person", {}, **{link: user[key]}) for user in users]
+    unlinked = committed_rows.seed("user", {})
+    committed_rows.commit()
+    first, second, third = (str(user[key]) for user in users)
+    expected = {
+        (str(user[key]), str(person[person_key]))
+        for user, person in zip(users[:2], persons[:2], strict=True)
+    }
+
+    with acting_as(committed_rows.session, APPLICATION_ROLE):
+        rows = [
+            (str(row[0]), None if row[1] is None else str(row[1]))
+            for row in committed_rows.session.execute(
+                text(RESOLVE_PERSONS_FOR_USERS),
+                {"user_ids": [users[0][key], users[1][key], unlinked[key]]},
+            ).all()
+        ]
+        third_alone = committed_rows.session.execute(
+            text(f"SELECT {RESOLVE_PERSON_FOR_USER}"), {"user_id": users[2][key]}
+        ).scalar_one()
+
+    assert str(third_alone) == str(persons[2][person_key]), (
+        f"The control failed: the one-user resolver answered {third_alone!r} for the third user, "
+        f"who is linked to person {persons[2][person_key]!r}."
+    )
+    passed = {first, second, str(unlinked[key])}
+    stray = [row for row in rows if row[0] not in passed]
+    assert not stray, (
+        f"`resolve_persons_for_users` answered rows for users it was not passed: {stray}. The "
+        f"third linked user ({third}) is among the reasons this matters."
+    )
+    users_answered = [row[0] for row in rows]
+    assert len(users_answered) == len(
+        set(users_answered)
+    ), f"`resolve_persons_for_users` answered a user more than once: {rows}."
+    answered = {row for row in rows if row[1] is not None}
+    assert answered == expected, (
+        f"`resolve_persons_for_users` answered persons {sorted(answered)} for the users passed; the "
+        f"two linked users resolve to {sorted(expected)} and the unlinked one to no person."
+    )
+
+
+@pytest.mark.invariant
+def test_the_care_role_and_public_may_not_execute_the_set_resolver(committed_rows: Any) -> None:
+    """`pulse_care` is refused the call, and the function's ACL carries no `PUBLIC` entry.
+
+    The function runs as `pulse_resolve_definer` and answers person keys for
+    user keys. It is `pulse_app`'s; a grant to `PUBLIC` (what a migration reaches
+    by not revoking) would hand it to every role in the cluster.
+
+    **The control:** `pulse_app` calls the same function without refusal, so the
+    refusal is the grant and not a function nobody can execute.
+
+    **The mutations it kills:** `REVOKE ALL … FROM PUBLIC` left out; `GRANT
+    EXECUTE … TO pulse_care`. **The near miss it spares:** the `pulse_app` grant.
+    """
+    parameters = {"user_ids": [uuid4()]}
+    with acting_as(committed_rows.session, APPLICATION_ROLE):
+        allowed = refused(committed_rows.session, RESOLVE_PERSONS_FOR_USERS, parameters)
+    with acting_as(committed_rows.session, CARE_ROLE):
+        care = refused(committed_rows.session, RESOLVE_PERSONS_FOR_USERS, parameters)
+    acl = committed_rows.session.execute(text(SET_RESOLVER_ACL)).mappings().all()
+
+    assert allowed is None, (
+        f"The control failed: `{APPLICATION_ROLE}` could not call `resolve_persons_for_users` "
+        f"({allowed})."
+    )
+    assert care is not None and sqlstate(care) == INSUFFICIENT_PRIVILEGE, (
+        f"`{CARE_ROLE}` calling `resolve_persons_for_users` was "
+        f"{'answered' if care is None else f'refused with SQLSTATE {sqlstate(care)}'}; it must be "
+        f"refused with {INSUFFICIENT_PRIVILEGE}."
+    )
+    assert len(acl) == 1 and not acl[0]["defaulted"] and not acl[0]["public_executes"], (
+        f"`resolve_persons_for_users`'s ACL reads {[dict(row) for row in acl]}: a NULL ACL is "
+        "Postgres's default, which grants `EXECUTE` to `PUBLIC`, and an explicit `PUBLIC` entry is "
+        "the same grant written down. Either reaches every role in the cluster."
+    )
+
+
 @pytest.mark.invariant
 def test_record_roster_email_writes_the_address_and_never_a_name(
     committed_rows: Any, metadata_tables: dict[str, Any]

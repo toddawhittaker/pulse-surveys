@@ -506,13 +506,77 @@ RESOLVE_DEFINER_ROLE = "pulse_resolve_definer"
 #     `user_identity` stays unreachable from this role by every mechanism, and the
 #     owner, `pulse_staff_name_definer`, holds nothing on it
 #     (`test_the_staff_name_definer_answers_names_and_never_other_people.py`).
-#     The count moves from ten to eleven.
+#     The count moves from ten to eleven. **E9-03 adds a second function under
+#     this name**, the overload `section_staff_names(p_section_ids uuid[],
+#     p_reader_user_id, p_reader_person_id, p_reader_date) -> TABLE (section_id,
+#     role, person_id, display_name)`, with the same owner (ADR 0201). It answers
+#     a set of sections at once, with each name's role, and adds the course's
+#     lead, the department's chair and the college's dean to the names; a reader
+#     holding a live `CHAIR`, `ASSISTANT_DEAN`, `DEAN` or `VP_ACADEMICS`
+#     assignment is answered for any section passed, and the door narrows that
+#     to the reader's purview. Because this inventory is by name, the overload
+#     does not move the count; the count of functions under the name is held to
+#     two in `test_the_staff_name_channel_answers_a_set_of_sections.py`.
+#   - The twelve people-graph definers, E9-02's (ADR 0200): nine writes —
+#     `admin_create_person`, `admin_edit_person`, `admin_grant_role`,
+#     `admin_revoke_role`, `admin_set_reports_to`, `admin_map_lead_course`,
+#     `admin_unmap_lead_course`, `admin_link_web_login` and
+#     `admin_unlink_web_login` — and three reads, `admin_read_people`,
+#     `admin_read_role_assignments` and `admin_read_lead_mappings`. SPEC §6.3 puts
+#     the People & reporting editor and the Lead Faculty mapping table in the
+#     admin console, and `pulse_app` holds no write on any of the four tables they
+#     touch (`person`, `role_assignment`, `lead_faculty_mapping`,
+#     `web_login_subject`) and must not: a grant cannot refuse an `INSTRUCTOR`
+#     row, cannot require the caller to be an admin, and cannot make a write and
+#     its `audit_log` row one transaction. So each is a function whose body checks
+#     that its first argument, the acting admin's person key, holds a live `ADMIN`
+#     assignment, refuses the LMS-owned `INSTRUCTOR` role, and writes its audit row
+#     with no handler around it. **What the database check is worth, said here
+#     because this connection supplies the key:** `pulse_app` asserts which admin
+#     is acting and the database cannot tell whether that is the session's own
+#     person, so the route (`require_admin`, the key from the verified session) is
+#     the real check, and these functions stop writes that bypass them and writes
+#     naming a non-admin key, nothing more. The reads answer staff records only:
+#     names, categories, the web-login issuer, assignments, edges and mappings,
+#     never `person.user_id`, `idp_subject`, a student or any `user_identity`
+#     column. Their owner is a NOLOGIN role of its own,
+#     `pulse_people_graph_definer`, which holds nothing on `user_identity`.
+#     The count moves from eleven to twenty-three.
+#   - `admin_record_import(actor_person_id uuid, kind text, diff jsonb)` — E9-06's
+#     fix round, in `views_sql/people_graph_v002.sql`. SPEC §8 makes `audit_log`
+#     include every import "with their dry-run diffs", and `pulse_app` holds no
+#     privilege on `audit_log` and must not: a grant cannot require the caller to
+#     be an admin, and an `INSERT` grant would let the application write any
+#     action at all into the append-only log. So the import's record is one
+#     function whose body checks the actor's live `ADMIN` assignment exactly as
+#     the twelve above do (refusing with `admin_people.actor_not_an_admin`) and
+#     writes one `IMPORT_APPLIED` row carrying the actor, the kind and the diff.
+#     It takes a person key, a word and the diff the admin was shown, returns no
+#     identity, and is owned by the same `pulse_people_graph_definer`. The count
+#     moves from twenty-three to twenty-four.
+#   - `resolve_persons_for_users(uuid[]) -> TABLE (user_id, person_id)` — E9-07's
+#     fix round (R1), and the set form of `resolve_person_for_user` above. The
+#     roll-up's enrolled count drops staff from a section's enrolled students
+#     (`enrollment_windows.without_staff_of`), which means asking, for every
+#     enrolled user, whether a `person` is linked to it; asked one user at a time
+#     that was a statement per student, thousands for a college, and ADR 0094
+#     forbids looping the one-user resolver for bulk use. So one call answers the
+#     person key for each user key passed, and nothing for a user not passed. It
+#     answers keys only, no name and no identity column, and its owner is the
+#     same `pulse_resolve_definer`, reading the same `person (id, user_id)`
+#     columns the one-user form already reads, so
+#     `RESOLVE_DEFINER_COLUMN_PRIVILEGES` below does not move. What it costs: a
+#     caller holding many user keys can map them to person keys in one call
+#     rather than one at a time, which is reach `pulse_app` already had through
+#     the one-user form. Its answer is scoped to the keys passed
+#     (`test_the_roster_definers_answer_a_point_query_and_nothing_more.py`).
+#     The count moves from twenty-four to twenty-five.
 #
 # What is *not* here is the point of the list: the functions of the Care door.
 # `pulse_app` is refused those by name in an `invariant`-marked test below, and a
-# **twelfth** entry appearing here is a new door into identity that some later
+# **twenty-sixth** entry appearing here is a new door into identity that some later
 # ticket opened without arguing for it. The number moves only in a change that
-# writes the sentence admitting the entry, as each of the eleven above did; an
+# writes the sentence admitting the entry, as each entry above did; an
 # entry arriving without one is the thing this inventory exists to make
 # impossible.
 #
@@ -532,6 +596,20 @@ SANCTIONED_APPLICATION_EXECUTE = (
     "end_teaching_instructor",
     "route_moderation_verdict",
     "section_staff_names",
+    "admin_create_person",
+    "admin_edit_person",
+    "admin_grant_role",
+    "admin_revoke_role",
+    "admin_set_reports_to",
+    "admin_map_lead_course",
+    "admin_unmap_lead_course",
+    "admin_link_web_login",
+    "admin_unlink_web_login",
+    "admin_read_people",
+    "admin_read_role_assignments",
+    "admin_read_lead_mappings",
+    "admin_record_import",
+    "resolve_persons_for_users",
 )
 
 # What the resolve definer may reach at table grain, and the whole of it.
@@ -851,9 +929,20 @@ THE_CARE_DOOR = (RECORD_FUNCTION, REVEAL_FUNCTION, SUBJECT_RESOLVER_FUNCTION)
 # a writer holds the role they state, and writes nothing. `pulse_app` holds no
 # `EXECUTE` on either function — a trigger fires without it — so neither is in
 # `SANCTIONED_APPLICATION_EXECUTE`, and a grant of one would be red there.
+#
+# **E9-02 adds a ninth, `pulse_people_graph_definer`**, the owner of the twelve
+# people-graph definers (ADR 0200), and of E9-06's `admin_record_import` beside them. It is the first owner that writes the people
+# graph, and what it may reach is pinned in
+# `tests/integration/test_the_people_graph_definers_answer_only_an_admin.py::
+# test_the_people_graph_definers_owner_holds_exactly_what_its_writes_need`:
+# column-scoped reads and writes on `person`, the writes on `role_assignment`,
+# `lead_faculty_mapping` and `web_login_subject` its bodies make, an `INSERT` on
+# the `audit_log` columns its rows fill (E9-06 adds `detail`), and nothing on
+# `user_identity`.
 MODERATION_DEFINER_ROLE = "pulse_moderation_definer"
 STAFF_NAME_DEFINER_ROLE = "pulse_staff_name_definer"
 RESPONSE_GUARD_DEFINER_ROLE = "pulse_response_guard_definer"
+PEOPLE_GRAPH_DEFINER_ROLE = "pulse_people_graph_definer"
 IDENTITY_DEFINER_ROLES = (
     RESOLVE_DEFINER_ROLE,
     "pulse_roster_definer",
@@ -863,6 +952,7 @@ IDENTITY_DEFINER_ROLES = (
     MODERATION_DEFINER_ROLE,
     STAFF_NAME_DEFINER_ROLE,
     RESPONSE_GUARD_DEFINER_ROLE,
+    PEOPLE_GRAPH_DEFINER_ROLE,
 )
 
 # How the two halves are called. The record's third argument is a null case id:
@@ -4447,6 +4537,14 @@ RUNTIME_BASE_TABLE_PRIVILEGES = frozenset(
         (APPLICATION_ROLE, "moderation_attempt", "INSERT"),
         (APPLICATION_ROLE, "instructor_response", "SELECT"),
         (APPLICATION_ROLE, "response_policy", "SELECT"),
+        # E9-04 (ADR 0202): the revoked-session ledger. SELECT is the revocation
+        # check every gate makes; INSERT is revoke_session (switch, logout);
+        # DELETE is the purge revoke_session runs in the same transaction.
+        # UPDATE is withheld: an expires_at moved earlier would bring an ended
+        # session back. The table holds a random jti and two timestamps, no person.
+        (APPLICATION_ROLE, "revoked_session", "SELECT"),
+        (APPLICATION_ROLE, "revoked_session", "INSERT"),
+        (APPLICATION_ROLE, "revoked_session", "DELETE"),
     }
 )
 
@@ -5809,7 +5907,9 @@ APPLICATION_READERS = (APPLICATION_ROLE, "PUBLIC")
 # **Per view, because the sanction is per view.** Each entry below carries the
 # sentence that admits it, and the sentences come from the ticket, SPEC and the
 # ADR rather than from the SQL: E0-10's two, ADR 0046's three, E4-03's three
-# report views, E4-04's comment view and E5-03's four benchmark views, and what
+# report views, E4-04's comment view and E9-07's org-node label view (E5-03's
+# four benchmark views were retired by E9-12; the note where they stood says
+# so), and what
 # each is *for* is written down in those records. No count
 # is written here — the set grows with every ticket that ships a read view, and a
 # number in a comment is a record with a scheduled expiry (`docs/MISTAKES.md`
@@ -5976,112 +6076,29 @@ SANCTIONED_VIEW_COLUMNS: dict[str, tuple[str, ...]] = {
     # first view in the schema whose rows are a person's writing, so the column
     # that must never arrive is any column that would let a reader sort them.
     "report_comment": ("section_id", "week_id", "stream", "answer_id", "comment_text"),
-    # E5-03's four, and the sentence that admits all of them at once: **a
-    # benchmark row is about a cohort, and a cohort has no id, no section and no
-    # person in it**. Each is keyed by a length, a level, a term and a week —
-    # four facts about a *set* of sections — and every other column is a
-    # statistic or a count over what that set's students submitted. There is
-    # deliberately no `section_id` here, which is the difference between these
-    # and E4-03's report views one row up: those are about one section an
-    # instructor already has, and these are about every section of a length and
-    # level in the institution, across the current and every retained prior term
-    # (SPEC §5.1's past-referencing). A key on that row would name a section a
-    # reader has no other route to.
-    #
-    # **`respondent_count` is a count and not a key**, and it is worth saying
-    # outright because it is the one column here that is *about* people. SPEC
-    # §5.1 gives comparison figures their own minimum and §4.1 item 7 covers "a
-    # mean, a median, or any other statistic"; E5-04 compares this number
-    # against `benchmark_min_respondents_default`, so it has to be a count of
-    # students rather than of responses (`docs/MISTAKES.md` entry 50). It is
-    # computed with `COUNT(DISTINCT ...)` inside the view and the key it counts
-    # over never leaves it.
-    #
-    # **What is absent is the whole point, and it was argued.** The work order
-    # for E5-03 asked for a fifth view exposing `(section_id, course_week,
-    # stream, user_id)` — a person-week index spanning a cohort — and the ruling
-    # on `docs/disputes/E5-03-01.md` withdrew it on E5-03's own scope sentence
-    # ("section id and numbers, never a person") and on SPEC §8's "enforced in
-    # the database, not just the application". The figures it was meant to feed
-    # are computed by `benchmark_set_week` and `benchmark_set_rating_week`,
-    # which are in `SANCTIONED_APPLICATION_EXECUTE` above with their own
-    # sentence. A `user_id` arriving on any of the four below is that decision
-    # being reversed without a ruling.
-    #
-    # `stream` is a key column on the two rating views (SPEC §3.2's two Likert
-    # questions, carried on the question rows since E4-02, never derived from a
-    # position), and `section_start_date` is a key column on the two term-axis
-    # views: SPEC §2.2 draws "one line per start cohort" on the aggregate axis,
-    # and a cohort is identified by the date it started rather than by its start
-    # letter, which is per-term admin data.
-    "benchmark_cohort_rating_week": (
-        "length_weeks",
-        "level",
-        "term_id",
-        "course_week",
-        "stream",
-        "rating_mean",
-        "rating_count",
-    ),
-    "benchmark_cohort_week": (
-        "length_weeks",
-        "level",
-        "term_id",
-        "course_week",
-        "workload_mean",
-        "workload_median",
-        "response_count",
-        "respondent_count",
-        "section_count",
-    ),
-    "benchmark_cohort_rating_term_axis": (
-        "length_weeks",
-        "level",
-        "term_id",
-        "section_start_date",
-        "term_week",
-        "stream",
-        "rating_mean",
-        "rating_count",
-    ),
-    # **The last two columns are a widening E5-04 admits here rather than makes
-    # quietly**, on the ruling appended to `docs/disputes/E5-04-01.md`. That
-    # ticket's security round found a figure sealed against counts of a
-    # population it was not computed over: the workload mean and median are
-    # computed only over the responses that carry hours — ADR 0165 keeps a
-    # cohort week's row when nobody reports any — while `respondent_count` and
-    # `section_count` above count everybody who answered anything. So the two
-    # figures were suppressed against the wrong number, which is
-    # `docs/MISTAKES.md` entry 50's class and, on this view, a real disclosure:
-    # two students' hours shown as a figure over fifteen people. The `_v002`
-    # body carries each figure's own contributor counts and the service seals
-    # with those.
-    #
-    # **Why the widening is admissible.** Both are aggregate counts of the same
-    # class the view already exposes — a count of distinct students and a count
-    # of sections, over a cohort that has no id, no section key and no person in
-    # it. Neither is a key and neither is new reach: `pulse_app` could already
-    # read `respondent_count` and `section_count` on this row. The alternative
-    # routes were measured and are in the dispute; the one the ruling rejected
-    # would have reversed an ADR 0166 decision taken in this same pull request.
-    #
-    # This entry is what makes the widening argued rather than discovered, which
-    # is §4.1 item 1's purpose and the convention E5-03 used to admit these four
-    # views in the first place.
-    "benchmark_cohort_term_axis": (
-        "length_weeks",
-        "level",
-        "term_id",
-        "section_start_date",
-        "term_week",
-        "workload_mean",
-        "workload_median",
-        "response_count",
-        "respondent_count",
-        "section_count",
-        "workload_respondent_count",
-        "workload_section_count",
-    ),
+    # E5-03's four cohort views (`benchmark_cohort_week`,
+    # `benchmark_cohort_rating_week`, `benchmark_cohort_term_axis` and
+    # `benchmark_cohort_rating_term_axis`) were sanctioned here from E5-03 to
+    # E9-11 and are **retired by E9-12** (README decision 10: E9-05 deleted their
+    # last reader, and named-set figures are computed through the two set
+    # functions in `SANCTIONED_APPLICATION_EXECUTE` above). With the views
+    # dropped, `pulse_app` may read none of their columns, so none is sanctioned;
+    # a grant on a relation of any of those names is now unsanctioned and this
+    # equality fails on it. The columns they carried, and the argument that
+    # admitted them, stand in git history and in
+    # `tests/integration/test_the_four_cohort_views_are_retired.py`, whose round
+    # trip requires the downgrade to restore them.
+    # E9-07's one view, and the sentence that admits it is the re-lane's ruling:
+    # the roll-up tree must say "Mathematics" and "College of Arts and Sciences"
+    # (SPEC §2.1's labels), `pulse_app` holds no `SELECT` on `institution`,
+    # `college` or `department`, and a view keeps that rule where a column grant
+    # would break it. One row per org node above a section: the containment
+    # level, the node's key, its display name, and the key of the node it sits
+    # in. **What is absent is the point**: no person, no identity, no email and
+    # no figure. The chair or dean a label names arrives through E9-03's staff
+    # name door, and every count is computed over the reader's purview, so a
+    # name or a count on this row would be one read past both.
+    "org_node_label": ("level", "node_id", "name", "parent_id"),
 }
 
 EXPECTED_APPLICATION_READABLE_COLUMNS: frozenset[tuple[str, str]] = frozenset(

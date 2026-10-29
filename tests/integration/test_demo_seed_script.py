@@ -129,11 +129,19 @@ USERS = "user"
 #     by: a launch whose roles claim carries no Instructor URN, by somebody Pulse's
 #     own records say is a dean, has to store the roster address. Nothing else in
 #     the seeded world holds a leadership assignment *and* a launchable subject.
+#   - `mock-lms-user-assistant-dean` — the demo institution's assistant dean, the
+#     person SPEC §2.1's worked example is about, so that their roll-up can be read
+#     from both doors (SPEC §14.3's E9 exit). A launch as this subject reaches
+#     that person's purview: Mathematics, Biology and PSYC 110.
 #
-# Both are values `scripts/seed.py` writes; a rename on either side is a named
+# Each is a value `scripts/seed.py` writes; a rename on either side is a named
 # failure below rather than a demo where one of the two doors silently stops
 # resolving.
-MOCK_WORLD_SUBJECTS = ("mock-lms-user-instructor", "mock-lms-user-dean")
+MOCK_WORLD_SUBJECTS = (
+    "mock-lms-user-instructor",
+    "mock-lms-user-dean",
+    "mock-lms-user-assistant-dean",
+)
 
 # What each mock-world persona holds in Pulse's own records, by the subject the
 # mock provider signs them in as. **A hand-written inventory, and E1-13 is why it
@@ -1149,8 +1157,14 @@ def test_the_only_users_on_the_mock_platform_are_the_mock_worlds_own(
     purview over the seeded institution. The data behind it is fictional and the
     container is a development one; ADR 0097 records the trade and the pull request
     says it again. The rule that keeps it bounded is this test: the reachable set is
-    **exactly** the two subjects below, and a third one added by a later ticket is a
-    red here rather than a quiet widening.
+    **exactly** the inventory above, and a subject added without an entry there is
+    a red here rather than a quiet widening.
+
+    **The third entry reuses a demo person, on purpose.** The worked example of
+    SPEC §2.1 is the demo assistant dean's own supervision edges, which no copy can
+    hold, so that person's `user` moved to the mock platform and a launch as
+    `mock-lms-user-assistant-dean` reaches their purview: Mathematics, Biology and
+    PSYC 110. `scripts/seed.py` states the same trade beside the constant.
 
     **Two controls, and neither is ceremony.** The fictional platform's own users
     have to be there, or "only these two belong to the mock" is being asserted over
@@ -1197,11 +1211,10 @@ def test_the_only_users_on_the_mock_platform_are_the_mock_worlds_own(
     missing = [subject for subject in MOCK_WORLD_SUBJECTS if subject not in subjects]
     assert not missing, (
         f"The seed wrote no `{USERS}` row on the mock's registration for {missing}; it wrote "
-        f"{subjects}. Each is a subject E1-12 needs launchable: the two-hat person, whose "
-        "launch has to reach the same identity her web login does, and the leadership person "
-        "whose launch drives §7.3's leadership limb. Without them the merge cannot be "
-        "demonstrated on the running stack or in E1-15's browser proof — and the equality below "
-        "would be satisfied by a seed that had stopped writing them entirely."
+        f"{subjects}. Each is a subject a browser proof needs launchable, for the reason the "
+        "inventory above gives beside it. Without them those proofs cannot be driven on the "
+        "running stack — and the equality below would be satisfied by a seed that had stopped "
+        "writing them entirely."
     )
     beyond = [subject for subject in subjects if subject not in MOCK_WORLD_SUBJECTS]
     assert not beyond, (
@@ -1209,8 +1222,8 @@ def test_the_only_users_on_the_mock_platform_are_the_mock_worlds_own(
         f"this test's inventory {list(MOCK_WORLD_SUBJECTS)}. The mock signs a launch as any "
         f"subject for whoever can reach the container, so a `{USERS}` row on that platform is a "
         "path from 'can reach the container' to whatever that row's person holds — and on a "
-        "development box that container is published on the host. E1-12 opened that path for two "
-        "named subjects and argued for both in ADR 0097; a third is a widening nobody has argued "
+        "development box that container is published on the host. Each subject in the inventory "
+        "is argued for beside it; one that is not there is a widening nobody has argued "
         "for. If it is deliberate, add it to the inventory above with the sentence that admits it "
         "and say in the pull request what a launch as that subject now reaches."
     )

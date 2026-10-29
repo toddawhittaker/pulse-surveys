@@ -40,7 +40,6 @@ from typing import Any
 import pytest
 from fixtures.benchmark_views import (
     BENCHMARK_FUNCTIONS,
-    COHORT_WEEK_VIEW,
     INSTRUCTOR_STREAM,
     SET_FUNCTION,
     SET_FUNCTION_RESULT_COLUMNS,
@@ -72,7 +71,6 @@ APPLICATION_ROLE = "pulse_app"
 # against every wrong answer.
 BENCHMARK_DEFINER_ROLE = "pulse_benchmark_definer"
 
-TWELVE_WEEKS = 12
 THE_COURSE_WEEK = 2
 
 # The relation the work order asked for and the ruling withdrew. Named here so
@@ -185,13 +183,11 @@ def the_set_row(world: BenchmarkWorld, *labels: str) -> dict[str, Any]:
     return rows[0]
 
 
-# `invariant`-marked for the reason its twin on the cohort view carries at
-# length (`test_a_benchmark_cohort_counts_each_respondent_once.py`): this is the
-# number §4.1 item 7's minimum is compared against, so an over-count shows a
-# comparison figure computed from fewer people than the rule requires. It is
-# marked on both sides because E5-04 reads the views behind one line and these
-# functions behind another, and a guard that covers one currency of a figure and
-# not the other is `docs/MISTAKES.md` entry 35's shape.
+# `invariant`-marked for the reason its twin carries at length
+# (`test_a_benchmark_cohort_counts_each_respondent_once.py`, which read the cohort
+# view until E9-12 retired it and now reads this function over another world):
+# this is the number §4.1 item 7's minimum is compared against, so an over-count
+# shows a comparison figure computed from fewer people than the rule requires.
 @pytest.mark.invariant
 def test_the_set_function_counts_a_repeat_respondent_once_across_the_whole_set(
     benchmark_world: BenchmarkWorld,
@@ -326,7 +322,7 @@ def test_the_set_rating_function_answers_per_stream(
     Every response in the set rated the instructor and left the course rating
     unanswered, so the instructor stream has a mean over four ratings and the
     course stream has no row at all — absence rather than a null, the same
-    contract the views carry.
+    contract the E5-03 cohort views carried until E9-12 retired them.
 
     **The mutation it exists to survive**: `stream` dropped from the function's
     output, which collapses SPEC §5.1's two panels into one series; and a
@@ -362,60 +358,11 @@ def test_the_set_rating_function_answers_per_stream(
     ), f"`rating_mean` is {rows[0]['rating_mean']!r}; all four ratings were {A_RATING}."
 
 
-def test_the_set_functions_agree_with_the_cohort_view_over_the_same_sections(
-    benchmark_world: BenchmarkWorld,
-) -> None:
-    """One arithmetic, two callers — the figures must not diverge.
-
-    Handed exactly the sections a cohort contains, the function answers what the
-    cohort view answers. Two implementations of one set of figures is the defect
-    this catches: E5-04 reads the views for the university line and the
-    functions for a named set, and a report showing a section against two
-    benchmarks computed by two different rules is worse than one showing
-    neither.
-
-    **The world is the four sections of one cohort week** — the set world's
-    three plus the outsider, which together are the whole cohort — so the two
-    answers are over the same rows by construction rather than by coincidence.
-
-    **The mutation it exists to survive**: the function written with its own
-    `avg` and its own `percentile_cont` that disagree with the view's in a
-    detail — a cast dropped, a null handled differently, `count(*)` where the
-    view has `count(DISTINCT ...)`. Each of those passes its own module's tests
-    and is visible only when the two are set side by side.
-    """
-    world = a_section_set_and_one_section_outside_it(benchmark_world)
-
-    from_the_view = world.cohort_week(
-        length_weeks=TWELVE_WEEKS, level=UG, course_week=THE_COURSE_WEEK
-    )
-    assert from_the_view is not None, (
-        f"`{COHORT_WEEK_VIEW}` has no row for the cohort these four sections make up, so there is "
-        "nothing to compare the function against. The cohort modules diagnose that."
-    )
-
-    from_the_function = the_set_row(world, "in-one", "in-two", "in-three", "outside")
-
-    shared = [
-        "workload_mean",
-        "workload_median",
-        "response_count",
-        "respondent_count",
-        "section_count",
-    ]
-    disagreements = {
-        name: (from_the_view[name], from_the_function[name])
-        for name in shared
-        if from_the_view[name] != from_the_function[name]
-    }
-    assert not disagreements, (
-        f"The cohort view and `{SET_FUNCTION}` disagree over the same four sections, as "
-        f"`{{figure: (view, function)}}`: {disagreements}.\n\n"
-        "The set passed to the function is every section of the cohort the view keys, so the two "
-        "are computing the same figures over the same rows. A divergence is two implementations of "
-        "one arithmetic — and E5-04 puts both on one report, the view behind the university line "
-        "and the function behind a named set."
-    )
+# `test_the_set_functions_agree_with_the_cohort_view_over_the_same_sections` stood
+# here and is deleted by E9-12: its whole subject was agreement with
+# `benchmark_cohort_week`, which E9-12 retires (README decision 10). With the view
+# gone the set functions are the one arithmetic, so there are no longer two
+# implementations to keep in step.
 
 
 def test_an_empty_section_set_answers_no_rows(benchmark_world: BenchmarkWorld) -> None:

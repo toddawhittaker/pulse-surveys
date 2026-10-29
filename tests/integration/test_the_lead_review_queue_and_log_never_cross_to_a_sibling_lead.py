@@ -14,8 +14,9 @@ asserted as a refusal**: the decision on the sibling's comment is the work order
 queue carries it, so its absence from this lead's queue is about the grant, not
 about a comment nobody could see.
 
-**One level out (`docs/MISTAKES.md` entries 35 and 53).** `resolve_scope` unions
-instructor grants with leadership ones, and work order decision 3 adds a
+**One level out (`docs/MISTAKES.md` entries 35 and 53).** `resolve_scope` unioned
+instructor grants with leadership ones until E9-01 made it leadership-only (E9
+ruling 4), and work order decision 3 adds a
 leadership-only own-grant function for exactly that reason. The last test gives
 the lead a second hat — an `INSTRUCTOR` assignment on the sibling course's
 section — and requires the queue and the log to stay inside the lead grant.
@@ -36,6 +37,7 @@ from fixtures.lead_review import (
     AS_INSTRUCTOR,
     EXCLUDE,
     LOG_REASON,
+    LOG_SECTION_LABEL,
     NOT_IN_QUEUE,
     SIBLING_COHORT,
     LeadReviewWorld,
@@ -70,6 +72,21 @@ def a_logged_exclusion(review: LeadReviewWorld, text: str, cohort: str, reason: 
         reason=reason,
     )
     return comment
+
+
+def logged_cohorts(review: LeadReviewWorld, reader: Any) -> set[str]:
+    """The cohorts whose sections the reader's log carries a row of, by each row's label.
+
+    E9-14 item 1: a withheld row's reason is blank to a reader who did not
+    decide it, and the sibling's single comment sits in a held stream, so a row
+    is found by the section its label names rather than by its reason.
+    """
+    labels = [str(row.get(LOG_SECTION_LABEL)) for row in review.log_rows(reader)]
+    return {
+        cohort
+        for cohort in (TAUGHT_COHORT, SIBLING_COHORT)
+        if any(review.code_of(cohort) in label for label in labels)
+    }
 
 
 def test_a_lead_never_sees_a_sibling_leads_comment_in_the_queue(
@@ -149,14 +166,15 @@ def test_a_lead_never_sees_a_sibling_leads_row_in_the_log(lead_review: LeadRevie
     a_logged_exclusion(review, "E6-05 sibling course comment", SIBLING_COHORT, SIBLING_REASON)
 
     reasons = [row.get(LOG_REASON) for row in review.log_rows(review.lead)]
-    siblings = [row.get(LOG_REASON) for row in review.log_rows(review.sibling_lead)]
+    cohorts = logged_cohorts(review, review.lead)
+    siblings = logged_cohorts(review, review.sibling_lead)
     assert OWN_REASON in reasons, "The canary: the lead's log lacks their own course's exclusion."
-    assert SIBLING_REASON in siblings, (
+    assert SIBLING_COHORT in siblings, (
         "The sibling lead's own log lacks the sibling course's exclusion, so its absence below "
         "would prove nothing."
     )
     assert (
-        SIBLING_REASON not in reasons
+        SIBLING_COHORT not in cohorts
     ), "The lead's exclusion log carries a sibling lead's course's row. SPEC §4.1 item 2."
 
 
@@ -166,11 +184,11 @@ def test_a_lead_who_also_teaches_a_sibling_section_still_sees_only_their_led_cou
     """One level out: a second hat, an `INSTRUCTOR` grant on the sibling course's section.
 
     Work order decision 3's function returns the reader's *leadership-role*
-    grants. `resolve_scope` would union this instructor grant in, and the
-    queue and log would then reach the sibling's course through it.
+    grants. `resolve_scope` unioned this instructor grant in until E9-01, and a
+    queue and log scoped that way would reach the sibling's course through it.
 
-    **The mutation this kills:** the queue or the log scoped with `resolve_scope`
-    (or any union over every assignment the person holds) rather than the
+    **The mutation this kills:** the queue or the log scoped with any union over
+    every assignment the person holds (`resolve_scope` before E9-01) rather than the
     leadership-only own grant. **The near miss:** the second hat dropped from the
     world — the assignment is read back first, so a world in which it did not
     land is red as a broken premise, not green.
@@ -199,8 +217,8 @@ def test_a_lead_who_also_teaches_a_sibling_section_still_sees_only_their_led_cou
     )
     reasons = [row.get(LOG_REASON) for row in review.log_rows(review.lead)]
     assert OWN_REASON in reasons, "The canary: the two-hat lead's log lacks their led course."
-    assert (
-        SIBLING_REASON not in reasons
+    assert SIBLING_COHORT not in logged_cohorts(
+        review, review.lead
     ), "The two-hat lead's log carries a row from the sibling course they teach a section of."
     before = review.rows_of(sibling)
     refused = review.decide(review.lead, sibling, EXCLUDE)

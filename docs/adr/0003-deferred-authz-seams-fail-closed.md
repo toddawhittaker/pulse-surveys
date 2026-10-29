@@ -1,6 +1,6 @@
 # 0003 — Deferred authorization seams fail closed by raising
 
-**Status:** Accepted
+**Status:** Accepted. Superseded in part by [ADR 0199](0199-the-purview-walk-the-lead-clamp-and-its-chokepoint.md): `transitive_purview` now walks the supervision graph and no longer raises. The rule that a deferred authorization seam fails closed by raising still stands, and `raw_comments_permitted` still follows it.
 **Date:** 2026-08-12
 **Tickets:** E0-11
 

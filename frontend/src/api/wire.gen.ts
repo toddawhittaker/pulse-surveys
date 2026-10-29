@@ -246,6 +246,87 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/session/landings": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The views this session may switch to
+         * @description The session's own view and every view its person holds at its door, read now.
+         *
+         *     SPEC §2.1's door rules come from `app.services.authz.resolve_landings`, over
+         *     the assignments' own door columns: a web session is never offered the
+         *     instructor or student view, and a launch session never Care or Admin.
+         */
+        readonly get: operations["read_session_landings_session_landings_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/session/switch": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Switch to another view this session's person holds
+         * @description A new session in the asked view, the old one revoked; or a 403 that changes nothing.
+         *
+         *     `app.services.session.switch_session` re-reads the person's views at this
+         *     door and decides. On success the new token is answered in the body, for the
+         *     SPA's Bearer carrier, and set as the session cookie beside a fresh CSRF
+         *     token bound to it; it keeps the old token's expiry. A refusal, including a
+         *     switch to the session's own role, sets no cookie and leaves the old session
+         *     live. A token another switch spent first gets the expired-token 401.
+         */
+        readonly post: operations["switch_session_session_switch_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/session/logout": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * End this session
+         * @description Revoke this session and clear both cookies: 204, whatever was presented.
+         *
+         *     The session is read by `app.api.deps.ending_session`, which checks the
+         *     signature and expiry but not revocation, so a second logout with the same
+         *     token answers exactly as the first did; the revocation is an insert that
+         *     does nothing on conflict. That read also applies the double-submit check
+         *     when the session rides the cookie, and a refusal there is a 403 that ends
+         *     nothing. With no valid session at all, the cookies are still cleared, so a
+         *     browser holding a cookie the server no longer accepts is not stranded.
+         *
+         *     Back-channel logout from the identity provider is E13's (ruling 8).
+         */
+        readonly post: operations["log_out_session_logout_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/student/survey": {
         readonly parameters: {
             readonly query?: never;
@@ -345,7 +426,7 @@ export interface paths {
          *     week of one course, so it has to be named. The section is then looked for
          *     among the session's own live enrollments, never read by its key, so a
          *     section the student is not in is not found, exactly as one that does not
-         *     exist is not (`app.services.response_loop.student_week_results`).
+         *     exist is not (`app.services.student_results.student_week_results`).
          *
          *     **Every refusal is one 404 with one sentence**, byte-identical: not enrolled,
          *     an ended enrollment, a week whose report has not opened, and a week or a
@@ -706,6 +787,36 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/comparison-sets/{set_id}/series": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * A comparison set's figures over my purview, one term
+         * @description One set's figures for the session's own reader, in the term asked for (E9-05).
+         *
+         *     **The reader's scope comes from `leadership_scope` and from nothing in the
+         *     request** (ADR 0199): a query string carrying another person's id is not
+         *     read, so it is answered with the session's own scope. The figures are
+         *     computed over the set's sections inside that purview, per start cohort, and
+         *     a set wholly outside it answers exactly what a thin set inside it does.
+         *
+         *     Two refusals past the gate, in order: a set id nothing defined is the 404
+         *     every keyed route here answers, and a term id no term carries is a 404 of its
+         *     own. A `term_id` that is absent or not a uuid is FastAPI's own 422.
+         */
+        readonly get: operations["read_set_series_leadership_comparison_sets__set_id__series_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/leadership/comparison-sets/{set_id}/preview": {
         readonly parameters: {
             readonly query?: never;
@@ -721,6 +832,76 @@ export interface paths {
          *     makes an institution-wide list usable, and it says nothing about anybody.
          */
         readonly get: operations["read_preview_leadership_comparison_sets__set_id__preview_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/context": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * My leadership roles, the terms, and the current term
+         * @description What the roll-up pages read first: which term to open, and the reader's own roles.
+         *
+         *     The roles are the session's own (ADR 0199); the terms are every term, which
+         *     is no secret.
+         */
+        readonly get: operations["read_leadership_context_leadership_context_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/rollup": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The tree over my leadership purview, one term
+         * @description The whole tree in one payload: the hierarchy, and the by-lead pivot for chair and above.
+         *
+         *     The scope is the session's own (ADR 0199). A term id no term carries is the
+         *     404 the named-set series route answers for it.
+         */
+        readonly get: operations["read_rollup_tree_leadership_rollup_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/rollup/{kind}/{node_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One node's figures and attention cards, one term
+         * @description A node's line per start cohort, its participation, and §5.6's cards.
+         *
+         *     **A node outside the purview is answered exactly as a node that does not
+         *     exist**: one 404, one sentence. So is a by-lead group asked by a reader who
+         *     is not offered the pivot.
+         */
+        readonly get: operations["read_rollup_figures_leadership_rollup__kind___node_id__get"];
         readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
@@ -780,8 +961,11 @@ export interface paths {
             readonly cookie?: never;
         };
         /**
-         * The exclusion log inside my own grant
-         * @description Every exclusion, keep and undo a person made inside the reader's own grant, newest first.
+         * The exclusion log inside my own grant or purview
+         * @description Every exclusion, keep and undo a person made inside the reader's reach; dated rows first.
+         *
+         *     A lead's or chair's own grant, and an assistant dean's, dean's or vice
+         *     president's purview (ADR 0206); the scope is the session's own.
          */
         readonly get: operations["read_exclusion_log_leadership_moderation_log_get"];
         readonly put?: never;
@@ -801,7 +985,8 @@ export interface paths {
         };
         /**
          * The response policy of every course I set or read it for
-         * @description The courses the reader sets the policy for, and a chair's led courses, which they read.
+         * @description The courses the reader sets the policy for, and those they read: a chair's led
+         *     courses, and every course of an assistant dean's, dean's or vice president's purview.
          */
         readonly get: operations["read_response_policy_leadership_response_policy_get"];
         readonly put?: never;
@@ -823,6 +1008,8 @@ export interface paths {
         /**
          * Switch the response policy for my courses in one prefix
          * @description One row per course of the prefix the reader sets the policy for; answered with the new read.
+         *
+         *     `claims` is the CSRF-checked gate; the reader is the same session's `scope`.
          */
         readonly put: operations["switch_response_policy_leadership_response_policy__prefix_id__put"];
         readonly post?: never;
@@ -936,6 +1123,359 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/leadership/sections/{section_id}/weeks/{course_week}/report": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * One section's Monday report, read-only, inside my purview
+         * @description The instructor's report of one section-week, as a leader reads it (SPEC §5.5).
+         *
+         *     The scope comes from `leadership_scope` and from nothing in the request
+         *     (ADR 0199). Comments show under the section's own per-stream threshold and
+         *     release batches, exactly as its instructor reads them; no comment is marked
+         *     as the reader's decision, and the benchmark lines are sealed against the
+         *     reader (SPEC §5.1).
+         */
+        readonly get: operations["read_drill_down_leadership_sections__section_id__weeks__course_week__report_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/leadership/sections/{section_id}/published-weeks": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The course weeks of a section in my purview with a report
+         * @description The published course weeks of one section, for the drill-down to open its latest.
+         *
+         *     Behind the same purview as the drill-down itself, with the same 404 and
+         *     sentence for a section outside it and a section that does not exist.
+         */
+        readonly get: operations["read_drill_down_weeks_leadership_sections__section_id__published_weeks_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/people": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The people graph, sorted and paged
+         * @description Every person, their assignments, and whom each assignment reports to.
+         *
+         *     Names sort by last name with titles stripped; category sorts by hierarchy
+         *     rank. A page past the end answers no people and the same total.
+         */
+        readonly get: operations["read_people_admin_people_get"];
+        readonly put?: never;
+        /** Add a person */
+        readonly post: operations["add_person_admin_people_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/people/{person_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /** Edit a person's name and category */
+        readonly put: operations["edit_person_admin_people__person_id__put"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/people/{person_id}/assignments": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /**
+         * Grant a person a role
+         * @description Any Pulse-owned role, Care and Admin included, to anyone, the acting admin included.
+         *
+         *     A teaching assignment is the roster's, and the definer refuses it.
+         */
+        readonly post: operations["grant_role_admin_people__person_id__assignments_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/assignments/{assignment_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        /**
+         * Revoke a role assignment
+         * @description Revoking deletes. An assignment others report to is refused, with how many.
+         */
+        readonly delete: operations["revoke_role_admin_assignments__assignment_id__delete"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/assignments/{assignment_id}/reports-to": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /** Set or clear whom an assignment reports to */
+        readonly put: operations["set_reports_to_admin_assignments__assignment_id__reports_to_put"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/reports-to-options": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The assignments a new assignment may report to
+         * @description Only assignments whose role ranks above `role` (ADR 0044).
+         */
+        readonly get: operations["read_reports_to_options_admin_reports_to_options_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/people/{person_id}/web-login": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /** Link a web-login subject to a person */
+        readonly put: operations["link_web_login_admin_people__person_id__web_login_put"];
+        readonly post?: never;
+        /** Unlink a person's web login */
+        readonly delete: operations["unlink_web_login_admin_people__person_id__web_login_delete"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/people/export": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Export People
+         * @description The people as CSV, in the shape the import reads back.
+         */
+        readonly get: operations["export_people_admin_people_export_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/people/import/dry-run": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** What a people file would change, changing nothing */
+        readonly post: operations["dry_run_people_admin_people_import_dry_run_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/people/import": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Apply a people file its dry run approved */
+        readonly post: operations["apply_people_admin_people_import_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/lead-mappings": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /** The lead faculty mappings, sorted and paged */
+        readonly get: operations["read_mappings_admin_lead_mappings_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/lead-mappings/{course_id}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        /**
+         * Map a course to a lead
+         * @description Replaces any current lead; the unmap and the map commit together.
+         */
+        readonly put: operations["map_lead_admin_lead_mappings__course_id__put"];
+        readonly post?: never;
+        /** Unmap a course's lead */
+        readonly delete: operations["unmap_lead_admin_lead_mappings__course_id__delete"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/lead-mappings/export": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * Export Mappings
+         * @description The mappings as CSV, in the shape the import reads back.
+         */
+        readonly get: operations["export_mappings_admin_lead_mappings_export_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/lead-mappings/import/dry-run": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** What a mapping file would change, changing nothing */
+        readonly post: operations["dry_run_mappings_admin_lead_mappings_import_dry_run_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/lead-mappings/import": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        /** Apply a mapping file its dry run approved */
+        readonly post: operations["apply_mappings_admin_lead_mappings_import_post"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/admin/org-nodes": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        /**
+         * The organization nodes a role may be granted at
+         * @description Only nodes at the level `role` is granted at, sorted by name.
+         */
+        readonly get: operations["read_org_nodes_admin_org_nodes_get"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/dev": {
         readonly parameters: {
             readonly query?: never;
@@ -972,6 +1512,84 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AssignmentLine
+         * @description One role assignment, and the assignment it reports to, if any.
+         *
+         *     `reports_to_name` is the parent holder's name, so two lead assignments held
+         *     by one person show both of their chairs (SPEC §2.1).
+         */
+        readonly AssignmentLine: {
+            /**
+             * Assignment Id
+             * Format: uuid
+             */
+            readonly assignment_id: string;
+            readonly role: components["schemas"]["AssignmentRole"];
+            /**
+             * Scope Node Id
+             * Format: uuid
+             */
+            readonly scope_node_id: string;
+            /** Reports To */
+            readonly reports_to: string | null;
+            /** Reports To Name */
+            readonly reports_to_name: string | null;
+            readonly reports_to_role: components["schemas"]["AssignmentRole"] | null;
+        };
+        /**
+         * AssignmentRole
+         * @description The roles SPEC §2.1's table grants, as a Postgres enum type.
+         *
+         *     Eight of the nine rows in that table. **`STUDENT` is deliberately absent**: a
+         *     student is attached to "own responses" rather than to a node in the org
+         *     hierarchy, and nothing in the spec or in any ticket gives a student a
+         *     `role_assignment` row. Adding one would need a scope grain for it, and the
+         *     honest answer to "which node is a student scoped to" is none of them — so the
+         *     row is left unwritable rather than given an invented answer.
+         *
+         *     **`CARE` is in this enumeration and reachable from nowhere else.** SPEC §6.2
+         *     makes Care the only role that can re-identify a student, and E0-09 keeps the
+         *     grant strictly here: no LTI claim, no OIDC claim and no LMS role may produce
+         *     it, because the administrator of the platform controls what a claim says and
+         *     a claim-to-Care mapping would hand them identity access.
+         *     `tests/unit/test_care_is_not_reachable_from_a_claim.py` sweeps the syntax tree
+         *     of every module under `app/` for a module that both reads a claim and names
+         *     this role. That is why the name belongs to a shared enumeration in the model
+         *     layer: a door that needs to exclude Care can exclude *this* member, and the
+         *     exclusion is then a fact about the role rather than a literal in the door.
+         *
+         *     Each member's value is its name, as `CourseLevel`'s and `Modality`'s are:
+         *     one spelling in Python and in the database, rather than two to keep in step.
+         * @enum {string}
+         */
+        readonly AssignmentRole: "INSTRUCTOR" | "LEAD_FACULTY" | "CHAIR" | "ASSISTANT_DEAN" | "DEAN" | "VP_ACADEMICS" | "CARE" | "ADMIN";
+        /**
+         * AttentionCard
+         * @description One §5.6 rule met by one section: the rule, its stream, and where its report is.
+         */
+        readonly AttentionCard: {
+            /**
+             * Rule
+             * @enum {string}
+             */
+            readonly rule: "instructor_trend_down" | "course_trend_down" | "response_rate_low" | "response_owed";
+            /** Rule Name */
+            readonly rule_name: string;
+            /** Stream */
+            readonly stream: ("INSTRUCTOR" | "COURSE") | null;
+            /**
+             * Section Id
+             * Format: uuid
+             */
+            readonly section_id: string;
+            /** Section Code */
+            readonly section_code: string;
+            /** Course Name */
+            readonly course_name: string;
+            /** Course Week */
+            readonly course_week: number;
+        };
         /**
          * BenchmarkSeries
          * @description One comparison line: the weeks it covers, each carrying its own sealed figure.
@@ -1246,11 +1864,31 @@ export interface components {
         };
         /**
          * ExclusionLog
-         * @description The reader's exclusion log, newest decision first.
+         * @description The reader's exclusion log: dated rows newest first, then undated rows in no time order.
          */
         readonly ExclusionLog: {
             /** Rows */
             readonly rows: readonly components["schemas"]["LogRow"][];
+        };
+        /**
+         * GrantWrite
+         * @description A role to grant, and the one org node it is granted at (ADR 0200).
+         */
+        readonly GrantWrite: {
+            readonly role: components["schemas"]["AssignmentRole"];
+            /**
+             * Scope Node Id
+             * Format: uuid
+             */
+            readonly scope_node_id: string;
+        };
+        /** Granted */
+        readonly Granted: {
+            /**
+             * Assignment Id
+             * Format: uuid
+             */
+            readonly assignment_id: string;
         };
         /** HTTPValidationError */
         readonly HTTPValidationError: {
@@ -1303,6 +1941,24 @@ export interface components {
          */
         readonly HeldNoteType: "harmful" | "privacy";
         /**
+         * ImportApply
+         * @description The same file again, and the digest its dry run answered (ADR 0204).
+         */
+        readonly ImportApply: {
+            /** Csv */
+            readonly csv: string;
+            /** Digest */
+            readonly digest: string;
+        };
+        /**
+         * ImportFile
+         * @description An import file, as the text of a CSV, for its dry run.
+         */
+        readonly ImportFile: {
+            /** Csv */
+            readonly csv: string;
+        };
+        /**
          * InstructorReport
          * @description One instructor's Monday report, for one of her own sections and one course week.
          */
@@ -1337,6 +1993,24 @@ export interface components {
             readonly reason?: string | null;
         };
         /**
+         * LeadershipContext
+         * @description What the leadership pages need before their first read (SPEC §5.5).
+         *
+         *     `roles` is every leadership role the reader holds, highest first, so a
+         *     read-only context bar can name the reader's role. `terms` is every term,
+         *     oldest first; `current_term_id` is the term the pages open: the one whose
+         *     dates contain the institution's today, else the latest that has begun,
+         *     absent before the first term begins. Terms are no secret.
+         */
+        readonly LeadershipContext: {
+            /** Roles */
+            readonly roles: readonly ("VP_ACADEMICS" | "DEAN" | "ASSISTANT_DEAN" | "CHAIR" | "LEAD_FACULTY")[];
+            /** Terms */
+            readonly terms: readonly components["schemas"]["RollupTerm"][];
+            /** Current Term Id */
+            readonly current_term_id: string | null;
+        };
+        /**
          * LogRow
          * @description One decision a person made about a comment inside the reader's own grant.
          */
@@ -1357,15 +2031,121 @@ export interface components {
             readonly flagged: boolean;
             /** Reason */
             readonly reason: string | null;
-            /**
-             * Decided On
-             * Format: date
-             */
-            readonly decided_on: string;
+            /** Decided On */
+            readonly decided_on: string | null;
             /** Excerpt */
             readonly excerpt: string | null;
             /** Is Undo */
             readonly is_undo: boolean;
+        };
+        /**
+         * MappingChange
+         * @description A course whose lead the import replaces.
+         */
+        readonly MappingChange: {
+            readonly before: components["schemas"]["MappingLine"];
+            readonly after: components["schemas"]["MappingLine"];
+        };
+        /**
+         * MappingDiff
+         * @description What a mapping import adds, changes and removes, and the courses left unmapped.
+         */
+        readonly MappingDiff: {
+            /** Digest */
+            readonly digest: string;
+            /** Added */
+            readonly added: readonly components["schemas"]["MappingLine"][];
+            /** Changed */
+            readonly changed: readonly components["schemas"]["MappingChange"][];
+            /** Removed */
+            readonly removed: readonly components["schemas"]["MappingLine"][];
+            /** Unmapped */
+            readonly unmapped: readonly components["schemas"]["UnmappedCourse"][];
+        };
+        /**
+         * MappingLine
+         * @description One row of the Lead Faculty mapping table: a course and its lead.
+         */
+        readonly MappingLine: {
+            /**
+             * Course Id
+             * Format: uuid
+             */
+            readonly course_id: string;
+            /** Course */
+            readonly course: string;
+            /**
+             * Person Id
+             * Format: uuid
+             */
+            readonly person_id: string;
+            /** Name */
+            readonly name: string;
+        };
+        /** MappingPage */
+        readonly MappingPage: {
+            /** Total */
+            readonly total: number;
+            /** Page */
+            readonly page: number;
+            /** Page Size */
+            readonly page_size: number;
+            /** Mappings */
+            readonly mappings: readonly components["schemas"]["MappingLine"][];
+        };
+        /**
+         * MappingWrite
+         * @description The lead to map a course to.
+         */
+        readonly MappingWrite: {
+            /**
+             * Person Id
+             * Format: uuid
+             */
+            readonly person_id: string;
+        };
+        /**
+         * NamedSetCohort
+         * @description One start cohort of the reader's purview in the viewed term, and its published weeks.
+         */
+        readonly NamedSetCohort: {
+            /**
+             * Section Start Date
+             * Format: date
+             */
+            readonly section_start_date: string;
+            /** Weeks */
+            readonly weeks: readonly components["schemas"]["NamedSetWeek"][];
+        };
+        /**
+         * NamedSetSeries
+         * @description A named set's figures for one leadership reader in one term, one series per start cohort.
+         *
+         *     A set wholly outside the reader's purview answers exactly the shape a thin set
+         *     inside it does: the purview's cohorts, every figure suppressed (E9-05).
+         */
+        readonly NamedSetSeries: {
+            /** Cohorts */
+            readonly cohorts: readonly components["schemas"]["NamedSetCohort"][];
+        };
+        /**
+         * NamedSetWeek
+         * @description One course week of one start cohort, on both of SPEC §2.2's week axes, every figure sealed.
+         *
+         *     The two rating means and the workload mean and median, each suppressed or
+         *     shown on its own decision (§4.1 item 7 covers "a mean, a median, or any
+         *     other statistic"). One validator per member, so removing one seal is one
+         *     test going red.
+         */
+        readonly NamedSetWeek: {
+            /** Course Week */
+            readonly course_week: number;
+            /** Term Week */
+            readonly term_week: number;
+            readonly instructor_mean: components["schemas"]["ComparisonFigure"];
+            readonly course_mean: components["schemas"]["ComparisonFigure"];
+            readonly workload_mean: components["schemas"]["ComparisonFigure"];
+            readonly workload_median: components["schemas"]["ComparisonFigure"];
         };
         /**
          * OnBehalfStream
@@ -1484,6 +2264,26 @@ export interface components {
             readonly submission: components["schemas"]["OwnSubmission"] | null;
         };
         /**
+         * OrgNode
+         * @description One organization node a role may be granted at, with its parent's name to tell namesakes apart.
+         */
+        readonly OrgNode: {
+            /**
+             * Node Id
+             * Format: uuid
+             */
+            readonly node_id: string;
+            /** Label */
+            readonly label: string;
+            /** Parent Label */
+            readonly parent_label: string | null;
+        };
+        /** OrgNodes */
+        readonly OrgNodes: {
+            /** Nodes */
+            readonly nodes: readonly components["schemas"]["OrgNode"][];
+        };
+        /**
          * OwedWeek
          * @description One section-week owed a response now, in a course the reader answers for (decision 4).
          *
@@ -1536,6 +2336,83 @@ export interface components {
              * @description The answers, in question order.
              */
             readonly answers: readonly components["schemas"]["SubmittedAnswer-Output"][];
+        };
+        /**
+         * PeopleDiff
+         * @description What a people import adds and changes. People are never removed by an import.
+         */
+        readonly PeopleDiff: {
+            /** Digest */
+            readonly digest: string;
+            /** Added */
+            readonly added: readonly components["schemas"]["PersonValues"][];
+            /** Changed */
+            readonly changed: readonly components["schemas"]["PersonChange"][];
+        };
+        /** PeoplePage */
+        readonly PeoplePage: {
+            /** Total */
+            readonly total: number;
+            /** Page */
+            readonly page: number;
+            /** Page Size */
+            readonly page_size: number;
+            /** People */
+            readonly people: readonly components["schemas"]["PersonLine"][];
+        };
+        /** PersonChange */
+        readonly PersonChange: {
+            /**
+             * Person Id
+             * Format: uuid
+             */
+            readonly person_id: string;
+            readonly before: components["schemas"]["PersonValues"];
+            readonly after: components["schemas"]["PersonValues"];
+        };
+        /** PersonCreated */
+        readonly PersonCreated: {
+            /**
+             * Person Id
+             * Format: uuid
+             */
+            readonly person_id: string;
+        };
+        /**
+         * PersonLine
+         * @description One row of the People & reporting table.
+         */
+        readonly PersonLine: {
+            /**
+             * Person Id
+             * Format: uuid
+             */
+            readonly person_id: string;
+            /** Name */
+            readonly name: string;
+            /** Category */
+            readonly category: string;
+            /** Web Login Linked */
+            readonly web_login_linked: boolean;
+            /** Assignments */
+            readonly assignments: readonly components["schemas"]["AssignmentLine"][];
+        };
+        /** PersonValues */
+        readonly PersonValues: {
+            /** Name */
+            readonly name: string;
+            /** Category */
+            readonly category: string;
+        };
+        /**
+         * PersonWrite
+         * @description A person's name and category, on a create and on an edit.
+         */
+        readonly PersonWrite: {
+            /** Name */
+            readonly name: string;
+            /** Category */
+            readonly category: string;
         };
         /**
          * PolicyCourse
@@ -1683,6 +2560,35 @@ export interface components {
             /** Valid Responses */
             readonly valid_responses: number;
         };
+        /** ReportsToOption */
+        readonly ReportsToOption: {
+            /**
+             * Assignment Id
+             * Format: uuid
+             */
+            readonly assignment_id: string;
+            /**
+             * Person Id
+             * Format: uuid
+             */
+            readonly person_id: string;
+            /** Name */
+            readonly name: string;
+            readonly role: components["schemas"]["AssignmentRole"];
+        };
+        /** ReportsToOptions */
+        readonly ReportsToOptions: {
+            /** Options */
+            readonly options: readonly components["schemas"]["ReportsToOption"][];
+        };
+        /**
+         * ReportsToWrite
+         * @description The parent assignment, or `null` to clear the edge.
+         */
+        readonly ReportsToWrite: {
+            /** Reports To */
+            readonly reports_to: string | null;
+        };
         /**
          * ResponseDraftView
          * @description What the response draft answers: the draft text the model wrote, once it has passed.
@@ -1735,6 +2641,172 @@ export interface components {
             readonly items: readonly components["schemas"]["QueueItem"][];
         };
         /**
+         * RollupCohort
+         * @description One start cohort of a node's sections, its line on the term axis, and its participation.
+         */
+        readonly RollupCohort: {
+            /**
+             * Section Start Date
+             * Format: date
+             */
+            readonly section_start_date: string;
+            /** Label */
+            readonly label: string;
+            /** Weeks */
+            readonly weeks: readonly components["schemas"]["RollupWeek"][];
+            readonly participation: components["schemas"]["RollupParticipation"] | null;
+        };
+        /**
+         * RollupFigures
+         * @description One node's figures in one term: a line per start cohort, and the attention cards.
+         *
+         *     `attention_empty` is §5.6's calm sentence when no card is due, and absent
+         *     when one is.
+         */
+        readonly RollupFigures: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            readonly kind: "college" | "department" | "prefix" | "course" | "lead" | "no_lead";
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /**
+             * Term Id
+             * Format: uuid
+             */
+            readonly term_id: string;
+            /** Cohorts */
+            readonly cohorts: readonly components["schemas"]["RollupCohort"][];
+            /** Attention */
+            readonly attention: readonly components["schemas"]["AttentionCard"][];
+            /** Attention Empty */
+            readonly attention_empty: string | null;
+        };
+        /**
+         * RollupNode
+         * @description One row of the tree, with its children.
+         *
+         *     Every count is over the sections the reader holds, in the viewed term, so a
+         *     container the reader holds part of counts that part only. `staff_name` is
+         *     the row's Dean, Chair or Lead (absent for a course in its own lead's view,
+         *     and where nobody holds the post); `instructor_names` is a section row's
+         *     teaching instructors. `label` is SPEC §2.1's row label, joined from those.
+         */
+        readonly RollupNode: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            readonly kind: "college" | "department" | "prefix" | "course" | "section" | "lead" | "no_lead";
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Name */
+            readonly name: string;
+            /** Label */
+            readonly label: string;
+            /** Section Count */
+            readonly section_count: number;
+            /** Course Count */
+            readonly course_count?: number | null;
+            /** Prefix Count */
+            readonly prefix_count?: number | null;
+            /** Department Count */
+            readonly department_count?: number | null;
+            /** Staff Name */
+            readonly staff_name?: string | null;
+            /**
+             * Instructor Names
+             * @default []
+             */
+            readonly instructor_names: readonly string[];
+            /**
+             * Children
+             * @default []
+             */
+            readonly children: readonly components["schemas"]["RollupNode"][];
+        };
+        /**
+         * RollupParticipation
+         * @description A cohort's response rate and validity rate in its latest published week.
+         */
+        readonly RollupParticipation: {
+            /** Course Week */
+            readonly course_week: number;
+            /** Response Rate */
+            readonly response_rate: number | null;
+            /** Validity Rate */
+            readonly validity_rate: number | null;
+        };
+        /**
+         * RollupTerm
+         * @description One term a roll-up may be read for: its name, its dates and its length in weeks.
+         */
+        readonly RollupTerm: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            readonly id: string;
+            /** Name */
+            readonly name: string;
+            /**
+             * Start Date
+             * Format: date
+             */
+            readonly start_date: string;
+            /**
+             * End Date
+             * Format: date
+             */
+            readonly end_date: string;
+            /** Length Weeks */
+            readonly length_weeks: number;
+        };
+        /**
+         * RollupTree
+         * @description The whole tree over the reader's leadership purview in one term.
+         *
+         *     `hierarchy` holds the roots (SPEC §2.1: the highest useful nodes, several
+         *     for a union of assignments). `by_lead` is the by-lead pivot, offered only to
+         *     a reader holding a `CHAIR` or higher assignment, and absent otherwise.
+         */
+        readonly RollupTree: {
+            /**
+             * Term Id
+             * Format: uuid
+             */
+            readonly term_id: string;
+            /** Hierarchy */
+            readonly hierarchy: readonly components["schemas"]["RollupNode"][];
+            /** By Lead */
+            readonly by_lead: readonly components["schemas"]["RollupNode"][] | null;
+        };
+        /**
+         * RollupWeek
+         * @description One course week of one cohort, on both week axes; `None` where nobody answered.
+         */
+        readonly RollupWeek: {
+            /** Course Week */
+            readonly course_week: number;
+            /** Term Week */
+            readonly term_week: number;
+            /** Instructor Mean */
+            readonly instructor_mean: string | null;
+            /** Course Mean */
+            readonly course_mean: string | null;
+            /** Workload Mean */
+            readonly workload_mean: string | null;
+            /** Workload Median */
+            readonly workload_median: string | null;
+        };
+        /**
          * SectionView
          * @description Which section this report is about, in the words its instructor knows it by.
          */
@@ -1754,6 +2826,55 @@ export interface components {
              * @description How many weeks this section runs (SPEC §2.2).
              */
             readonly length_weeks: number;
+            /**
+             * Lead Name
+             * @description The Lead Faculty's name for the page header; null when nobody leads it.
+             */
+            readonly lead_name: string | null;
+        };
+        /**
+         * SessionLandings
+         * @description `GET /session/landings`: the session's own view, and every view held at its door.
+         *
+         *     `landings` is in `LANDING_PRECEDENCE` order with the student view last, and
+         *     includes `current`.
+         */
+        readonly SessionLandings: {
+            /**
+             * Current
+             * @enum {string}
+             */
+            readonly current: "student" | "instructor" | "leadership" | "care" | "admin";
+            /** Landings */
+            readonly landings: readonly ("student" | "instructor" | "leadership" | "care" | "admin")[];
+        };
+        /**
+         * SessionSwitch
+         * @description `POST /session/switch`: the one view to switch to.
+         */
+        readonly SessionSwitch: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            readonly role: "student" | "instructor" | "leadership" | "care" | "admin";
+        };
+        /**
+         * SessionSwitched
+         * @description What a switch answers with: the role of the new session, and the session itself.
+         *
+         *     The token is also set as the session cookie, beside a fresh CSRF token. It is
+         *     in the body for the SPA's Bearer carrier, which is how the session travels
+         *     inside the LMS's iframe (ADR 0089).
+         */
+        readonly SessionSwitched: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            readonly role: "student" | "instructor" | "leadership" | "care" | "admin";
+            /** Session */
+            readonly session: string;
         };
         /**
          * SetDetail
@@ -2112,6 +3233,11 @@ export interface components {
              */
             readonly course_label: string;
             /**
+             * Lead Name
+             * @description The Lead Faculty's name for the page header; null when nobody leads it.
+             */
+            readonly lead_name: string | null;
+            /**
              * State
              * @description Whether the week is held, answered, or neither.
              * @enum {string}
@@ -2373,7 +3499,7 @@ export interface components {
          *     `term_week` is the term week of the window row this point was built from —
          *     §2.2's second axis, stated here rather than left for the client to derive
          *     (breakdown decision 12, ADR 0157). Today the gap between the two axes is a
-         *     per-section constant (`_section_weeks`' `first_term_week`), so a client
+         *     per-section constant (the section's first term week), so a client
          *     could compute this member from the report week's own `course_week` /
          *     `term_week` pair. It is on the wire anyway because `week_of_the_term` is
          *     this codebase's one reading of the axis mapping (§2.2), and a client that
@@ -2392,6 +3518,21 @@ export interface components {
             /** Mean */
             readonly mean: number | null;
         };
+        /**
+         * UnmappedCourse
+         * @description A course the import leaves without a lead, and the sentence saying where it falls.
+         */
+        readonly UnmappedCourse: {
+            /**
+             * Course Id
+             * Format: uuid
+             */
+            readonly course_id: string;
+            /** Course */
+            readonly course: string;
+            /** Note */
+            readonly note: string;
+        };
         /** ValidationError */
         readonly ValidationError: {
             /** Location */
@@ -2404,6 +3545,16 @@ export interface components {
             readonly input?: unknown;
             /** Context */
             readonly ctx?: Record<string, never>;
+        };
+        /**
+         * WebLoginWrite
+         * @description The verified web-login subject to link to a person (ADR 0097).
+         */
+        readonly WebLoginWrite: {
+            /** Idp Issuer */
+            readonly idp_issuer: string;
+            /** Idp Subject */
+            readonly idp_subject: string;
         };
         /**
          * WeekResponseView
@@ -2616,6 +3767,77 @@ export interface operations {
                 content: {
                     readonly "application/json": unknown;
                 };
+            };
+        };
+    };
+    readonly read_session_landings_session_landings_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["SessionLandings"];
+                };
+            };
+        };
+    };
+    readonly switch_session_session_switch_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["SessionSwitch"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["SessionSwitched"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly log_out_session_logout_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -3193,6 +4415,39 @@ export interface operations {
             };
         };
     };
+    readonly read_set_series_leadership_comparison_sets__set_id__series_get: {
+        readonly parameters: {
+            readonly query: {
+                readonly term_id: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly set_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["NamedSetSeries"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     readonly read_preview_leadership_comparison_sets__set_id__preview_get: {
         readonly parameters: {
             readonly query?: never;
@@ -3211,6 +4466,91 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["SetPreview"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_leadership_context_leadership_context_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["LeadershipContext"];
+                };
+            };
+        };
+    };
+    readonly read_rollup_tree_leadership_rollup_get: {
+        readonly parameters: {
+            readonly query: {
+                readonly term_id: string;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RollupTree"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_rollup_figures_leadership_rollup__kind___node_id__get: {
+        readonly parameters: {
+            readonly query: {
+                readonly term_id: string;
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly kind: "college" | "department" | "prefix" | "course" | "lead" | "no_lead";
+                readonly node_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["RollupFigures"];
                 };
             };
             /** @description Validation Error */
@@ -3531,6 +4871,658 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["WeekResponseView"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_drill_down_leadership_sections__section_id__weeks__course_week__report_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+                readonly course_week: number;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["InstructorReport"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_drill_down_weeks_leadership_sections__section_id__published_weeks_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly section_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PublishedWeeks"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_people_admin_people_get: {
+        readonly parameters: {
+            readonly query?: {
+                readonly sort?: "name" | "category";
+                readonly order?: "asc" | "desc";
+                readonly page?: number;
+                readonly page_size?: number;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PeoplePage"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly add_person_admin_people_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["PersonWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PersonCreated"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly edit_person_admin_people__person_id__put: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly person_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["PersonWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly grant_role_admin_people__person_id__assignments_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly person_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["GrantWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 201: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["Granted"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly revoke_role_admin_assignments__assignment_id__delete: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly assignment_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly set_reports_to_admin_assignments__assignment_id__reports_to_put: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly assignment_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ReportsToWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_reports_to_options_admin_reports_to_options_get: {
+        readonly parameters: {
+            readonly query: {
+                readonly role: components["schemas"]["AssignmentRole"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["ReportsToOptions"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly link_web_login_admin_people__person_id__web_login_put: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly person_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["WebLoginWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly unlink_web_login_admin_people__person_id__web_login_delete: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly person_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly export_people_admin_people_export_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "text/csv": string;
+                };
+            };
+        };
+    };
+    readonly dry_run_people_admin_people_import_dry_run_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ImportFile"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PeopleDiff"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly apply_people_admin_people_import_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ImportApply"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PeopleDiff"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_mappings_admin_lead_mappings_get: {
+        readonly parameters: {
+            readonly query?: {
+                readonly sort?: "name" | "course";
+                readonly order?: "asc" | "desc";
+                readonly page?: number;
+                readonly page_size?: number;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MappingPage"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly map_lead_admin_lead_mappings__course_id__put: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly course_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["MappingWrite"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly unmap_lead_admin_lead_mappings__course_id__delete: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly course_id: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly export_mappings_admin_lead_mappings_export_get: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "text/csv": string;
+                };
+            };
+        };
+    };
+    readonly dry_run_mappings_admin_lead_mappings_import_dry_run_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ImportFile"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MappingDiff"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly apply_mappings_admin_lead_mappings_import_post: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["ImportApply"];
+            };
+        };
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["MappingDiff"];
+                };
+            };
+            /** @description Validation Error */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readonly read_org_nodes_admin_org_nodes_get: {
+        readonly parameters: {
+            readonly query: {
+                readonly role: components["schemas"]["AssignmentRole"];
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            /** @description Successful Response */
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["OrgNodes"];
                 };
             };
             /** @description Validation Error */

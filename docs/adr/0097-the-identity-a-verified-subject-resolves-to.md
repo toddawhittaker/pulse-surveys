@@ -63,6 +63,10 @@ constraints:
 an administrator writes them by hand until E9 or E11 builds a surface: connect as
 the migration identity and
 `INSERT INTO public.web_login_subject (idp_issuer, idp_subject, person_id) VALUES (…);`
+**Since E9-02 an admin links and unlinks a web login through
+`public.admin_link_web_login` and `public.admin_unlink_web_login`
+(`views_sql/people_graph_v001.sql`, [ADR 0200](0200-the-admins-people-graph-definers.md)),
+each admin-checked and audited, so the statement above is no longer the only path.**
 `pulse_app` holds **no grant of any kind** on the table — not even SELECT — so
 the application cannot read it except through `resolve_web_person` and cannot
 write it at all. That is what makes "a web login writes nothing" a property of
@@ -208,7 +212,8 @@ unique column of its own, and six of the eight have no `user` row to key on.
 - **One person, one web account, until somebody drops a constraint.** A second
   identity provider is a migration.
 - **An administrator provisions a linkage by hand.** There is no surface for it in
-  E1 and the psql statement above is the whole of the path. E9's People editor and
+  E1 and the psql statement above is the whole of the path. (Since E9-02 the
+  definers named above are the path; ADR 0200.) E9's People editor and
   E11's console are where one belongs; until then, a person who joins between demo
   seeds cannot sign in through the web door without a database write.
 - **The launch door's ordering is now a dependency rather than a preference.**
@@ -222,3 +227,5 @@ unique column of its own, and six of the eight have no `user` row to key on.
 - **ADR 0068's "the mock registration carries no `user` rows at all" is amended
   here**, to exactly the two subjects named above. That ADR's own text now points
   at this one.
+
+**Amended by [0208](0208-the-worked-example-is-entered-as-the-demo-person-by-both-mock-doors.md)** (E9-13): one demo person, the assistant dean of SPEC §2.1's worked example, is now reached by both mock doors, and the launchable inventory holds three subjects.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX } from 'react';
+import { useEffect, useRef, useState, type JSX, type ReactNode } from 'react';
 
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router';
 
@@ -13,6 +13,8 @@ import {
   writeWeekResponse,
   type CommentView,
   type InstructorReportView,
+  type PublishedWeeksRead,
+  type ReportRead,
   type StreamReportView,
   type SummaryView,
   type TrendPointView,
@@ -38,6 +40,7 @@ import { WeekNav } from '../../components/WeekNav';
 import { copy as commentCopy } from '../../copy/instructorReportCommentCopy';
 import { copy, fillCopy } from '../../copy/instructorReportPageCopy';
 import './instructorReportPage.css';
+import { REPORT_ROUTE } from '../paths';
 
 /**
  * SPEC §7.6's `InstructorMondayReport` — ticket E4-11.
@@ -102,8 +105,40 @@ export const INSTRUCTOR_REPORT_ERROR_TESTID = 'pulse-instructor-report-error';
 
 const HEADING_ID = 'pulse-instructor-report-heading';
 
-/** The route this page is served at, and the one `WeekNav` navigates within. */
-export const REPORT_ROUTE = '/instructor/sections/$sectionId';
+
+/**
+ * Where the page's reads go, and whether its reader may act on what it shows.
+ *
+ * **One page, two readers.** The instructor reads her own section's report and
+ * may moderate it and respond; a leader reads the same report wholesale through
+ * the drill-down (SPEC §5.5), read-only. The reads differ only in their
+ * address and gate, so the page takes them as a source rather than being
+ * written twice.
+ */
+export interface ReportSource {
+  readonly readWeeks: (sectionId: string) => Promise<PublishedWeeksRead>;
+  readonly readReport: (sectionId: string, week: number) => Promise<ReportRead>;
+  /** The section's course label for a section with no published week yet, where one can be read. */
+  readonly readCourseLabel: (sectionId: string) => Promise<string | null>;
+  /** No moderation control and no composer: the leadership drill-down. */
+  readonly readOnly: boolean;
+  /** The testid on the page's landmark, which says which page landed. */
+  readonly testid: string;
+}
+
+/** The instructor's own reads, over her own sections. */
+const INSTRUCTOR_SOURCE: ReportSource = {
+  readWeeks: readPublishedWeeks,
+  readReport: readInstructorReport,
+  readCourseLabel: async (sectionId) => {
+    const named = await readTaughtSections();
+    return named.kind === 'sections'
+      ? (named.sections.find((section) => section.section_id === sectionId)?.course_label ?? null)
+      : null;
+  },
+  readOnly: false,
+  testid: INSTRUCTOR_LANDING_TESTID,
+};
 
 /**
  * Which address a set of reads was made for.
@@ -140,10 +175,16 @@ export function InstructorMondayReport({
   sectionId,
   week,
   onSelectWeek,
+  source = INSTRUCTOR_SOURCE,
+  contextBar,
 }: {
   readonly sectionId: string;
   readonly week: number | null;
   readonly onSelectWeek: (week: number) => void;
+  /** Where the reads go; the instructor's own unless the drill-down passes the leader's. */
+  readonly source?: ReportSource;
+  /** What sits above the report on the drill-down: whose view this is, and that it is read-only. */
+  readonly contextBar?: ReactNode;
 }): JSX.Element {
   // **What was asked for, and what came back for it.** Loading is derived from
   // the two disagreeing rather than stored: a state written at the top of the
@@ -170,7 +211,7 @@ export function InstructorMondayReport({
     };
 
     void (async () => {
-      const weeks = await readPublishedWeeks(sectionId);
+      const weeks = await source.readWeeks(sectionId);
       if (!live) return;
       if (weeks.kind === 'session-ended') {
         setLoad({ kind: 'session-ended' });
@@ -186,18 +227,13 @@ export function InstructorMondayReport({
       // week that is not on this list, which is answered by asking for it.
       const target = week ?? weeks.weeks.at(-1) ?? null;
       if (target === null) {
-        const named = await readTaughtSections();
+        const courseLabel = await source.readCourseLabel(sectionId);
         if (!live) return;
-        const courseLabel =
-          named.kind === 'sections'
-            ? (named.sections.find((section) => section.section_id === sectionId)?.course_label ??
-              null)
-            : null;
         setLoad({ kind: 'no-weeks', courseLabel });
         return;
       }
 
-      const answer = await readInstructorReport(sectionId, target);
+      const answer = await source.readReport(sectionId, target);
       if (!live) return;
       if (answer.kind === 'session-ended') {
         setLoad({ kind: 'session-ended' });
@@ -213,7 +249,7 @@ export function InstructorMondayReport({
     return () => {
       live = false;
     };
-  }, [sectionId, week]);
+  }, [sectionId, week, source]);
 
   useEffect(() => {
     if (answered === null || answered.load.kind !== 'report') return;
@@ -238,11 +274,8 @@ export function InstructorMondayReport({
     copy('instructor_report_page.heading');
 
   return (
-    <main
-      className="pulse-report"
-      data-testid={INSTRUCTOR_LANDING_TESTID}
-      aria-labelledby={HEADING_ID}
-    >
+    <main className="pulse-report" data-testid={source.testid} aria-labelledby={HEADING_ID}>
+      {contextBar}
       {/* **The eyebrow and the week arrows share one row** (E4-21), which is
           where `design/InstructorMondayReport.dc.html:13-19` puts them: the week
           this report is about on the left, the two controls that change it on
@@ -288,8 +321,14 @@ export function InstructorMondayReport({
           })}
         </p>
       )}
+      {/* SPEC §2.1: the course's Lead Faculty, by name. No line when nobody leads it. */}
+      {report === null || report.section.lead_name === null ? null : (
+        <p className="pulse-report-subline" data-testid="pulse-report-lead">
+          {fillCopy('instructor_report_page.lead_faculty', { name: report.section.lead_name })}
+        </p>
+      )}
       <PulseDivider />
-      <ReportBody load={load} sectionId={sectionId} />
+      <ReportBody load={load} sectionId={sectionId} readOnly={source.readOnly} />
     </main>
   );
 }
@@ -298,9 +337,11 @@ export function InstructorMondayReport({
 function ReportBody({
   load,
   sectionId,
+  readOnly,
 }: {
   readonly load: Load;
   readonly sectionId: string;
+  readonly readOnly: boolean;
 }): JSX.Element {
   if (load.kind === 'loading') {
     return (
@@ -356,7 +397,7 @@ function ReportBody({
       data-testid={INSTRUCTOR_REPORT_TESTID}
       key={load.report.week.course_week}
     >
-      <ReportWeek report={load.report} sectionId={sectionId} />
+      <ReportWeek report={load.report} sectionId={sectionId} readOnly={readOnly} />
     </div>
   );
 }
@@ -365,11 +406,15 @@ function ReportBody({
 function ReportWeek({
   report,
   sectionId,
+  readOnly,
 }: {
   readonly report: InstructorReportView;
   readonly sectionId: string;
+  /** The drill-down: every card read-only, and no composer (SPEC §5.5). */
+  readonly readOnly: boolean;
 }): JSX.Element {
   const { rates, streams } = report;
+  const decision = readOnly ? undefined : decide;
 
   return (
     <>
@@ -468,7 +513,7 @@ function ReportWeek({
         comments={cardsOf(streams.instructor.comments)}
         suppressed={streams.instructor.small_n.suppressed}
         threshold={streams.instructor.small_n.threshold}
-        decide={decide}
+        decide={decision}
       />
       <CommentGroup
         stream="course"
@@ -476,16 +521,18 @@ function ReportWeek({
         comments={cardsOf(streams.course.comments)}
         suppressed={streams.course.small_n.suppressed}
         threshold={streams.course.small_n.threshold}
-        decide={decide}
+        decide={decision}
       />
 
-      <ReleasedFromEarlierWeeks comments={report.released_from_earlier_weeks} />
+      <ReleasedFromEarlierWeeks comments={report.released_from_earlier_weeks} readOnly={readOnly} />
 
-      <WeekResponse
-        sectionId={sectionId}
-        courseWeek={report.week.course_week}
-        timeZone={report.institution_timezone}
-      />
+      {readOnly ? null : (
+        <WeekResponse
+          sectionId={sectionId}
+          courseWeek={report.week.course_week}
+          timeZone={report.institution_timezone}
+        />
+      )}
     </>
   );
 }
@@ -513,8 +560,10 @@ function ReportWeek({
  */
 function ReleasedFromEarlierWeeks({
   comments,
+  readOnly,
 }: {
   readonly comments: readonly CommentView[];
+  readonly readOnly: boolean;
 }): JSX.Element | null {
   if (comments.length === 0) return null;
   return (
@@ -531,7 +580,9 @@ function ReleasedFromEarlierWeeks({
             <CommentCard
               {...cardOf(comment)}
               stream={cardStream(comment.stream)}
-              decide={(decision) => decide(comment.answer_id, decision)}
+              decide={
+                readOnly ? undefined : (decision) => decide(comment.answer_id, decision)
+              }
             />
           </li>
         ))}

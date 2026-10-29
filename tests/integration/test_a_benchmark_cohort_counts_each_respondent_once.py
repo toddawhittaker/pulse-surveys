@@ -33,6 +33,17 @@ Only a distinct count over the response's person key answers three.
 behaviours: that a repeat respondent counts once, and that the response figure
 still counts both of their responses. A single test asserting both would go red
 for either and name neither.
+
+**Re-pointed by E9-12 from the cohort views to the set functions.** E9-12 retires
+`benchmark_cohort_week` and `benchmark_cohort_rating_week` (README decision 10);
+every benchmark figure is now computed by `benchmark_set_week` and
+`benchmark_set_rating_week` over a section set the service resolves. So the
+cohort here is passed in as exactly its two sections, and every rule this module
+pinned on the views — people counted once, responses counted twice, the
+interpolated median, ratings counted as ratings — is pinned on the functions
+over the same world. Which sections belong to a cohort (length and level, both
+terms) is the resolvers' rule, pinned in
+`test_a_benchmark_cohort_matches_on_length_and_level_exactly.py`.
 """
 
 from decimal import Decimal
@@ -40,18 +51,17 @@ from typing import Any
 
 import pytest
 from fixtures.benchmark_views import (
-    COHORT_RATING_WEEK_VIEW,
-    COHORT_WEEK_VIEW,
     INSTRUCTOR_STREAM,
+    SET_FUNCTION,
+    SET_RATING_FUNCTION,
     UG,
     BenchmarkWorld,
-    require_benchmark_view,
 )
 
 pytestmark = pytest.mark.integration
 
-THE_LENGTH = 12
 THE_COURSE_WEEK = 2
+THE_COHORT = ("first", "second")
 
 # Four responses from three people. The shared student answers in both sections;
 # the other two answer in one each.
@@ -84,7 +94,7 @@ SUBMITTED_HOURS = (
 HOURS_AS_WRITTEN = [str(value) for value in SUBMITTED_HOURS]
 HOURS_IN_ORDER = [str(value) for value in sorted(SUBMITTED_HOURS)]
 
-# The ratings, so the rating view's own count can be asserted on the same world.
+# The ratings, so the rating function's own count can be asserted on the same world.
 # Four instructor ratings: 5, 5, 2, 4 — mean 4.0, and `rating_count` 4 rather
 # than 3, because a rating count is a count of ratings and is not the figure the
 # minimum is about. Naming both units in one module is deliberate: entry 50 is
@@ -141,16 +151,20 @@ def a_cohort_one_student_answered_twice(world: BenchmarkWorld) -> BenchmarkWorld
     return world
 
 
-def the_cohort_row(world: BenchmarkWorld) -> dict[str, Any]:
-    """The one workload-and-counts row, with the non-vacuity guard in front of it."""
-    row = world.cohort_week(length_weeks=THE_LENGTH, level=UG, course_week=THE_COURSE_WEEK)
-    assert row is not None, (
-        f"`{COHORT_WEEK_VIEW}` has no row for the cohort week four students' worth of responses "
-        f"were submitted in — two sections of a {THE_LENGTH}-week {UG} cohort, course week "
-        f"{THE_COURSE_WEEK}. Every assertion about a count below would be vacuous against an "
-        "absent row (`docs/MISTAKES.md` entry 3)."
+def one_row_at_the_week(rows: list[dict[str, Any]], what: str) -> dict[str, Any]:
+    """The one row a set function answers at this course week, with the non-vacuity guard."""
+    found = [row for row in rows if row["course_week"] == THE_COURSE_WEEK]
+    assert len(found) == 1, (
+        f"`{what}` answered {len(found)} rows at course week {THE_COURSE_WEEK} over the cohort's "
+        f"two sections, in which four responses were submitted: {rows}. Every assertion about a "
+        "count below would be vacuous against an absent row (`docs/MISTAKES.md` entry 3)."
     )
-    return row
+    return found[0]
+
+
+def the_cohort_row(world: BenchmarkWorld) -> dict[str, Any]:
+    """`benchmark_set_week`'s one row over the cohort's two sections at the course week."""
+    return one_row_at_the_week(world.set_week(*THE_COHORT), SET_FUNCTION)
 
 
 # **This test alone in this module is `invariant`-marked**, and the reason is
@@ -162,7 +176,7 @@ def the_cohort_row(world: BenchmarkWorld) -> dict[str, Any]:
 # counts distinct students, "never responses or answers". A figure that
 # over-counts people is item 7 breached *in fact* while passing on paper — the
 # comparison is shown, and it was computed from fewer people than the rule
-# requires. The breach would live here, in the view, where no test of the
+# requires. The breach would live here, in the set function, where no test of the
 # chokepoint can see it, which is the kind of route the isolated §4.1 pass
 # exists for. The two tests below are about the other figures' units and stay
 # unmarked.
@@ -176,8 +190,8 @@ def test_a_student_who_answered_in_two_sections_of_a_cohort_counts_once(
     E5-04 compares against `benchmark_min_respondents_default` is three.
 
     **The response count is asserted first, and it is not ceremony.** It is what
-    tells a reader of the failure whether the view lost a row or counted the
-    right rows in the wrong unit — and without it, a view returning three
+    tells a reader of the failure whether the function lost a row or counted the
+    right rows in the wrong unit — and without it, a function returning three
     responses from three people would satisfy this assertion while having
     dropped one of the shared student's submissions entirely, which is the same
     number reached by a defect in the opposite direction.
@@ -233,7 +247,7 @@ def test_the_response_figure_still_counts_both_of_one_students_responses(
 
     **The mutation it exists to survive**: `response_count` written as
     `count(DISTINCT <person key>)` — the copy-paste from the line above it,
-    which answers 3 — and a `DISTINCT ON (<person key>)` in the view's `FROM`,
+    which answers 3 — and a `DISTINCT ON (<person key>)` in the function's `FROM`,
     which drops one of the shared student's rows and moves the mean as well.
     """
     world = a_cohort_one_student_answered_twice(benchmark_world)
@@ -263,18 +277,18 @@ def test_the_response_figure_still_counts_both_of_one_students_responses(
     )
 
 
-def test_the_rating_view_counts_ratings_rather_than_people(
+def test_the_rating_set_function_counts_ratings_rather_than_people(
     benchmark_world: BenchmarkWorld,
 ) -> None:
     """`rating_count`'s unit, said out loud on the same world.
 
-    The rating pair carries `rating_count` and no respondent figure, and that is
-    the ruling's shape rather than an omission: a rating mean is a statistic
-    about ratings, and the figure a minimum is applied to lives on the
-    workload-and-counts view beside the section count. Asserting the unit here
-    keeps the two from drifting into each other — `docs/MISTAKES.md` entry 50 is
-    about a number whose unit nobody said, and two numbers called "count" on two
-    views of one ticket is where that starts.
+    The rating function's `rating_count` is a count of ratings, and that is the
+    ruling's shape rather than an omission: a rating mean is a statistic about
+    ratings, and the people a minimum is applied to are counted by the
+    workload-and-counts function beside the section count. Asserting the unit
+    here keeps the two from drifting into each other — `docs/MISTAKES.md` entry
+    50 is about a number whose unit nobody said, and two numbers called "count"
+    from two functions of one ticket is where that starts.
 
     **The mutation it exists to survive**: `rating_count` written as
     `count(DISTINCT <person key>)`, which answers 3 where four ratings were
@@ -282,20 +296,14 @@ def test_the_rating_view_counts_ratings_rather_than_people(
     would answer 3.67 rather than 4.
     """
     world = a_cohort_one_student_answered_twice(benchmark_world)
-    require_benchmark_view(world.session, COHORT_RATING_WEEK_VIEW)
 
-    row = world.cohort_rating_week(
-        length_weeks=THE_LENGTH, level=UG, course_week=THE_COURSE_WEEK, stream=INSTRUCTOR_STREAM
-    )
-    assert row is not None, (
-        f"`{COHORT_RATING_WEEK_VIEW}` has no {INSTRUCTOR_STREAM} row for this cohort week, in "
-        "which four instructor ratings were submitted. The assertions below would be vacuous."
-    )
+    rows = [row for row in world.set_rating_week(*THE_COHORT) if row["stream"] == INSTRUCTOR_STREAM]
+    row = one_row_at_the_week(rows, f"{SET_RATING_FUNCTION}, stream {INSTRUCTOR_STREAM}")
     assert row["rating_count"] == EXPECTED_RATINGS, (
         f"`rating_count` is {row['rating_count']!r} where four instructor ratings were submitted — "
         "two of them by one student, in two sections of this cohort. A 3 is a distinct count of "
         "people applied to a figure whose unit is ratings; the count of people is "
-        f"`respondent_count` on `{COHORT_WEEK_VIEW}`, and it is 3 there for the same reason it is "
+        f"`respondent_count` from `{SET_FUNCTION}`, and it is 3 there for the same reason it is "
         "not 3 here."
     )
     submitted = [
