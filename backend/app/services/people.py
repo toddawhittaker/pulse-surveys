@@ -144,8 +144,8 @@ COUNTED_REFUSALS: frozenset[str] = frozenset(
 _FORMULA_STARTS = ("=", "+", "-", "@", "\t", "\r")
 _ESCAPE = "'"
 
-_NAME = TypeAdapter(PersonName)
-_CATEGORY = TypeAdapter(Category)
+_NAME: TypeAdapter[str] = TypeAdapter(PersonName)
+_CATEGORY: TypeAdapter[str] = TypeAdapter(Category)
 
 T = TypeVar("T")
 
