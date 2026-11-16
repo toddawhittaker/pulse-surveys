@@ -262,7 +262,7 @@ services:
 
   # PostgreSQL 17 (§7.1, §7.2).
   db:
-    image: postgres:17.11-bookworm@sha256:84560e3b9c6874893fc4e2854f5dc3e7c1a37bc9d1dfd7a8c641310ae22ba5ad
+    image: postgres:17.12-bookworm@sha256:40865bc877a289da75963d97d72b59633f639fc5af7a4e856bfa3714cae5b536
     # Compose cannot parse a URL, so the database's own credentials cannot be
     # read out of DATABASE_URL. They are read from the parts DATABASE_URL is
     # built from instead, which keeps each password in one place rather than in
