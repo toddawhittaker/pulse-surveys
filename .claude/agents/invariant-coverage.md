@@ -72,7 +72,8 @@ Return exactly this and nothing else:
 
 ```
 ### invariant-coverage
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:

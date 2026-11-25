@@ -1,6 +1,6 @@
 ---
 name: app-security
-description: Generic application security review plus the project-specific surfaces the generic checklist cannot know. Runs /security-review first, then adds LTI token handling, the sanctioned fail-open path, and audit-write completeness. Fires on api, lti, mocks, Dockerfiles, and dependency manifests.
+description: Generic application security review plus the project-specific surfaces the generic checklist cannot know. Runs /security-review first, then adds LTI token handling, the sanctioned fail-open path, and audit-write completeness. Fires per PR on api, lti, mocks, scripts, Dockerfiles, dependency manifests, CI workflows, evals, and ai code, and as the generic security pass on any PR that matches no specialist reviewer.
 model: opus
 effort: medium
 tools: Read, Grep, Glob, Bash, Skill, Agent
@@ -85,7 +85,8 @@ Return exactly this and nothing else:
 
 ```
 ### app-security
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:

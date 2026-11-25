@@ -36,11 +36,12 @@ tool=$(jq -r '.tool_name // empty' <<<"$input")
 command_line=$(jq -r '.tool_input.command // empty' <<<"$input")
 
 # A shell command rewrites a test without ever calling Write or Edit. Unlike the
-# test author, the builder-heavy genuinely needs Bash — it runs `make ci` — so the
-# capability cannot simply be withdrawn, and this is the only guard available.
+# test author, the builder-heavy genuinely needs Bash — it runs the named test
+# suites, ruff, mypy and alembic check — so the capability cannot simply be
+# withdrawn, and this is the only guard available.
 #
-# Reading and running tests must keep working: `pytest tests/unit` is the
-# builder-heavy's whole feedback loop. So this matches mutation, not mention — a
+# Reading and running tests must keep working: pytest on the named suites is
+# the core of the builder-heavy's feedback loop. So this matches mutation, not mention — a
 # redirection into tests/, or a writing command with a test path as its target.
 if [ -n "$command_line" ]; then
   case "$command_line" in
@@ -53,10 +54,11 @@ BLOCKED: the builder-heavy may not modify test files, including from a shell.
 
   $command_line
 
-Running tests is fine — \`pytest tests/unit\` and \`make ci\` are your feedback
-loop and are not blocked. Rewriting one is not. If you believe a test is wrong,
-escalate rather than edit: write docs/disputes/<TICKET>-NN.md and stop. The
-orchestrating session arbitrates from the sources.
+Running tests is fine — \`.venv/bin/pytest\` on the named suites, \`ruff\`,
+\`mypy\` and \`alembic check\` are your feedback loop and are not blocked.
+Rewriting a test is not. If you believe a test is wrong, escalate rather than
+edit: write docs/disputes/<TICKET>-NN.md and stop. The orchestrating session
+arbitrates from the sources.
 
 (CLAUDE.md — How a ticket is built)
 EOF

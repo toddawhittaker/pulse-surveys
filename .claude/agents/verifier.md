@@ -67,12 +67,11 @@ against). Confirm that run rather than re-running the suite yourself:
   run is better evidence than a log line — "CI is authoritative" covers the
   suite, not an excuse to skip these.
 - MISTAKES #40 (the suite ran under an environment nobody chose, and it was a
-  different one in CI) is answered rather than dodged: divergence now shows up
-  in CI directly, or as a totals mismatch above — there is no separate local
-  run left for it to diverge from.
+  different one in CI): environment divergence shows up in CI directly, or as a
+  totals mismatch above.
 - MISTAKES #9 (citing a guard as a guarantee without executing it): the suite
-  still executes, on CI's own, cleaner checkout. What you execute is the
-  headSha-plus-totals check above; skipping *that* is the #9 violation now.
+  executes on CI's own, cleaner checkout. What you execute is the
+  headSha-plus-totals check above; skipping *that* is the #9 violation.
 
 Distinguish a FAILURE (assertion) from an ERROR (import, fixture, exception)
 in anything CI reports red — they mean different things and the orchestrator

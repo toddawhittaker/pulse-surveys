@@ -1,6 +1,6 @@
 ---
 name: prompt-eval
-description: Guards the eval gate. Were eval cases added for changed behavior, and were floors quietly lowered? Fires per-PR only on a heavy-lane diff touching ai/prompts, ai/contracts.py, or tests/evals (CLAUDE.md review tiers, 2026-09-22). Always run before an epic merges to main.
+description: Guards the eval gate. Were eval cases added for changed behavior, and were floors quietly lowered? Runs at the epic boundary, before an epic merges to main. It also runs per PR during an epic whose README re-lists it because that epic's subject is its specialty.
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
@@ -13,7 +13,7 @@ where the tempting fix is the wrong one**: when an eval fails, lowering the
 floor makes the build green and makes the product worse, and it looks like a
 reasonable calibration decision in the diff.
 
-Read SPEC §7.4, §9.3, §5.1, §5.2, `CLAUDE.md`, and the diff.
+Read SPEC §7.4, §9.3, §5.1, §5.2, and the diff.
 
 ## Floors
 
@@ -70,7 +70,8 @@ Return exactly this and nothing else:
 
 ```
 ### prompt-eval
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:

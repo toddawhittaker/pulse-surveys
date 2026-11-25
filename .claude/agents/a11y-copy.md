@@ -1,6 +1,6 @@
 ---
 name: a11y-copy
-description: WCAG 2.2 AA against rendered output, plus copy register against the design brief. Keyboard operability, chart data-table equivalents, focus rings, reduced motion, and the language rules that keep this product from shaming anyone. Fires per-PR only on a heavy-lane diff touching frontend or design (CLAUDE.md review tiers, 2026-09-22). Always run before an epic merges to main.
+description: WCAG 2.2 AA against rendered output, plus copy register against the design brief. Keyboard operability, chart data-table equivalents, focus rings, reduced motion, and the language rules that keep this product from shaming anyone. Runs at the epic boundary, before an epic merges to main. It also runs per PR during an epic whose README re-lists it because that epic's subject is its specialty.
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
@@ -75,7 +75,8 @@ Return exactly this and nothing else:
 
 ```
 ### a11y-copy
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:

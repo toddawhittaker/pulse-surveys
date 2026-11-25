@@ -89,8 +89,9 @@ CI is what makes the §14.2 definition of done enforceable. A red pipeline is
 information, never an obstacle.
 
 **Never merge or mark a pull request ready with red CI.** Not "it's unrelated,"
-not "it passes locally." Run `make ci` before pushing; when it disagrees with
-`.github/workflows/ci.yml`, the workflow is right and the Makefile is the bug.
+not "it passes locally." Before pushing, the orchestrator runs `make ci`; no agent
+runs it unasked, because it destroys the shared development database. When it
+disagrees with `.github/workflows/ci.yml`, the workflow is right and the Makefile is the bug.
 
 **Never skip, xfail, mark flaky, or delete a failing test to make CI pass.** A
 failing test is finding a real defect or is itself wrong. If the test is wrong,

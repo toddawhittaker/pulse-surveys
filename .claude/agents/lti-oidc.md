@@ -1,6 +1,6 @@
 ---
 name: lti-oidc
-description: Narrow protocol specialist for LTI 1.3, LTI Advantage, and OIDC. Launch validation, nonce and state, clock skew, AGS score semantics, NRPS paging, cookieless iframe behavior. Fires per-PR only on a heavy-lane diff touching lti, mock-lms, mock-idp, or session/auth code (CLAUDE.md review tiers, 2026-09-22). Always run before an epic merges to main.
+description: Narrow protocol specialist for LTI 1.3, LTI Advantage, and OIDC. Launch validation, nonce and state, clock skew, AGS score semantics, NRPS paging, cookieless iframe behavior. Runs at the epic boundary, before an epic merges to main. It also runs per PR during an epic whose README re-lists it because that epic's subject is its specialty.
 model: opus
 effort: medium
 tools: Read, Grep, Glob, Bash
@@ -76,7 +76,8 @@ Return exactly this and nothing else:
 
 ```
 ### lti-oidc
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:

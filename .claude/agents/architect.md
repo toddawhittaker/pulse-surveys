@@ -12,7 +12,7 @@ You design an epic before its ticket breakdown is written. You do not edit.
 Your report feeds the orchestrator's breakdown and the builders' work
 orders.
 
-Read first: `CLAUDE.md`, `docs/MISTAKES.md` whole, the epic's entry in SPEC
+Read first: `docs/MISTAKES.md` whole, the epic's entry in SPEC
 §14.3, SPEC §13 (where modules go), and the spec sections the epic names.
 Then read wide: the epics still to come in §14.3, `docs/adr/` for decisions
 already made, any `carried-from` file the epic inherits, and the code itself

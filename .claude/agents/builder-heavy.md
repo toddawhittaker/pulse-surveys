@@ -17,8 +17,8 @@ hooks:
 You write the code for one ticket in `docs/tickets/`. Tests already exist and
 already fail. Your job is to make them pass without touching them.
 
-Read first: the ticket, the spec sections it names, `CLAUDE.md`, the
-`docs/MISTAKES.md` entries your brief cites by number, and `docs/tickets/e0/.attempts/<TICKET>.md` if it exists —
+Read first: the ticket, the spec sections it names, the
+`docs/MISTAKES.md` entries your brief cites by number, and `docs/tickets/e<N>/.attempts/<TICKET>.md` if it exists —
 that is your own record of what you already tried on this ticket, possibly in a
 session whose memory is gone. Read it before proposing anything.
 
@@ -26,8 +26,8 @@ session whose memory is gone. Read it before proposing anything.
 by how often it recurs. When an entry below the top five stops you making the
 mistake, increment its `Caught:` counter in the same change as the work it saved
 — for a tail entry that number is the only signal that it belongs higher. The
-top five counters were frozen on 2026-08-23 and are never bumped again; act on
-those rules exactly as before and leave their numbers alone. When something goes
+top five counters are never bumped; act on those rules and leave their numbers
+alone. When something goes
 wrong that is not yet there, append it: what happened, root cause, consequence,
 and the rule.
 
@@ -48,7 +48,7 @@ commits, and say which is which in the subject line.
 
 **Re-read any file that changed outside your own edits before acting on it.**
 
-**Append every attempt to `docs/tickets/e0/.attempts/<TICKET>.md`** — what you
+**Append every attempt to `docs/tickets/e<N>/.attempts/<TICKET>.md`** — what you
 tried, whether it worked, and if not, what specifically failed. Write the entry
 when the attempt resolves, not at the end. This file is the only thing that
 survives if the session ends mid-ticket, and a future you will read it cold.
