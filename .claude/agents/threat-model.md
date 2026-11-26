@@ -1,6 +1,6 @@
 ---
 name: threat-model
-description: Epic-boundary review. Given everything now merged, what can a Lead Faculty, an instructor, or an agent acting for either see that they should not? Hunts exposure that emerges from the combination of merged work. Always run before a marked epic merges to main.
+description: Epic-boundary review. Given everything now merged, what can a Lead Faculty, an instructor, or an agent acting for either see that they should not? Hunts exposure that emerges from the combination of merged work. Always run before an epic merges to main.
 model: opus
 effort: medium
 tools: Read, Grep, Glob, Bash
@@ -70,7 +70,8 @@ Return exactly this and nothing else:
 
 ```
 ### threat-model
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:

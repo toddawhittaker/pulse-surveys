@@ -27,7 +27,7 @@ is the requirement. The tickets are one person's guess at how to reach it.
 Bring the stack up, launch, log in, run the suite, look. An exit criterion
 verified by reading is not verified.
 
-For E0 specifically, the exit checklist is in ticket E0-18 as well.
+The epic's exit ticket in `docs/tickets/e<N>/` holds its exit checklist as well.
 
 ## What to check
 
@@ -60,14 +60,15 @@ Return exactly this and nothing else:
 
 ```
 ### epic-exit
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:
 
 ```
 ### epic-exit
-- **HIGH** E0 exit criterion — one-sentence statement of what is not met.
+- **HIGH** E<N> exit criterion — one-sentence statement of what is not met.
   Failure: what you ran, what you expected, what happened.
 ```
 

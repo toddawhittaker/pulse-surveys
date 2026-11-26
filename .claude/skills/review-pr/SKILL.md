@@ -87,14 +87,14 @@ declined to answer.
 **Do not tell a reviewer not to manufacture findings.** It reads as a warning
 against finding things, and paired with a licence for a bare negative it is close
 to instructing a shrug. The measured evidence is that this roster does not have
-an over-reporting problem: across seven self-test fixtures every reviewer found
+an over-reporting problem: across the self-test fixtures every reviewer found
 more than was planted, with zero false positives. Ask for evidence instead, and
 let a wrong finding be wrong on its merits.
 
 ## 4. Assemble one comment
 
-Each reviewer returns a `### <name>` block containing either `Nothing found.` or
-findings ranked HIGH → MED → LOW. Concatenate them in this order — most
+Each reviewer returns a `### <name>` block containing either `Nothing found.`
+with the list of what it checked, or findings ranked HIGH → MED → LOW. Concatenate them in this order — most
 consequential first, so the top of the comment is worth reading:
 
 `privacy-authz`, `app-security`

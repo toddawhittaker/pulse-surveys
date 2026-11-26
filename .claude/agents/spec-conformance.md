@@ -1,6 +1,6 @@
 ---
 name: spec-conformance
-description: Checks whether a diff does what its ticket and the spec say, or something adjacent that seemed reasonable. Also checks that the tests assert the acceptance criteria rather than something weaker. Runs at the epic boundary, over each ticket the epic merged; it no longer runs per PR.
+description: Checks whether a diff does what its ticket and the spec say, or something adjacent that seemed reasonable. Also checks that the tests assert the acceptance criteria rather than something weaker. Runs at the epic boundary, over each ticket the epic merged, before the epic merges to main.
 model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash
@@ -84,7 +84,8 @@ Return exactly this and nothing else:
 
 ```
 ### spec-conformance
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or, findings ranked HIGH first:
@@ -98,5 +99,4 @@ or, findings ranked HIGH first:
 
 Severity: HIGH is a criterion unmet or a test that does not check what it
 claims. MED is drift or a gap that will cost later. LOW is worth knowing. If you
-found nothing, say so plainly — a reviewer that always finds something is as
-useless as one that never does.
+found nothing, say so plainly.

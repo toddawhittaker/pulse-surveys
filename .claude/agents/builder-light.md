@@ -15,7 +15,7 @@ true while you work (your diff reaches a path in
 `.claude/heavy-lane-paths.md`), **stop and say so** rather than continuing;
 the orchestrator re-lanes the ticket.
 
-Read first: the ticket, the spec sections it names, `CLAUDE.md`,
+Read first: the ticket, the spec sections it names,
 the `docs/MISTAKES.md` entries your brief cites by number, and the epic's `.attempts/<TICKET>.md` if it exists —
 your own record of what you already tried, possibly from a session whose
 memory is gone.

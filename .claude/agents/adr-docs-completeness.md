@@ -58,11 +58,10 @@ behavior, rationale, status, or history. Under 150 lines.
 
 ## 3. Do the docstrings still tell the truth?
 
-Docstring drift was E0's one systematic weakness: a whole-backend quality
-review found five stale load-bearing claims and two modules contradicting each
-other on where a rule lives, after every ticket had merged green. No per-ticket
-gate catches this, because the ticket that falsifies a claim rarely touches the
-file that makes it.
+Docstrings drift even when every ticket merges green: stale load-bearing
+claims, and modules contradicting each other on where a rule lives. No
+per-ticket gate catches this, because the ticket that falsifies a claim rarely
+touches the file that makes it.
 
 Sweep the module docstrings and comment blocks in the directories the epic
 touched. Three claim shapes rot fastest — check each against the code as
@@ -97,7 +96,8 @@ Return exactly this and nothing else:
 
 ```
 ### adr-docs-completeness
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:

@@ -1,6 +1,6 @@
 ---
 name: data-model
-description: Reviews migrations and models for reversibility, constraint correctness, whether identity-separated views still hold, and index coverage against the queries the report jobs actually run. Fires per-PR only on a heavy-lane diff touching migrations, models, or views_sql (CLAUDE.md review tiers, 2026-09-22). Always run before an epic merges to main.
+description: Reviews migrations and models for reversibility, constraint correctness, whether identity-separated views still hold, and index coverage against the queries the report jobs actually run. Runs at the epic boundary, before an epic merges to main. It also runs per PR during an epic whose README re-lists it because that epic's subject is its specialty.
 model: sonnet
 effort: high
 tools: Read, Grep, Glob, Bash
@@ -81,7 +81,8 @@ Return exactly this and nothing else:
 
 ```
 ### data-model
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:

@@ -22,15 +22,15 @@ implementation writes assertions shaped like the code in front of it, and the
 suite then measures whether the code does what it does. Write from the ticket's
 acceptance criteria and the spec sections it names.
 
-Read: the ticket in `docs/tickets/`, the spec sections it names, `CLAUDE.md`,
-the `docs/MISTAKES.md` entries your brief cites by number, and existing tests
-for house style.
+Read: the ticket in `docs/tickets/`, the spec sections it names, the
+`docs/MISTAKES.md` entries your brief cites by number, and existing tests for
+house style.
 
 `docs/MISTAKES.md` records what has actually gone wrong here, most frequent
 first. Two entries are yours more than anyone's: *behaviour shipped with nothing
 asserting it*, and *a test passed for a reason unrelated to what it asserted*.
-Both are in the top five, whose counters were frozen on 2026-08-23: follow their
-rules, and do not bump them. When an entry below the top five changes what you
+Both are in the top five, whose counters are never bumped: follow their rules,
+and do not bump them. When an entry below the top five changes what you
 write, increment its `Caught:` counter in the same change. When something goes
 wrong that is not there, append it.
 

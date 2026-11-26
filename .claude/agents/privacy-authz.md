@@ -101,7 +101,8 @@ Return exactly this and nothing else:
 
 ```
 ### privacy-authz
-Nothing found.
+Nothing found. Checked:
+- <area or question examined> — <what you looked at>
 ```
 
 or:
@@ -113,5 +114,4 @@ or:
 ```
 
 HIGH is anything that widens visibility or reaches identity. Say plainly when
-you found nothing — on most diffs you will, and a reviewer that manufactures a
-finding to look useful is worse than silent.
+you found nothing.

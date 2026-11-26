@@ -40,12 +40,10 @@ For each fixture:
    git worktree add /tmp/selftest-<name> HEAD
    git -C /tmp/selftest-<name> apply <fixture>
    ```
-2. **If it does not apply, feed the diff to the reviewer directly.** Most
-   fixtures reference files that do not exist yet — the codebase is still being
-   built — so this is the normal path today, not a failure. A reviewer judges a
-   diff; it does not need the rest of the tree to see that a view exposes an
-   identity column. As the codebase fills in, more fixtures will apply and the
-   reviews get richer for free.
+2. **If it does not apply, feed the diff to the reviewer directly.** A fixture
+   whose files do not exist or have changed will not apply; that is a normal
+   path, not a failure. A reviewer judges a diff; it does not need the rest of
+   the tree to see that a view exposes an identity column.
 3. Spawn the named reviewer against that diff, exactly as `/review-pr` would —
    same inputs: a pull request number, the diff, the `ticket:` from the header,
    and the changed files. **Do not tell it a fixture is planted, and strip the

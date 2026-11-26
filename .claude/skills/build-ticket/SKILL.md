@@ -1,6 +1,6 @@
 ---
 name: build-ticket
-description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, builder-heavy confirms the reds and turns them green, and a ⚠ ticket adds the verifier's mutation battery), light rides builder-light, which writes code and tests together, checked by CI; both get one fresh-context security review on the final head and merge through the merger agent. Use when the user says "build E0-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and ends with the PR merged into its epic branch.
+description: Build one ticket through the lane its header names - heavy rides the orchestrated tests-first loop (test-author writes red, builder-heavy confirms the reds and turns them green, and a ⚠ ticket adds the verifier's mutation battery), light rides builder-light, which writes code and tests together, checked by CI; both get one fresh-context security review on the final head and merge through the merger agent. Use when the user says "build E<N>-05", "build ticket 3", or asks to implement a ticket from docs/tickets/. Cuts the ticket branch and ends with the PR merged into its epic branch.
 ---
 
 # Build a ticket
@@ -12,7 +12,8 @@ subagents build.** Your brief is where the leverage is — a design decision
 settled in the brief stays settled; one left open comes back as a review
 finding or a wasted round.
 
-`$1` is the ticket ID (`E0-05`) or a loose ordinal ("ticket 3" means `E0-03`).
+`$1` is the ticket ID (`E<N>-05`) or a loose ordinal ("ticket 3" means `E<N>-03`
+in the active epic).
 If ambiguous, ask — building the wrong ticket wastes a whole loop.
 
 ## 0. The lane
@@ -104,7 +105,7 @@ stop on that item while everything independent proceeds.
 It verifies its own work — the named suites, `ruff`, `mypy`, `alembic check`
 where schema moved — and commits in small steps, behavior separate from
 refactors and from documentation, appending each attempt to
-`docs/tickets/e0/.attempts/<TICKET>.md`. For a second attempt within the
+`docs/tickets/e<N>/.attempts/<TICKET>.md`. For a second attempt within the
 ticket, `SendMessage` the same agent rather than spawning fresh — it remembers
 what it tried. Never edit the tree while it works in it.
 
